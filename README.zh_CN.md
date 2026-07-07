@@ -34,8 +34,7 @@ SPDX-License-Identifier: MIT
 
 - 入参采用 `busctl` 风格（签名串 + 位置参数），**完整支持嵌套与空容器**
   ——补齐 `dbus-send` 的硬伤；
-- 输出统一为**带类型标签的 JSON**（值恒为 `{"type":..,"data":..}`，监听为
-  每行一个对象的 NDJSON），对脚本友好，可直接管道到 `jq` / python；
+- 默认输出**人类可读文本**；加 `--json` 切到**带类型标签的 JSON**（值 `{"type":..,"data":..}`，监听为每行一个对象的 NDJSON），对脚本友好、可管道到 `jq` / python；
 - **不会重蹈 sd-bus 的覆辙**：非 string 键的 dict（如 `a{uu}`）正常渲染成
   `[{"key":..,"value":..}]`，绝不崩溃（对比 systemd#32904）；
 - 自带**动态 shell 补全**（bash/zsh），实时内省总线；
@@ -45,14 +44,13 @@ SPDX-License-Identifier: MIT
 
 ## 功能
 
-- `list` —— 列出总线上的服务名。
-- `tree` —— 递归内省，画出服务的对象路径树。
+- `list` —— 列出服务名 + PID + 进程名（人类为表，`--json` 为对象数组）。
+- `tree SVC` —— 画单个服务的对象路径树。
 - `introspect` —— 列出对象的接口 / 方法 / 信号 / 属性。
-- `call` —— 调用方法（入参 busctl 风格，支持任意嵌套）。
+- `call SVC OBJ IFACE METHOD SIG ARGS...` —— 调用方法（SIG 独立必填、可补全；入参 busctl 风格，支持任意嵌套）。
 - `get` / `set` —— 读取（不传属性名走 `GetAll`）/ 写入属性。
-- `monitor` —— 监听总线消息，按 match rule 过滤，输出 NDJSON（含
-  `PropertiesChanged` 解码）。
-- `completion` —— 生成动态 shell 补全脚本。
+- `monitor` —— 监听总线消息，按 match rule 过滤（`--json` 出 NDJSON，含 `PropertiesChanged` 解码）。
+- `completion` —— 生成动态 shell 补全脚本（实时内省总线补全服务/路径/接口/方法/签名/属性）。
 
 ## 安装与构建
 
@@ -73,11 +71,11 @@ busx list
 # 内省某个对象
 busx introspect org.freedesktop.systemd1 /org/freedesktop/systemd1
 
-# 调方法（入参 busctl 风格：签名串 + 位置参数）
+# 调方法（SIG 是独立必填位；ListUnits 无入参故 SIG 为空串）
 busx call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
-  org.freedesktop.systemd1.Manager ListUnits
+  org.freedesktop.systemd1.Manager ListUnits ""
 
-# 嵌套入参（dbus-send 做不到的 a{sv} 内含数组）：
+# 嵌套入参（dbus-send 做不到的 a{sv} 内含数组；'a{sv}' 即 SIG）：
 busx call org.example /obj org.example.Iface Method \
   'a{sv}' 1 'hint' 'a' 's' 2 'a' 'b'
 
@@ -85,17 +83,18 @@ busx call org.example /obj org.example.Iface Method \
 busx get org.freedesktop.systemd1 /org/freedesktop/systemd1 \
   org.freedesktop.systemd1.Manager
 
-# 监听信号，管道到外部 jq 处理
-busx monitor --signals --interface org.freedesktop.DBus.Properties \
+# 监听信号，--json 出 NDJSON 管道到外部 jq 处理
+busx --json monitor --signals --interface org.freedesktop.DBus.Properties \
   --member PropertiesChanged | jq 'select(.args[1] != {})'
 
 # 生成 bash 补全（写入后会实时内省总线补全服务/路径/接口/方法）
 busx completion bash > /etc/bash_completion.d/busx
 ```
 
-输出恒为 JSON；需要缩进美化或字段变换，管道到外部 `jq` / python 等。
-所有诊断（错误、警告）打到 stderr，前缀 `busx:`；退出码 `0` 成功 / `1`
-失败。
+默认输出人类可读文本；`--json` 切到 type-tagged JSON（`monitor` 为 NDJSON），
+需要缩进美化或字段变换时管道到外部 `jq` / python。所有诊断（错误、警告）打到
+stderr，前缀 `busx:`；退出码 `0` 成功 / `1` 失败。管道到 `less`/`head` 也不会
+panic（SIGPIPE 按常规处理）。
 
 更多设计细节见 [设计文档]。
 
