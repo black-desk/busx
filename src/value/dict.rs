@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Dict rendering with the spec §7.2 safety rule.
 //!
 //! - **string-key dict** (`a{sv}`, `a{ss}`, `a{os}`, ...) → JSON object:

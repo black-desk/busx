@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `busx call` — invoke a D-Bus method and print its return values as
 //! type-tagged JSON (spec §7).
 //!

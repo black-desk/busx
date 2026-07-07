@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `busx list` — print the names on the bus (spec §7).
 //!
 //! Default output is a human-friendly, column-aligned table

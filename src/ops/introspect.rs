@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `busx introspect` — fetch introspection XML via
 //! `org.freedesktop.DBus.Introspectable.Introspect` and emit it as a JSON
 //! array of interface objects (spec §6).

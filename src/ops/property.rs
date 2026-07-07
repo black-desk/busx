@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `busx get` — read D-Bus properties via `org.freedesktop.DBus.Properties`.
 //!
 //! With no property names, runs `GetAll` (returns an object keyed by property
