@@ -3,6 +3,7 @@ mod conn;
 mod error;
 mod ops;
 mod out;
+mod value;
 
 use clap::{CommandFactory, Parser};
 use cli::{Cli, Command};
@@ -29,8 +30,18 @@ fn run(cli: Cli) -> error::Result<()> {
             acquired,
             activatable,
         ),
+        Command::Get { service, object, interface, props } => ops::property::get(
+            cli.user,
+            cli.system,
+            cli.address.as_deref(),
+            cli.verbose,
+            &service,
+            &object,
+            interface.as_deref(),
+            &props,
+        ),
         Command::Tree { .. } | Command::Introspect { .. }
-        | Command::Call { .. } | Command::Get { .. } | Command::Set { .. } | Command::Monitor { .. } => {
+        | Command::Call { .. } | Command::Set { .. } | Command::Monitor { .. } => {
             Err(error::Error::Msg("not yet implemented".into()))
         }
         Command::Completion { shell } => {

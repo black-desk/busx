@@ -15,28 +15,31 @@ pub struct TestIface {
 
 #[interface(name = "org.busx.Test")]
 impl TestIface {
-    #[zbus(property)]
+    // Pin D-Bus property names to lowercase so the fixture matches its
+    // documented contract (`volume`/`name`/`counts`/`hints`). zbus otherwise
+    // exposes Rust snake_case getters as PascalCase.
+    #[zbus(property, name = "volume")]
     fn volume(&self) -> f64 {
         self.volume
     }
-    #[zbus(property)]
+    #[zbus(property, name = "volume")]
     fn set_volume(&mut self, v: f64) {
         self.volume = v;
     }
 
-    #[zbus(property)]
+    #[zbus(property, name = "name")]
     fn name(&self) -> String {
         "busx-test".to_string()
     }
 
     /// Non-string-key dict property (a{uu}) — for the decode safety test.
-    #[zbus(property)]
+    #[zbus(property, name = "counts")]
     fn counts(&self) -> std::collections::HashMap<u32, u32> {
         [(1u32, 10u32), (2, 20)].into_iter().collect()
     }
 
     /// String-key dict-of-variant property (a{sv}).
-    #[zbus(property)]
+    #[zbus(property, name = "hints")]
     fn hints(&self) -> std::collections::HashMap<String, zvariant::Value<'static>> {
         [("urgency".to_string(), zvariant::Value::U8(1))]
             .into_iter()
