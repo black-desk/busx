@@ -1,6 +1,7 @@
 mod cli;
 mod conn;
 mod error;
+mod introspect;
 mod ops;
 mod out;
 mod value;
@@ -65,7 +66,16 @@ fn run(cli: Cli) -> error::Result<()> {
                 &value,
             )
         }
-        Command::Tree { .. } | Command::Introspect { .. } | Command::Monitor { .. } => {
+        Command::Introspect { service, object, interface } => ops::introspect::run(
+            cli.user,
+            cli.system,
+            cli.address.as_deref(),
+            cli.verbose,
+            &service,
+            &object,
+            interface.as_deref(),
+        ),
+        Command::Tree { .. } | Command::Monitor { .. } => {
             Err(error::Error::Msg("not yet implemented".into()))
         }
         Command::Completion { shell } => {
