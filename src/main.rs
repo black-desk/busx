@@ -40,8 +40,19 @@ fn run(cli: Cli) -> error::Result<()> {
             interface.as_deref(),
             &props,
         ),
+        Command::Call { service, object, interface, method, args } => ops::call::run(
+            cli.user,
+            cli.system,
+            cli.address.as_deref(),
+            cli.verbose,
+            &service,
+            &object,
+            &interface,
+            &method,
+            &args,
+        ),
         Command::Tree { .. } | Command::Introspect { .. }
-        | Command::Call { .. } | Command::Set { .. } | Command::Monitor { .. } => {
+        | Command::Set { .. } | Command::Monitor { .. } => {
             Err(error::Error::Msg("not yet implemented".into()))
         }
         Command::Completion { shell } => {
