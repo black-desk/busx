@@ -269,6 +269,7 @@ dependencies = [
  "assert_cmd",
  "clap",
  "clap_complete",
+ "enumflags2",
  "nix",
  "predicates",
  "roxmltree",
