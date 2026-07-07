@@ -105,6 +105,8 @@ pub fn bus() -> &'static TestBus {
             .expect("build test-bus connection")
             .serve_at("/org/busx/Test", TestIface { volume: 0.5 })
             .expect("register test object")
+            .serve_at("/org/busx/Test/sub", TestIface { volume: 0.0 })
+            .expect("register sub object")
             .name("org.busx.Test")
             .expect("request name")
             .build()
