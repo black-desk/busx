@@ -1,72 +1,405 @@
-//! `busx __complete` — dynamic shell-completion candidate generator (spec §12).
+//! Shell completion via `clap_complete::dynamic` (spec §12).
 //!
-//! Hidden subcommand invoked by the script emitted from `busx completion`. It
-//! live-introspects the bus (no caching) and prints one candidate per line for
-//! the positional currently being typed. The contract is best-effort: on any
-//! bus error it prints nothing and the shell falls back to no completion, and
-//! the command itself never fails (returns `Ok(())`).
+//! Two layers:
+//! - **Structural completion** (subcommand names, flag names, global-flag
+//!   parsing) is delegated to clap by `CompleteEnv` + the `complete` engine.
+//!   The shell re-invokes `busx` with the full command line under a special
+//!   env var (`COMPLETE=<shell>`); `try_complete` processes it and exits.
+//! - **Positional values** (service / object-path / interface / method) get
+//!   live bus introspection via `ArgValueCompleter` closures attached to each
+//!   positional when building the clap `Command`. The closures read the bus
+//!   flags and the already-typed positionals straight from `std::env::args_os()`
+//!   — the same arg vector clap itself parses — so completion connects to the
+//!   bus the user actually selected (`--user`/`--system`/`--address`).
+//!
+//! Everything here is best-effort: a bus error yields no candidates (and the
+//! command never fails), and introspection is uncached (re-issued each TAB).
+
+use std::ffi::OsStr;
+
+use clap::builder::ValueHint;
+use clap::{Arg, ArgAction, Command};
+use clap_complete::{ArgValueCompleter, CompletionCandidate, CompleteEnv, Shell};
+use zbus::blocking::Connection;
+use zbus::blocking::fdo::DBusProxy;
 
 use crate::conn::connect;
 use crate::error::Result;
-use zbus::blocking::Connection;
-use zbus::blocking::fdo::DBusProxy;
 
 /// The interface whose `Introspect` method we call. Every object implements it.
 const INTROSPECTABLE: &str = "org.freedesktop.DBus.Introspectable";
 
-/// Entry point for `busx __complete ARGS...`.
+/// Names of subcommands that take a service as their first positional.
+const SERVICE_SUBS: &[&str] = &["call", "get", "set", "introspect", "tree", "monitor"];
+
+/// Entry point invoked very early in `main`. If `COMPLETE=<shell>` is set the
+/// shell is asking us to produce candidates (or the registration script); we do
+/// so, write them to stdout, and the caller exits `0`. Otherwise this is a
+/// normal run and we return `Ok(false)` so `main` proceeds to parse args.
+pub fn try_complete() -> Result<bool> {
+    let current_dir = std::env::current_dir().ok();
+    CompleteEnv::with_factory(command)
+        .try_complete(std::env::args_os(), current_dir.as_deref())
+        .map_err(|e| crate::error::Error::Msg(format!("completion: {e}")))
+}
+
+/// Emit the `clap_complete::dynamic` registration script for `shell`. This is
+/// the "source me" form — e.g. for bash, `source <(busx completion bash)`.
 ///
-/// `args[0]` is the subcommand (`call`, `get`, ...); the elements after it are
-/// the already-filled positionals followed by the partial token being typed
-/// (which may be empty). `user`/`system`/`address`/`verbose` select the bus.
-pub fn run(args: &[String], user: bool, system: bool, address: Option<&str>, verbose: bool) -> Result<()> {
-    // Connect best-effort: if the bus isn't reachable, completion simply yields
-    // nothing rather than surfacing an error to the shell.
-    let conn = match connect(user, system, address, verbose) {
+/// `CompleteEnv` writes the registration script to stdout when invoked with
+/// only the binary name (no `-- <words>`). We reproduce that by setting the env
+/// var and re-running the try_complete path with a bare argv: it prints the
+/// registration script for the requested shell.
+pub fn emit_script(shell: Shell) {
+    if let Some(name) = shell_name(shell) {
+        // SAFETY: completion registration runs at process start, before any
+        // threads exist.
+        unsafe { std::env::set_var("COMPLETE", name) };
+        let bin = std::env::args_os().next().unwrap_or_else(|| "busx".into());
+        let current_dir = std::env::current_dir().ok();
+        let _ = CompleteEnv::with_factory(command).try_complete([bin], current_dir.as_deref());
+    }
+}
+
+/// Map the AOT `Shell` enum to the dynamic completer's shell name (the same
+/// string the `COMPLETE=` env var accepts). Returns `None` for shells the
+/// dynamic engine doesn't ship a registration script for.
+fn shell_name(shell: Shell) -> Option<&'static str> {
+    match shell {
+        Shell::Bash => Some("bash"),
+        Shell::Elvish => Some("elvish"),
+        Shell::Fish => Some("fish"),
+        Shell::PowerShell => Some("powershell"),
+        Shell::Zsh => Some("zsh"),
+        _ => None,
+    }
+}
+
+/// Build the `Command` mirror of `crate::cli::Cli` with dynamic completion
+/// attached to the bus-walking positionals. This is a hand-built mirror rather
+/// than `Cli::command()` because `ArgValueCompleter` is attached via the
+/// programmatic `Arg::add` API (clap derive has no `add = ...` attribute in the
+/// resolved clap version), and we only need the surface clap parses for
+/// completion — not the real value semantics.
+fn command() -> Command {
+    let global = |name: &'static str, help: &'static str| {
+        Arg::new(name).long(name).global(true).action(ArgAction::SetTrue).help(help)
+    };
+    Command::new("busx")
+        .bin_name("busx")
+        .about("D-Bus CLI (dbus-send/busctl/qdbus replacement)")
+        .arg(global("user", "Connect to the session bus (fallback to system)"))
+        .arg(global("system", "Connect to the system bus"))
+        .arg(
+            Arg::new("address")
+                .long("address")
+                .global(true)
+                .value_name("ADDRESS")
+                .action(ArgAction::Set)
+                .help("Connect to the bus at ADDRESS"),
+        )
+        .arg(global("verbose", "Verbose diagnostics on stderr"))
+        .subcommands([
+            subcommand("list").arg(flag("unique")).arg(flag("acquired")).arg(flag("activatable")),
+            subcommand("tree").arg(positional_vec("services", Service)),
+            subcommand("introspect")
+                .arg(positional("service", Service))
+                .arg(positional("object", Path))
+                .arg(positional_opt("interface", Interface)),
+            subcommand("call")
+                .arg(positional("service", Service))
+                .arg(positional("object", Path))
+                .arg(positional("interface", Interface))
+                .arg(positional("method", Method))
+                .arg(positional_vec("args", None)),
+            subcommand("get")
+                .arg(positional("service", Service))
+                .arg(positional("object", Path))
+                .arg(positional_opt("interface", Interface))
+                .arg(positional_vec("props", None)),
+            subcommand("set")
+                .arg(positional("service", Service))
+                .arg(positional("object", Path))
+                .arg(positional("interface", Interface))
+                .arg(positional("property", None))
+                .arg(positional("signature", None))
+                .arg(positional_vec("value", None)),
+            subcommand("monitor")
+                .arg(positional_vec("services", Service))
+                .arg(opt("interface"))
+                .arg(opt("member"))
+                .arg(opt("path"))
+                .arg(opt("sender"))
+                .arg(Arg::new("match").long("match").value_name("MATCH").action(ArgAction::Set))
+                .arg(flag("signals"))
+                .arg(Arg::new("limit_messages").long("limit-messages").value_name("N").action(ArgAction::Set))
+                .arg(Arg::new("timeout").long("timeout").value_name("DUR").action(ArgAction::Set)),
+            Command::new("completion")
+                .about("Generate shell completion script")
+                .arg(
+                    Arg::new("shell")
+                        .value_name("SHELL")
+                        .required(true)
+                        .value_parser(["bash", "elvish", "fish", "powershell", "zsh"]),
+                ),
+        ])
+}
+
+/// The "kind" of bus value a positional holds. `None` ⇒ no dynamic completion
+/// (e.g. method args, signatures, property values — out of scope for v1).
+#[derive(Clone, Copy)]
+enum Kind {
+    Service,
+    Path,
+    Interface,
+    Method,
+}
+
+// Short lowercase aliases read better at the `positional(...)` call sites than
+// `Some(Kind::Service)`; they're local ergonomics, not exported constants.
+#[allow(non_upper_case_globals)]
+const Service: Option<Kind> = Some(Kind::Service);
+#[allow(non_upper_case_globals)]
+const Path: Option<Kind> = Some(Kind::Path);
+#[allow(non_upper_case_globals)]
+const Interface: Option<Kind> = Some(Kind::Interface);
+#[allow(non_upper_case_globals)]
+const Method: Option<Kind> = Some(Kind::Method);
+
+fn subcommand(name: &'static str) -> Command {
+    Command::new(name).about(match name {
+        "list" => "List service names on the bus",
+        "tree" => "Show the object path tree of services",
+        "introspect" => "Show interfaces/methods/signals/properties of an object",
+        "call" => "Call a method",
+        "get" => "Get properties",
+        "set" => "Set a property",
+        "monitor" => "Monitor bus messages",
+        _ => "",
+    })
+}
+
+fn flag(name: &'static str) -> Arg {
+    Arg::new(name).long(name).action(ArgAction::SetTrue)
+}
+
+fn opt(name: &'static str) -> Arg {
+    Arg::new(name).long(name).action(ArgAction::Set)
+}
+
+/// A required positional with optional dynamic completion.
+fn positional(name: &'static str, kind: Option<Kind>) -> Arg {
+    let arg = Arg::new(name).required(true).action(ArgAction::Set);
+    attach(arg, kind)
+}
+
+/// An optional (nullable) positional.
+fn positional_opt(name: &'static str, kind: Option<Kind>) -> Arg {
+    let arg = Arg::new(name).action(ArgAction::Set);
+    attach(arg, kind)
+}
+
+/// A variadic positional (`Vec<String>`).
+fn positional_vec(name: &'static str, kind: Option<Kind>) -> Arg {
+    let arg = Arg::new(name).num_args(0..).action(ArgAction::Append);
+    attach(arg, kind)
+}
+
+/// Attach the `ArgValueCompleter` for `kind` (if any). The completer ignores
+/// clap's value-hint default (clap would otherwise try filesystem completion for
+/// an `Other`-hinted arg) by setting `ValueHint::Other` and supplying its own
+/// candidates.
+fn attach(arg: Arg, kind: Option<Kind>) -> Arg {
+    let arg = arg.value_hint(ValueHint::Other);
+    match kind {
+        Some(Kind::Service) => arg.add(ArgValueCompleter::new(complete_service)),
+        Some(Kind::Path) => arg.add(ArgValueCompleter::new(complete_path)),
+        Some(Kind::Interface) => arg.add(ArgValueCompleter::new(complete_interface)),
+        Some(Kind::Method) => arg.add(ArgValueCompleter::new(complete_method)),
+        None => arg,
+    }
+}
+
+/// Completer fn for the service positional.
+fn complete_service(current: &OsStr) -> Vec<CompletionCandidate> {
+    complete_positional(Kind::Service, current)
+}
+
+/// Completer fn for the object-path positional.
+fn complete_path(current: &OsStr) -> Vec<CompletionCandidate> {
+    complete_positional(Kind::Path, current)
+}
+
+/// Completer fn for the interface positional.
+fn complete_interface(current: &OsStr) -> Vec<CompletionCandidate> {
+    complete_positional(Kind::Interface, current)
+}
+
+/// Completer fn for the method positional.
+fn complete_method(current: &OsStr) -> Vec<CompletionCandidate> {
+    complete_positional(Kind::Method, current)
+}
+
+/// The per-positional dynamic completer. Reads the bus flags + filled
+/// positionals from `std::env::args_os()` (the same vector clap parses),
+/// connects to the resulting bus, and dispatches to the matching introspection
+/// helper. `current` is the partial token the user is typing.
+fn complete_positional(kind: Kind, current: &OsStr) -> Vec<CompletionCandidate> {
+    let parsed = match parse_args() {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+    let Some(sub) = parsed.subcommand else {
+        return Vec::new();
+    };
+    let current = match current.to_str() {
+        Some(s) => s,
+        None => return Vec::new(),
+    };
+    let conn = match connect(parsed.user, parsed.system, parsed.address.as_deref(), parsed.verbose) {
         Ok(c) => c,
-        Err(_) => return Ok(()),
+        Err(_) => return Vec::new(),
     };
-
-    // `split_first` guarantees `sub` exists; the rest splits into the filled
-    // positionals (`rest` minus its last element) and the partial (`rest`'s last
-    // element, or "" when only the subcommand was supplied).
-    let (sub, rest) = match args.split_first() {
-        Some((s, rest)) => (s.as_str(), rest),
-        None => return Ok(()),
-    };
-    let filled: &[String] = &rest[..rest.len().saturating_sub(1)];
-    let partial = rest.last().map(|s| s.as_str()).unwrap_or("");
-
-    let cands = candidates(&conn, sub, filled, partial).unwrap_or_default();
-    for c in cands {
-        println!("{c}");
-    }
-    Ok(())
+    let cands = positional_candidates(&conn, sub, &parsed.positionals, kind, current)
+        .unwrap_or_default();
+    cands.into_iter().map(CompletionCandidate::new).collect()
 }
 
-/// Decide which positional is being completed (`filled.len()`) and dispatch to
-/// the matching introspection. Returns `Ok(vec![])` for unknown shapes so the
-/// generator stays best-effort even here.
-fn candidates(conn: &Connection, sub: &str, filled: &[String], partial: &str) -> Result<Vec<String>> {
-    // Position index being completed == number of already-filled positionals.
-    let pos = filled.len();
-    match (sub, pos) {
-        // 1st positional of the bus-walking subcommands → well-known services.
-        ("call" | "get" | "set" | "introspect" | "tree" | "monitor", 0) => {
-            service_names(conn, partial)
+/// Decoded view of the raw argv relevant to completion: the bus flags, the
+/// subcommand, and the already-filled positional values (the partial being typed
+/// is excluded — it arrives separately as `current`).
+struct ParsedArgs {
+    user: bool,
+    system: bool,
+    address: Option<String>,
+    verbose: bool,
+    subcommand: Option<&'static str>,
+    positionals: Vec<String>,
+}
+
+/// Walk `std::env::args_os()` skipping the binary name, separating global flags
+/// from the subcommand + its positionals. Flags after the subcommand (e.g.
+/// `monitor --interface X`) are skipped so they don't masquerade as positionals.
+/// Returns `None` only if argv can't be read at all.
+fn parse_args() -> Option<ParsedArgs> {
+    let mut user = false;
+    let mut system = false;
+    let mut address: Option<String> = None;
+    let mut verbose = false;
+    let mut subcommand: Option<&'static str> = None;
+    let mut positionals: Vec<String> = Vec::new();
+
+    let mut iter = std::env::args_os().skip(1);
+    while let Some(raw) = iter.next() {
+        let token = match raw.to_str() {
+            Some(s) => s,
+            None => continue,
+        };
+        if subcommand.is_none() {
+            // Top-level: only globals + the subcommand name are expected here.
+            match token {
+                "--user" => user = true,
+                "--system" => system = true,
+                "--verbose" => verbose = true,
+                "--address" => address = iter.next().and_then(|v| v.into_string().ok()),
+                "--" => {}
+                t if t.starts_with("--address=") => {
+                    address = Some(t["--address=".len()..].to_string());
+                }
+                t if SERVICE_SUBS.contains(&t) || t == "list" || t == "completion" => {
+                    // Record the subcommand name as a `&'static str`. The match
+                    // arms below pin each branch to a literal, so the returned
+                    // lifetime is `'static`.
+                    subcommand = Some(match t {
+                        "list" => "list",
+                        "completion" => "completion",
+                        "call" => "call",
+                        "get" => "get",
+                        "set" => "set",
+                        "introspect" => "introspect",
+                        "tree" => "tree",
+                        "monitor" => "monitor",
+                        _ => "call",
+                    });
+                }
+                _ => {}
+            }
+        } else {
+            // Inside a subcommand: skip flags (and their values for known
+            // value-taking options) so only positionals are collected.
+            if token == "--" {
+                continue;
+            }
+            if let Some(rest) = token.strip_prefix("--") {
+                // Split `--flag=value` into `(flag, Some(value))`; a bare `--flag`
+                // is `(flag, None)` and may consume the *next* token as its value.
+                let (flag, inline_value) = rest.split_once('=').map(|(f, v)| (f, Some(v))).unwrap_or((rest, None));
+                let consume_next = inline_value.is_none() && takes_value(flag);
+                match flag {
+                    "address" => {
+                        address = inline_value
+                            .map(str::to_string)
+                            .or_else(|| iter.next().and_then(|v| v.into_string().ok()));
+                    }
+                    _ if consume_next => {
+                        let _ = iter.next();
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+            if token.starts_with('-') && token.len() > 1 {
+                continue;
+            }
+            positionals.push(token.to_string());
         }
-        // 2nd positional → object path. Walk one level under `/` so the shell
-        // re-completes the next segment; full path discovery is `tree`'s job.
-        ("call" | "get" | "set" | "introspect", 1) => child_paths(conn, &filled[0], partial),
-        // 3rd positional → interface name from the object's introspection.
-        ("call" | "get" | "set" | "introspect", 2) => {
-            interface_names(conn, &filled[0], &filled[1], partial)
+    }
+
+    // The last collected positional is the partial currently being typed; the
+    // completer receives it separately as `current`, so drop it here. For a
+    // required-but-empty position (user just typed the subcommand) the shell
+    // appends an empty word, which lands here and is dropped correctly.
+    if !positionals.is_empty() {
+        positionals.pop();
+    }
+
+    Some(ParsedArgs { user, system, address, verbose, subcommand, positionals })
+}
+
+/// Whether a long flag (without the `--`) consumes a separate value token.
+fn takes_value(name: &str) -> bool {
+    matches!(
+        name,
+        "address" | "interface" | "member" | "path" | "sender" | "match" | "limit-messages"
+            | "timeout"
+    )
+}
+
+/// Dispatch to the introspection helper for `kind` using the filled positionals.
+/// `positionals` excludes the partial. Mirrors the position semantics documented
+/// in the spec (call: svc/obj/iface/method; get: svc/obj/iface?; etc.).
+fn positional_candidates(
+    conn: &Connection,
+    sub: &str,
+    positionals: &[String],
+    kind: Kind,
+    partial: &str,
+) -> Result<Vec<String>> {
+    let nth = |i: usize| positionals.get(i).map(|s| s.as_str()).unwrap_or("");
+    match (sub, kind) {
+        (_, Kind::Service) => service_names(conn, partial),
+        ("call" | "get" | "set" | "introspect", Kind::Path) => {
+            child_paths(conn, nth(0), partial)
         }
-        // 4th positional of `call` → method name from the chosen interface.
-        ("call", 3) => method_names(conn, &filled[0], &filled[1], &filled[2], partial),
-        _ => Ok(vec![]),
+        ("call" | "get" | "set" | "introspect", Kind::Interface) => {
+            interface_names(conn, nth(0), nth(1), partial)
+        }
+        ("call", Kind::Method) => method_names(conn, nth(0), nth(1), nth(2), partial),
+        _ => Ok(Vec::new()),
     }
 }
+
+// --- live bus introspection helpers (best-effort, uncached) -----------------
 
 /// Candidate services: well-known (non-unique) names on the bus, filtered to
 /// those that start with the partial token.
@@ -85,7 +418,7 @@ fn service_names(conn: &Connection, partial: &str) -> Result<Vec<String>> {
 
 /// Candidate object paths: introspect `/` on `service`, emit each immediate
 /// child as a full path (`/<name>`), filtered by the partial token. Only one
-/// level is expanded — the shell re-invokes `__complete` for the next segment.
+/// level is expanded — the shell re-invokes completion for the next segment.
 fn child_paths(conn: &Connection, service: &str, partial: &str) -> Result<Vec<String>> {
     let xml = introspect_xml(conn, service, "/")?;
     let mut paths: Vec<String> = parse_node_names(&xml)
@@ -100,7 +433,12 @@ fn child_paths(conn: &Connection, service: &str, partial: &str) -> Result<Vec<St
 
 /// Candidate interface names exposed by `service` at `object`, filtered by the
 /// partial token.
-fn interface_names(conn: &Connection, service: &str, object: &str, partial: &str) -> Result<Vec<String>> {
+fn interface_names(
+    conn: &Connection,
+    service: &str,
+    object: &str,
+    partial: &str,
+) -> Result<Vec<String>> {
     let xml = introspect_xml(conn, service, object)?;
     let mut names: Vec<String> = parse_root_interface_names(&xml)
         .into_iter()
@@ -187,49 +525,4 @@ fn parse_interface_methods(xml: &str, interface: &str) -> Vec<String> {
 fn parse_doc(xml: &str) -> Option<roxmltree::Document<'_>> {
     let opts = roxmltree::ParsingOptions { allow_dtd: true, ..Default::default() };
     roxmltree::Document::parse_with_options(xml, opts).ok()
-}
-
-/// Emit a completion script for `shell` that calls back into `busx __complete`.
-///
-/// The script defines a completion function which forwards the words being
-/// typed (minus `busx` itself) to `busx __complete` and feeds its newline
-/// output to `compgen`/`compadd`. Static subcommand completion isn't useful
-/// here — the value of busx completion is live bus introspection — so the
-/// script is hand-rolled rather than generated by `clap_complete`.
-pub fn emit_script(shell: clap_complete::Shell) {
-    let script = match shell {
-        clap_complete::Shell::Bash => bash_script(),
-        clap_complete::Shell::Zsh => zsh_script(),
-        // Other shells aren't exercised; emit nothing rather than a wrong guess.
-        _ => return,
-    };
-    print!("{script}");
-}
-
-/// Bash completion script. `COMP_WORDS[@]:1` drops `busx` (word 0); the rest is
-/// passed verbatim so `__complete` sees `[SUB, ...filled, partial]`.
-fn bash_script() -> String {
-    r#"# busx bash completion (dynamic — calls back into `busx __complete`).
-_busx() {
-    local IFS=$'\n'
-    local cands
-    cands=$(busx __complete "${COMP_WORDS[@]:1}" 2>/dev/null) || return
-    COMPREPLY=($(compgen -W "$cands" -- "${COMP_WORDS[COMP_CWORD]}"))
-    return 0
-}
-complete -o nospace -F _busx busx
-"#.to_string()
-}
-
-/// Zsh completion script. `words[2,-1]` skips `busx` (word 1 in zsh indexing).
-fn zsh_script() -> String {
-    r#"#compdef busx
-# busx zsh completion (dynamic — calls back into `busx __complete`).
-_busx() {
-    local -a cands
-    cands=("${(@f)$(busx __complete "${words[2,-1]}" 2>/dev/null)}") || return
-    compadd -- "${cands[@]}"
-}
-_busx "$@"
-"#.to_string()
 }

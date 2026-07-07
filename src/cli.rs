@@ -43,7 +43,4 @@ pub enum Command {
     },
     /// Generate shell completion script.
     Completion { shell: clap_complete::Shell },
-    /// (hidden) dynamic completion candidate generator.
-    #[command(name = "__complete", hide = true)]
-    Complete { args: Vec<String> },
 }
