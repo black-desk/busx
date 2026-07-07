@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Shell completion via `clap_complete::dynamic` (spec §12).
 //!
 //! Two layers:

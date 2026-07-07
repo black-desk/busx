@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Render a [`zvariant::Value`] as type-tagged JSON (spec §7.2).
 //!
 //! Every value is encoded as `{"type": <signature>, "data": <native JSON>}`.

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Introspection XML → JSON parsing (spec §6).
 //!
 //! `org.freedesktop.DBus.Introspectable.Introspect` returns an XML description

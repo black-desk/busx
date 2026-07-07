@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! Human-friendly rendering of a [`zvariant::Value`] (spec §7.3).
 //!
 //! This is the value pretty-printer used by every command's *default* output

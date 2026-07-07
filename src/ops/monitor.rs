@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 //! `busx monitor` — stream bus messages as NDJSON, with match-rule filtering
 //! (spec §10).
 //!
