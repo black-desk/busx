@@ -29,6 +29,11 @@ SPDX-License-Identifier: MIT
 
 en | [zh_CN](README.zh_CN.md)
 
+> [!WARNING]
+>
+> This project is in an **early development stage**; its code has **never been
+> reviewed by a human**. Do not use it in production.
+
 > [!NOTE]
 >
 > This English README is translated from the Chinese version and may contain

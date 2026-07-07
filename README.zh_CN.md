@@ -29,6 +29,10 @@ SPDX-License-Identifier: MIT
 
 [en](README.md) | zh_CN
 
+> [!WARNING]
+>
+> 本项目处于**早期开发阶段**，代码**完全未经人工审核**，请勿用于生产环境。
+
 `busx` 是一个用 Rust（基于 [zbus]）实现的 D-Bus 命令行工具，目标是替代
 `dbus-send` / `busctl` / `qdbus` 三件套，把它们各自的痛点一次性补齐：
 
