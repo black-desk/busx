@@ -99,6 +99,7 @@ fn command() -> Command {
                 .help("Connect to the bus at ADDRESS"),
         )
         .arg(global("verbose", "Verbose diagnostics on stderr"))
+        .arg(global("json", "Emit type-tagged JSON (default: human text)"))
         .subcommands([
             subcommand("list").arg(flag("unique")).arg(flag("acquired")).arg(flag("activatable")),
             subcommand("tree").arg(positional_vec("services", Service)),

@@ -2,18 +2,45 @@ mod common;
 use assert_cmd::Command;
 use serde_json::Value;
 
+/// `--json list` returns an array of `{ name, pid, process }` objects; the test
+/// service must be among them. PIDs are environment-dependent, so only the
+/// structure is asserted (a present, optional `pid`).
 #[test]
 fn list_returns_json_array_with_test_service() {
+    let addr = common::bus().address.clone();
+    let out = Command::cargo_bin("busx")
+        .unwrap()
+        .args(["--json", "--address", &addr, "list"])
+        .ok()
+        .unwrap();
+    let v: Value = serde_json::from_slice(&out.stdout).expect("valid json");
+    let arr = v.as_array().expect("array of {name,pid,process}");
+    let test = arr
+        .iter()
+        .find(|e| e["name"] == "org.busx.Test")
+        .unwrap_or_else(|| panic!("missing test service: {v}"));
+    // Every entry carries name; pid/process are optional but always present as
+    // keys (null when unresolvable).
+    assert!(test.get("pid").is_some(), "pid key present: {test}");
+    assert!(test.get("process").is_some(), "process key present: {test}");
+}
+
+/// Default (human) `list` output is an aligned table with a NAME/PID/PROCESS
+/// header and the test service on its own line.
+#[test]
+fn list_human_shows_table_with_test_service() {
     let addr = common::bus().address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args(["--address", &addr, "list"])
         .ok()
         .unwrap();
-    let v: Value = serde_json::from_slice(&out.stdout).expect("valid json");
-    let arr = v.as_array().expect("array of names");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("NAME"), "missing NAME header:\n{stdout}");
+    assert!(stdout.contains("PID"), "missing PID header:\n{stdout}");
+    assert!(stdout.contains("PROCESS"), "missing PROCESS header:\n{stdout}");
     assert!(
-        arr.iter().any(|n| n == "org.busx.Test"),
-        "missing test service in list output: {v}"
+        stdout.contains("org.busx.Test"),
+        "missing test service row:\n{stdout}"
     );
 }

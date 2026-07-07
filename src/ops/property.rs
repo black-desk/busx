@@ -24,6 +24,7 @@ pub fn get(
     system: bool,
     address: Option<&str>,
     verbose: bool,
+    json: bool,
     service: &str,
     object: &str,
     interface: Option<&str>,
@@ -36,7 +37,7 @@ pub fn get(
     match interface {
         // No/empty interface: GetAll over all interfaces is allowed; Get is not.
         None | Some("") if get_all_only => {
-            get_all(&proxy, InterfaceName::from_str_unchecked(""))
+            get_all(&proxy, InterfaceName::from_str_unchecked(""), json)
         }
         None | Some("") => Err(crate::error::Error::Msg(
             "get: --interface is required when reading individual properties".into(),
@@ -45,14 +46,22 @@ pub fn get(
         Some(name) => {
             let iface = InterfaceName::try_from(name).map_err(zbus::Error::from)?;
             if get_all_only {
-                get_all(&proxy, iface)
+                get_all(&proxy, iface, json)
             } else {
-                let mut arr = Vec::with_capacity(props.len());
+                let mut values: Vec<zvariant::Value<'_>> = Vec::with_capacity(props.len());
                 for p in props {
                     let v = proxy.get(iface.as_ref(), p)?;
-                    arr.push(crate::value::decode::to_tagged(&v));
+                    values.push(v.into());
                 }
-                crate::out::print_json(&json!(arr));
+                if json {
+                    let arr: Vec<_> =
+                        values.iter().map(crate::value::decode::to_tagged).collect();
+                    crate::out::print_json(&json!(arr));
+                } else {
+                    for v in &values {
+                        println!("{}  {}", v.value_signature(), crate::value::pretty::pretty(v));
+                    }
+                }
                 Ok(())
             }
         }
@@ -103,14 +112,23 @@ pub fn set(
 }
 
 /// Run `GetAll` and print the result as a type-tagged JSON object keyed by
-/// property name.
-fn get_all(proxy: &PropertiesProxy<'_>, iface: InterfaceName<'_>) -> Result<()> {
+/// property name, or — in human mode — one `<name>  <type>  <pretty>` line per
+/// property (sorted by name for stable output).
+fn get_all(proxy: &PropertiesProxy<'_>, iface: InterfaceName<'_>, json: bool) -> Result<()> {
     let map = proxy.get_all(iface)?;
-    let mut obj = Map::new();
-    for (k, v) in map.iter() {
-        // OwnedValue derefs to Value, so `v` is `&Value` after deref.
-        obj.insert(k.clone(), crate::value::decode::to_tagged(v));
+    if json {
+        let mut obj = Map::new();
+        for (k, v) in map.iter() {
+            obj.insert(k.clone(), crate::value::decode::to_tagged(v));
+        }
+        crate::out::print_json(&Json::Object(obj));
+    } else {
+        let mut names: Vec<&String> = map.keys().collect();
+        names.sort();
+        for k in names {
+            let v = &map[k];
+            println!("{}  {}  {}", k, v.value_signature(), crate::value::pretty::pretty(v));
+        }
     }
-    crate::out::print_json(&Json::Object(obj));
     Ok(())
 }

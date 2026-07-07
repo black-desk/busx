@@ -11,6 +11,11 @@ pub struct Cli {
     pub address: Option<String>,
     #[arg(long, help = "Verbose diagnostics on stderr")]
     pub verbose: bool,
+    /// Emit machine-readable type-tagged JSON instead of human-friendly text.
+    /// Global: applies to every subcommand. For `monitor` the JSON form is NDJSON
+    /// (one object per message).
+    #[arg(long, global = true, help = "Emit type-tagged JSON (default: human text)")]
+    pub json: bool,
     #[command(subcommand)]
     pub command: Command,
 }
