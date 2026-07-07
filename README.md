@@ -1,107 +1,136 @@
 <!--
-SPDX-FileCopyrightText: 2025 Chen Linxuan <me@black-desk.cn>
+SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 
 SPDX-License-Identifier: MIT
 -->
 
-<!-- TODO: Update project name -->
-
-# Template
+# busx
 
 [![checks][badge-shields-io-checks]][actions]
 [![commit activity][badge-shields-io-commit-activity]][commits]
 [![contributors][badge-shields-io-contributors]][contributors]
 [![release date][badge-shields-io-release-date]][releases]
 ![commits since release][badge-shields-io-commits-since-release]
-[![codecov][badge-shields-io-codecov]][codecov]
-
-<!-- TODO: Update project links -->
 
 [badge-shields-io-checks]:
-  https://img.shields.io/github/check-runs/black-desk/template/master
-
-<!-- TODO: Update project links -->
-
-[actions]: https://github.com/black-desk/template/actions
-
-<!-- TODO: Update project links -->
-
+  https://img.shields.io/github/check-runs/black-desk/busx/master
+[actions]: https://github.com/black-desk/busx/actions
 [badge-shields-io-commit-activity]:
-  https://img.shields.io/github/commit-activity/w/black-desk/template/master
-
-<!-- TODO: Update project links -->
-
-[commits]: https://github.com/black-desk/template/commits/master
-
-<!-- TODO: Update project links -->
-
+  https://img.shields.io/github/commit-activity/w/black-desk/busx/master
+[commits]: https://github.com/black-desk/busx/commits/master
 [badge-shields-io-contributors]:
-  https://img.shields.io/github/contributors/black-desk/template
-
-<!-- TODO: Update project links -->
-
-[contributors]: https://github.com/black-desk/template/graphs/contributors
-
-<!-- TODO: Update project links -->
-
+  https://img.shields.io/github/contributors/black-desk/busx
+[contributors]: https://github.com/black-desk/busx/graphs/contributors
 [badge-shields-io-release-date]:
-  https://img.shields.io/github/release-date/black-desk/template
-
-<!-- TODO: Update project links -->
-
-[releases]: https://github.com/black-desk/template/releases
-
-<!-- TODO: Update project links -->
-
+  https://img.shields.io/github/release-date/black-desk/busx
+[releases]: https://github.com/black-desk/busx/releases
 [badge-shields-io-commits-since-release]:
-  https://img.shields.io/github/commits-since/black-desk/template/latest
-
-<!-- TODO: Update project links -->
-
-[badge-shields-io-codecov]:
-  https://codecov.io/github/black-desk/template/graph/badge.svg?token=6TSVGQ4L9X
-[codecov]: https://codecov.io/github/black-desk/template
+  https://img.shields.io/github/commits-since/black-desk/busx/latest
 
 en | [zh_CN](README.zh_CN.md)
 
-> [!WARNING]
+> [!NOTE]
 >
-> This English README is translated from the Chinese version using LLM and may
-> contain errors.
+> This English README is translated from the Chinese version and may contain
+> errors.
 
-<!-- TODO: Add project description -->
+`busx` is a D-Bus command-line tool written in Rust (on top of [zbus]), aiming
+to replace `dbus-send` / `busctl` / `qdbus` and fix each of their pain points at
+once:
 
-My personal project template
+- Input follows `busctl` style (signature string + positional args) and **fully
+  supports nesting and empty containers** — closing `dbus-send`'s hard gap;
+- Output is always **type-tagged JSON** (every value is `{"type":..,"data":..}`,
+  and monitoring is NDJSON — one object per line), script-friendly and pipeable
+  to `jq` / python;
+- **It does not repeat sd-bus's mistake**: dicts with non-string keys (e.g.
+  `a{uu}`) render as `[{"key":..,"value":..}]` instead of crashing (cf.
+  systemd#32904);
+- Ships **dynamic shell completion** (bash/zsh) that introspects the bus live;
+- **Single binary, zero runtime dependencies** (pure Rust, no libdbus).
+
+[zbus]: https://crates.io/crates/zbus
+
+## Features
+
+- `list` — list service names on the bus.
+- `tree` — recursively introspect and draw an object-path tree of a service.
+- `introspect` — list an object's interfaces / methods / signals / properties.
+- `call` — call a method (busctl-style input, arbitrary nesting supported).
+- `get` / `set` — read (no property names = `GetAll`) / write properties.
+- `monitor` — monitor bus messages, filter by match rule, emit NDJSON (with
+  `PropertiesChanged` decoded).
+- `completion` — generate a dynamic shell-completion script.
+
+## Build & install
+
+You need a Rust toolchain and a D-Bus environment (Linux only). The system must
+provide `dbus-daemon` (used at run/test time).
+
+```bash
+cargo build --release        # binary at target/release/busx
+cargo install --path .       # or install straight to ~/.cargo/bin
+```
 
 ## Usage
 
-<!-- TODO: Add project usage instructions -->
+```bash
+# List services (defaults to the session bus, falling back to the system bus)
+busx list
 
-1. Use gh to create a repository from the template:
+# Introspect an object
+busx introspect org.freedesktop.systemd1 /org/freedesktop/systemd1
 
-   ```bash
-   gh repo create --public --template black-desk/template
-   ```
+# Call a method (busctl-style input: signature string + positional args)
+busx call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
+  org.freedesktop.systemd1.Manager ListUnits
 
-2. Edit project files, fill in content, and remove all `TODO` comments.
+# Nested input (a{sv} containing an array — impossible with dbus-send):
+busx call org.example /obj org.example.Iface Method \
+  'a{sv}' 1 'hint' 'a' 's' 2 'a' 'b'
 
-3. Run the check script to ensure all `TODO` comments have been removed:
+# Read properties (no property names = GetAll)
+busx get org.freedesktop.systemd1 /org/freedesktop/systemd1 \
+  org.freedesktop.systemd1.Manager
 
-   ```bash
-   ./scripts/ls-todo.sh
-   ```
+# Monitor signals, piping to external jq
+busx monitor --signals --interface org.freedesktop.DBus.Properties \
+  --member PropertiesChanged | jq 'select(.args[1] != {})'
+
+# Generate bash completion (once sourced, it live-introspects the bus to
+# complete services/paths/interfaces/methods)
+busx completion bash > /etc/bash_completion.d/busx
+```
+
+Output is always JSON; for pretty-printing or field transformation, pipe to an
+external `jq` / python. All diagnostics (errors, warnings) go to stderr with the
+`busx:` prefix; exit code is `0` on success, `1` on failure.
+
+See the [design doc] for details.
+
+[design doc]: docs/superpowers/specs/2026-07-07-busx-design.md
+
+## Roadmap
+
+1. **TUI**: built on this crate's modules (a second `[[bin]]`, or extract a lib
+   then), providing interactive browsing / call / monitor; with
+   `copy as dbus-send / busctl / gdbus`.
+2. `emit` (emit signals), pcapng `capture`.
+3. `--host` / `--machine` remote and container buses.
+4. A bytestring string view for `ay` and other value-rendering enhancements.
+5. Re-evaluate an embedded `busx jq` subcommand if `jaq` ever publishes a
+   reusable flag-parsing library entry.
 
 ## License
 
-Unless otherwise specified, the code of this project are open source under the
+Unless otherwise specified, the code of this project is open source under the
 GNU General Public License version 3 or any later version, while documentation,
-configuration files, and scripts used in the development and maintenance process
-are open source under the MIT License.
+configuration files, and scripts used in development and maintenance are open
+source under the MIT License.
 
-This project complies with the [REUSE specification].
-
-You can use [reuse-tool](https://github.com/fsfe/reuse-tool) to generate the
-SPDX list for this project:
+This project complies with the [REUSE specification]. You can use
+[reuse-tool](https://github.com/fsfe/reuse-tool) to generate the SPDX list for
+this project:
 
 ```bash
 reuse spdx
