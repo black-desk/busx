@@ -280,7 +280,7 @@ busx call svc /o <TAB> → 列 interface
 
 ## 14. 测试策略
 
-**只做集成测试，不做单元测试。**
+**只做端到端的集成测试。**
 
 - **统一准备一次**：所有集成测试共用一条独立消息总线——测试入口用一次性 fixture（`OnceLock`/`Once`）spawn 一个 `dbus-daemon --session --print-address`，进程内用 zbus 注册一个小测试服务（暴露含嵌套类型 / 属性 / 信号 / 非 string 键 dict 的接口），地址供全部用例复用；不为每个用例重启 daemon。
 - 因用例在共享总线上并行执行，**用例间用独立 object path / well-known 名隔离**（如每个 `#[test]` 取唯一后缀）避免互相干扰。
@@ -290,6 +290,8 @@ busx call svc /o <TAB> → 列 interface
 - CI：取消 `.github/workflows/ci.yaml` 里 `rust` job 的注释，复用模板的 [`black-desk/workflows/rust@master`](https://github.com/black-desk/workflows)（fmt/clippy/test/build 一站式）。ubuntu runner 自带 `dbus-daemon`，集成测试可直接跑。
 
 ## 15. 路线图（后续阶段，不在 v1）
+
+> 此路线图属对外信息：**实现阶段写入 `README`**（作为项目对外发布说明），本节仅作设计备案；二者需保持同步。
 
 1. **TUI**：基于本 crate 的 `src/` 模块（加第二个 `[[bin]]` 或届时抽 lib），提供交互式浏览/call/monitor；支持 `copy as dbus-send / busctl / gdbus`。
 2. `emit`（发信号）、pcapng `capture`。
