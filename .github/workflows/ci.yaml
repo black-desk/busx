@@ -43,13 +43,13 @@ jobs:
   #     - uses: black-desk/workflows/go@master
 
   # TODO: Uncomment this job if this is a rust project
-  # rust:
-  #   runs-on: ubuntu-latest
-  #   permissions:
-  #     contents: write
-  #     id-token: write
-  #   steps:
-  #     - uses: black-desk/workflows/rust@master
+  rust:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: black-desk/workflows/rust@master
 
   # TODO: Uncomment this job if this is a project with a container
   # container:
@@ -68,7 +68,7 @@ jobs:
       # TODO: Uncomment the following lines if you have the respective jobs
       # - autotools
       # - go
-      # - rust
+      - rust
       # - container
     runs-on: ubuntu-latest
     steps:
