@@ -59,6 +59,49 @@ pub fn get(
     }
 }
 
+/// Implementation of `busx set`.
+///
+/// `signature` is the busctl-style type code of the single value; `value_tokens`
+/// are the positional value tokens. Both are routed through the shared encoder
+/// (which expects the signature as its first token), and the resulting value is
+/// written via `org.freedesktop.DBus.Properties.Set`. The peer emits
+/// `PropertiesChanged` as a side effect (when the property is annotated
+/// `emits_changed_signal`).
+#[allow(clippy::too_many_arguments)]
+pub fn set(
+    user: bool,
+    system: bool,
+    address: Option<&str>,
+    verbose: bool,
+    service: &str,
+    object: &str,
+    interface: &str,
+    property: &str,
+    signature: &str,
+    value_tokens: &[String],
+) -> Result<()> {
+    let conn = connect(user, system, address, verbose)?;
+    let proxy = PropertiesProxy::new(&conn, service, object)?;
+
+    // Build the value via the shared encoder: first token is the signature,
+    // the rest are value tokens.
+    let mut tokens = vec![signature.to_string()];
+    tokens.extend(value_tokens.iter().cloned());
+    let mut parsed = crate::value::encode::parse(&tokens)?;
+    let value = parsed
+        .pop()
+        .ok_or_else(|| crate::error::Error::Msg("set: missing value".into()))?;
+    if !parsed.is_empty() {
+        return Err(crate::error::Error::Msg(
+            "set: expected exactly one value".into(),
+        ));
+    }
+
+    let iface = InterfaceName::try_from(interface).map_err(zbus::Error::from)?;
+    proxy.set(iface, property, value)?;
+    Ok(())
+}
+
 /// Run `GetAll` and print the result as a type-tagged JSON object keyed by
 /// property name.
 fn get_all(proxy: &PropertiesProxy<'_>, iface: InterfaceName<'_>) -> Result<()> {

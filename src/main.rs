@@ -51,8 +51,21 @@ fn run(cli: Cli) -> error::Result<()> {
             &method,
             &args,
         ),
-        Command::Tree { .. } | Command::Introspect { .. }
-        | Command::Set { .. } | Command::Monitor { .. } => {
+        Command::Set { service, object, interface, property, signature, value } => {
+            ops::property::set(
+                cli.user,
+                cli.system,
+                cli.address.as_deref(),
+                cli.verbose,
+                &service,
+                &object,
+                &interface,
+                &property,
+                &signature,
+                &value,
+            )
+        }
+        Command::Tree { .. } | Command::Introspect { .. } | Command::Monitor { .. } => {
             Err(error::Error::Msg("not yet implemented".into()))
         }
         Command::Completion { shell } => {
