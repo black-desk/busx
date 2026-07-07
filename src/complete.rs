@@ -118,12 +118,12 @@ fn command() -> Command {
                 .arg(positional("service", Service))
                 .arg(positional("object", Path))
                 .arg(positional_opt("interface", Interface))
-                .arg(positional_vec("props", None)),
+                .arg(positional_vec("props", Property)),
             subcommand("set")
                 .arg(positional("service", Service))
                 .arg(positional("object", Path))
                 .arg(positional("interface", Interface))
-                .arg(positional("property", None))
+                .arg(positional("property", Property))
                 .arg(positional("signature", None))
                 .arg(positional_vec("value", None)),
             subcommand("monitor")
@@ -156,6 +156,7 @@ enum Kind {
     Interface,
     Method,
     Signature,
+    Property,
 }
 
 // Short lowercase aliases read better at the `positional(...)` call sites than
@@ -170,6 +171,8 @@ const Interface: Option<Kind> = Some(Kind::Interface);
 const Method: Option<Kind> = Some(Kind::Method);
 #[allow(non_upper_case_globals)]
 const Signature: Option<Kind> = Some(Kind::Signature);
+#[allow(non_upper_case_globals)]
+const Property: Option<Kind> = Some(Kind::Property);
 
 fn subcommand(name: &'static str) -> Command {
     Command::new(name).about(match name {
@@ -222,6 +225,7 @@ fn attach(arg: Arg, kind: Option<Kind>) -> Arg {
         Some(Kind::Interface) => arg.add(ArgValueCompleter::new(complete_interface)),
         Some(Kind::Method) => arg.add(ArgValueCompleter::new(complete_method)),
         Some(Kind::Signature) => arg.add(ArgValueCompleter::new(complete_signature)),
+        Some(Kind::Property) => arg.add(ArgValueCompleter::new(complete_property)),
         None => arg,
     }
 }
@@ -250,6 +254,12 @@ fn complete_method(current: &OsStr) -> Vec<CompletionCandidate> {
 /// input signature (a single candidate), filtered by the partial token.
 fn complete_signature(current: &OsStr) -> Vec<CompletionCandidate> {
     complete_positional(Kind::Signature, current)
+}
+
+/// Completer fn for the property-name positional(s) of `get`/`set`. Lists the
+/// property names of the chosen (or all) interface(s) on the object.
+fn complete_property(current: &OsStr) -> Vec<CompletionCandidate> {
+    complete_positional(Kind::Property, current)
 }
 
 /// The per-positional dynamic completer. Reads the bus flags + filled
@@ -410,6 +420,13 @@ fn positional_candidates(
         ("call", Kind::Signature) => method_input_signature_candidates(
             conn, nth(0), nth(1), nth(2), nth(3), partial,
         ),
+        // `get`'s property positional is variadic: every position from index 3
+        // onward (after service/object/[interface]) completes property names.
+        // `filled[2]` is the interface the user typed (possibly empty for `get`,
+        // where it's optional) — empty ⇒ all interfaces of the object.
+        ("get", Kind::Property) => property_names(conn, nth(0), nth(1), nth(2), partial),
+        // `set`'s single property positional sits at index 3.
+        ("set", Kind::Property) => property_names(conn, nth(0), nth(1), nth(2), partial),
         _ => Ok(Vec::new()),
     }
 }
@@ -481,7 +498,25 @@ fn method_names(
     Ok(names)
 }
 
-/// The input signature of `method` on `interface` (`service` at `object`), as a
+/// Candidate property names of `interface` on `service` at `object`, filtered
+/// by the partial token. If `interface` is empty, lists properties across all of
+/// the object's own interfaces (de-duplicated).
+fn property_names(
+    conn: &Connection,
+    service: &str,
+    object: &str,
+    interface: &str,
+    partial: &str,
+) -> Result<Vec<String>> {
+    let xml = introspect_xml(conn, service, object)?;
+    let mut names: Vec<String> = parse_interface_properties(&xml, interface)
+        .into_iter()
+        .filter(|n| n.starts_with(partial))
+        .collect();
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
 /// single-candidate completion list filtered by the partial token. For a no-arg
 /// method the signature is `""`, which is returned as-is so the user can accept
 /// it.
@@ -563,6 +598,29 @@ fn parse_interface_methods(xml: &str, interface: &str) -> Vec<String> {
             iface
                 .children()
                 .filter(|n| n.has_tag_name("method"))
+                .filter_map(|n| n.attribute("name").map(|s| s.to_string()))
+        })
+        .collect()
+}
+
+/// Parse the property names of a given interface (a direct child of the root).
+/// If `interface` is empty, collects properties from *all* of the root's own
+/// interfaces — useful for `get` when the interface positional is omitted.
+fn parse_interface_properties(xml: &str, interface: &str) -> Vec<String> {
+    let doc = match parse_doc(xml) {
+        Some(d) => d,
+        None => return Vec::new(),
+    };
+    doc.root_element()
+        .children()
+        .filter(|n| {
+            n.has_tag_name("interface")
+                && (interface.is_empty() || n.attribute("name") == Some(interface))
+        })
+        .flat_map(|iface| {
+            iface
+                .children()
+                .filter(|n| n.has_tag_name("property"))
                 .filter_map(|n| n.attribute("name").map(|s| s.to_string()))
         })
         .collect()
