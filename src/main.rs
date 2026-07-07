@@ -1,4 +1,5 @@
 mod cli;
+mod complete;
 mod conn;
 mod error;
 mod introspect;
@@ -6,7 +7,7 @@ mod ops;
 mod out;
 mod value;
 
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 use cli::{Cli, Command};
 
 fn main() -> std::process::ExitCode {
@@ -108,9 +109,15 @@ fn run(cli: Cli) -> error::Result<()> {
             timeout.as_deref(),
         ),
         Command::Completion { shell } => {
-            clap_complete::generate(shell, &mut Cli::command(), "busx", &mut std::io::stdout());
+            crate::complete::emit_script(shell);
             Ok(())
         }
-        Command::Complete { .. } => Ok(()),
+        Command::Complete { args } => crate::complete::run(
+            &args,
+            cli.user,
+            cli.system,
+            cli.address.as_deref(),
+            cli.verbose,
+        ),
     }
 }
