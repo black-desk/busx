@@ -1,8 +1,9 @@
 //! `busx list` — print the names on the bus (spec §7).
 //!
 //! Default output is a human-friendly, column-aligned table
-//! `NAME  PID  PROCESS`; `--json` switches to the type-tagged JSON form, an
-//! array of `{ name, pid, process }` objects.
+//! `NAME  PID  PROCESS`, kept within 80 columns by capping the NAME column
+//! (overlong names are truncated with `…`); `--json` switches to the
+//! type-tagged JSON form, an array of `{ name, pid, process }` objects.
 //!
 //! Flags:
 //! - `--activatable`: list *activatable* names instead of currently-owned ones.
@@ -51,6 +52,17 @@ fn proc_info(dbus: &DBusProxy<'_>, name: &str) -> ProcInfo {
     ProcInfo { pid: Some(pid), process }
 }
 
+/// Truncate `s` to `cap` display columns, appending `…` when longer (keeps
+/// `busx list` within 80 columns for very long service names such as Firefox's).
+fn cap_cell(s: &str, cap: usize) -> String {
+    if s.chars().count() <= cap {
+        s.to_string()
+    } else {
+        let head: String = s.chars().take(cap.saturating_sub(1)).collect();
+        format!("{head}…")
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     user: bool,
@@ -93,42 +105,42 @@ pub fn run(
             .collect();
         crate::out::print_json(&json!(arr));
     } else {
-        // Build a fixed-column table: NAME  PID  PROCESS. The three header
-        // labels also fix the minimum column width so short lists stay aligned.
+        // Human table: NAME  PID  PROCESS, total width ≤ 80 columns.
+        // PID is at most 7 digits (Linux pid_max caps at 4194304 on 64-bit) and
+        // PROCESS (from /proc/<pid>/comm) at most 15, so NAME is capped at
+        // 80 - 2 - 7 - 2 - 15 = 54 to keep a line within 80 columns.
+        const NAME_CAP: usize = 54;
         let mut rows: Vec<[String; 3]> = Vec::with_capacity(names.len());
         for n in &names {
             let info = proc_info(&dbus, n);
             rows.push([
-                n.clone(),
+                cap_cell(n, NAME_CAP),
                 info.pid.map(|p| p.to_string()).unwrap_or_default(),
                 info.process.unwrap_or_default(),
             ]);
         }
         let cols = ["NAME", "PID", "PROCESS"];
-        let mut widths = [cols[0].len(), cols[1].len(), cols[2].len()];
+        // Widths by character count (not bytes — `…` is one column, three bytes).
+        let mut widths = [
+            cols[0].chars().count(),
+            cols[1].chars().count(),
+            cols[2].chars().count(),
+        ];
         for r in &rows {
             for (i, cell) in r.iter().enumerate() {
-                widths[i] = widths[i].max(cell.len());
+                widths[i] = widths[i].max(cell.chars().count());
             }
         }
         println!(
             "{:<w0$}  {:<w1$}  {:<w2$}",
-            cols[0],
-            cols[1],
-            cols[2],
-            w0 = widths[0],
-            w1 = widths[1],
-            w2 = widths[2],
+            cols[0], cols[1], cols[2],
+            w0 = widths[0], w1 = widths[1], w2 = widths[2],
         );
         for r in &rows {
             println!(
                 "{:<w0$}  {:<w1$}  {:<w2$}",
-                r[0],
-                r[1],
-                r[2],
-                w0 = widths[0],
-                w1 = widths[1],
-                w2 = widths[2],
+                r[0], r[1], r[2],
+                w0 = widths[0], w1 = widths[1], w2 = widths[2],
             );
         }
     }
