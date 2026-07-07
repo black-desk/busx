@@ -11,6 +11,16 @@ use clap::Parser;
 use cli::{Cli, Command};
 
 fn main() -> std::process::ExitCode {
+    // Rust sets SIGPIPE to SIG_IGN at startup, so a downstream pipe reader
+    // (e.g. `less`, `head`) closing early makes stdout writes return EPIPE,
+    // which `println!` turns into a panic ("failed printing to stdout: Broken
+    // pipe"). Restore the default disposition so we terminate via SIGPIPE like
+    // ordinary Unix tools. Must run before any stdout output.
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+
     // Shell-completion protocol: if `COMPLETE=<shell>` is set the shell is asking
     // us to produce candidates (or the registration script). Handle it before
     // any normal parsing and exit, mirroring `clap_complete`'s `CompleteEnv`.

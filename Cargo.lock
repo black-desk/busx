@@ -270,6 +270,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "enumflags2",
+ "libc",
  "nix",
  "predicates",
  "roxmltree",
