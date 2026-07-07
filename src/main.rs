@@ -11,6 +11,18 @@ use clap::Parser;
 use cli::{Cli, Command};
 
 fn main() -> std::process::ExitCode {
+    // Shell-completion protocol: if `COMPLETE=<shell>` is set the shell is asking
+    // us to produce candidates (or the registration script). Handle it before
+    // any normal parsing and exit, mirroring `clap_complete`'s `CompleteEnv`.
+    match complete::try_complete() {
+        Ok(true) => return std::process::ExitCode::SUCCESS,
+        Ok(false) => {}
+        Err(e) => {
+            eprintln!("busx: {e}");
+            return std::process::ExitCode::FAILURE;
+        }
+    }
+
     let cli = Cli::parse();
     match run(cli) {
         Ok(()) => std::process::ExitCode::SUCCESS,
@@ -112,12 +124,5 @@ fn run(cli: Cli) -> error::Result<()> {
             crate::complete::emit_script(shell);
             Ok(())
         }
-        Command::Complete { args } => crate::complete::run(
-            &args,
-            cli.user,
-            cli.system,
-            cli.address.as_deref(),
-            cli.verbose,
-        ),
     }
 }
