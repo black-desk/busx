@@ -288,7 +288,8 @@ busx call svc /o <TAB> → 列 interface
 
 **只做集成测试，不做单元测试。**
 
-- 每个集成测试用例**另起一条独立消息总线**：spawn `dbus-daemon --session --print-address` 取其地址，进程内用 zbus 注册一个小测试服务（暴露含嵌套类型 / 属性 / 信号 / 非 string 键 dict 的接口）。
+- **统一准备一次**：所有集成测试共用一条独立消息总线——测试入口用一次性 fixture（`OnceLock`/`Once`）spawn 一个 `dbus-daemon --session --print-address`，进程内用 zbus 注册一个小测试服务（暴露含嵌套类型 / 属性 / 信号 / 非 string 键 dict 的接口），地址供全部用例复用；不为每个用例重启 daemon。
+- 因用例在共享总线上并行执行，**用例间用独立 object path / well-known 名隔离**（如每个 `#[test]` 取唯一后缀）避免互相干扰。
 - 用 [`assert_cmd`](https://crates.io/crates/assert_cmd) 以子进程方式驱动 `busx` 二进制，通过 `--address=<该总线地址>` 指向测试总线，断言 stdout（type-tagged JSON / NDJSON）与退出码。
 - 覆盖：`list`/`tree`/`introspect`/`call`（含嵌套入参）/`get`（`GetAll`/`Get`）/`set`/`monitor`（含触发 `PropertiesChanged` 与非 string 键 dict，断言不崩溃）/`jq`/`completion`。
 - 默认总线 session→system 回退：构造无 session 环境的用例断言回退。
@@ -308,5 +309,5 @@ busx call svc /o <TAB> → 列 interface
 - D-Bus 规范（类型系统 / match rules）：https://dbus.freedesktop.org/doc/dbus-specification.html
 - sd-bus 非 string 键 dict JSON bug：https://github.com/systemd/systemd/issues/32904
 - zbus：https://crates.io/crates/zbus
-- jaq：https://crates.io/crates/jaq-core （仓库 https://github.com/01mf02/jaq）
+- jaq：https://crates.io/crates/jaq-core （仓库 https://github.om/01mf02/jaq）
 - Lennart 介绍 sd-bus：https://0pointer.net/blog/the-new-sd-bus-api-of-systemd.html
