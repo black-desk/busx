@@ -242,11 +242,10 @@ NDJSON 每条消息对象示例：
 ## 11. busx jq（内嵌 jaq）
 
 - 形式：`busx jq` **透传后续全部命令行参数**（clap 不解析 jq 的 flag，用 `trailing_var_arg` + `allow_hyphen_values` 原样收集），行为对齐 `jq`/`jaq`：无 FILE 则读 stdin，应用 filter，输出结果。用户写什么、jaq 认什么。
-- 执行用 `jaq`（`jaq-core`/`jaq-interpret`/`jaq-std`）。flag 解析按以下优先级落地（jaq 的 CLI 解析器未作为库发布）：
-  1. 先查 `jaq` 是否暴露可复用的「解析+运行」库入口（如 `jaq::run`）——若有，直接用，零维护、真透传；
-  2. 否则**自建 jq 的 CLI flag 集**（jq 的 flag 多年稳定、数量有限：`-c/-n/-r/-R/-s/-e/-S/-a/--tab/--indent/--arg/--argjson/--slurpfile/--rawfile/-f/-L` 等），自己解析后喂给 jaq 解释器；
-  3. 若自建发现语义易错，退而 **vendor jaq 的 CLI 层**（MIT，把它的 clap `Args` + 运行循环搬进本 crate 作子命令）以保 bit-for-bit 对齐。
-  用户侧契约不变：`busx jq` 接受 `jq` 接受的那些参数。
+- 执行用 jaq 的库（`jaq-core`/`jaq-interpret`/`jaq-std`）。**已核实（2026-07）：`jaq` crate 全版本 bin-only（`has_lib=false`，docs.rs 明示「not a library」），CLI flag 解析只存在于其二进制 `main.rs`，没有任何可复用的库入口。** 故 flag 解析二选一：
+  1. **自建 jq 的 CLI flag 集**（jq 的 flag 多年稳定、数量有限：`-c/-n/-r/-R/-s/-e/-S/-a/--tab/--indent/--arg/--argjson/--slurpfile/--rawfile/-f/-L` 等），自己解析后喂给 jaq 解释器——依赖最轻；
+  2. 或 **vendor jaq 的 CLI 层**（MIT，jaq bin crate 仅 ~750 行/6 文件，把它的 clap `Args` + 运行循环搬进本 crate 作子命令）——bit-for-bit 对齐、零语义猜测，代价是带上 jaq 的额外依赖。
+  实现阶段先试 (1)，跑不通再退 (2)。用户侧契约不变：`busx jq` 接受 `jq` 接受的那些参数。
 - **不做** type-tag 解包等特殊处理：用户直接对 busx 输出的 JSON 写 jq 表达式（如 `busx monitor | busx jq 'select(.member=="PropertiesChanged") | .args[1]'`）。
 - 由于 busx 输出恒为 JSON，`busx jq` 既是查询/变换工具，也是**缩进美化**的途径（如 `busx get SVC OBJ IFACE | busx jq`）。
 - 目的：让 busx **自带 jq**，在任何未装 jq 的环境也能基于 busx 派生脚本；除此之外不引入额外耦合。
@@ -277,7 +276,7 @@ busx call svc /o <TAB> → 列 interface
 | `clap_complete` | `4` | 静态补全脚本生成 |
 | `serde` | `1` | 序列化 |
 | `serde_json` | `1` | type-tagged JSON |
-| `jaq`（`jaq-core`/`jaq-interpret`/`jaq-std`） | `2` | 内嵌 jq |
+| `jaq-core`/`jaq-interpret`/`jaq-std` | `2`（jaq bin 为 3.x，不可作库） | 内嵌 jq 解释器（flag 解析见 §11） |
 | `roxmltree` | `0.20` | 内省 XML 解析 |
 | `thiserror` | `2` | 错误类型 |
 | `anyhow` | `1` | bin 层错误聚合 |
