@@ -1,8 +1,8 @@
 //! `busx` value encoder — busctl-style signature + positional tokens →
 //! [`zvariant::Value`] (spec §7.1).
 //!
-//! The first token is the **signature string**; the remaining tokens are values
-//! laid out positionally per busctl rules:
+//! The **signature string** is passed separately; the value tokens are laid out
+//! positionally per busctl rules:
 //!
 //! - basic type → one value token (`b` accepts `true`/`yes`/`on`/`1` and
 //!   `false`/`no`/`off`/`0`, case-sensitive per busctl).
@@ -52,17 +52,12 @@ impl<'a> Cur<'a> {
     }
 }
 
-/// Parse busctl-style input: `tokens[0]` is the signature, the rest are values.
-pub fn parse(tokens: &[String]) -> Result<Vec<Value<'static>>> {
-    if tokens.is_empty() {
-        return Ok(vec![]);
-    }
-    let sig: Vec<char> = tokens[0].chars().collect();
+/// Parse busctl-style input: `signature` is the type code string and `values`
+/// are the positional value tokens laid out per busctl rules.
+pub fn parse(signature: &str, values: &[String]) -> Result<Vec<Value<'static>>> {
+    let sig: Vec<char> = signature.chars().collect();
+    let mut cur = Cur { toks: values, pos: 0 };
     let mut st = SigStream { chars: &sig, pos: 0 };
-    let mut cur = Cur {
-        toks: &tokens[1..],
-        pos: 0,
-    };
 
     let mut out = Vec::new();
     while !st.done() {

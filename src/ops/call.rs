@@ -13,7 +13,8 @@ use zvariant::{Structure, StructureBuilder};
 
 /// Implementation of `busx call`.
 ///
-/// `args[0]` is the busctl-style signature string; the rest are values.
+/// `signature` is the busctl-style type code string; `args` are the positional
+/// value tokens.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     user: bool,
@@ -25,13 +26,14 @@ pub fn run(
     object: &str,
     interface: &str,
     method: &str,
+    signature: &str,
     args: &[String],
 ) -> Result<()> {
     let conn = connect(user, system, address, verbose)?;
     let proxy = zbus::blocking::Proxy::new(&conn, service, object, interface)?;
 
     // Encode the positional args into N `Value`s.
-    let values = crate::value::encode::parse(args)?;
+    let values = crate::value::encode::parse(signature, args)?;
 
     // Build the outgoing body. `Proxy::call_method` wants a `Serialize +
     // DynamicType`; a `Structure` carries the concatenated signature of its
