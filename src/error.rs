@@ -7,6 +7,8 @@ pub enum Error {
     #[error("{0}")]
     Zbus(#[from] zbus::Error),
     #[error("{0}")]
+    Fdo(#[from] zbus::fdo::Error),
+    #[error("{0}")]
     Zvariant(#[from] zvariant::Error),
     #[error("{0}")]
     Io(#[from] std::io::Error),
