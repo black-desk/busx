@@ -40,9 +40,9 @@ once:
 
 - Input follows `busctl` style (signature string + positional args) and **fully
   supports nesting and empty containers** — closing `dbus-send`'s hard gap;
-- Output is always **type-tagged JSON** (every value is `{"type":..,"data":..}`,
-  and monitoring is NDJSON — one object per line), script-friendly and pipeable
-  to `jq` / python;
+- Output is **human-friendly text by default**; `--json` switches to
+  **type-tagged JSON** (every value is `{"type":..,"data":..}`, and monitoring
+  is NDJSON — one object per line), script-friendly and pipeable to `jq` / python;
 - **It does not repeat sd-bus's mistake**: dicts with non-string keys (e.g.
   `a{uu}`) render as `[{"key":..,"value":..}]` instead of crashing (cf.
   systemd#32904);
@@ -53,14 +53,13 @@ once:
 
 ## Features
 
-- `list` — list service names on the bus.
-- `tree` — recursively introspect and draw an object-path tree of a service.
+- `list` — list service names + PID + process (human table, or `--json` array of objects).
+- `tree SVC` — draw the object-path tree of a single service.
 - `introspect` — list an object's interfaces / methods / signals / properties.
-- `call` — call a method (busctl-style input, arbitrary nesting supported).
+- `call SVC OBJ IFACE METHOD SIG ARGS...` — call a method (SIG is a distinct, completable required arg; busctl-style input, arbitrary nesting supported).
 - `get` / `set` — read (no property names = `GetAll`) / write properties.
-- `monitor` — monitor bus messages, filter by match rule, emit NDJSON (with
-  `PropertiesChanged` decoded).
-- `completion` — generate a dynamic shell-completion script.
+- `monitor` — monitor bus messages, filter by match rule (`--json` emits NDJSON with `PropertiesChanged` decoded).
+- `completion` — generate a dynamic shell-completion script (live-completes services/paths/interfaces/methods/signature/properties).
 
 ## Build & install
 
@@ -81,11 +80,11 @@ busx list
 # Introspect an object
 busx introspect org.freedesktop.systemd1 /org/freedesktop/systemd1
 
-# Call a method (busctl-style input: signature string + positional args)
+# Call a method (SIG is a distinct required arg; ListUnits takes no args, so SIG is "")
 busx call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
-  org.freedesktop.systemd1.Manager ListUnits
+  org.freedesktop.systemd1.Manager ListUnits ""
 
-# Nested input (a{sv} containing an array — impossible with dbus-send):
+# Nested input (a{sv} containing an array — impossible with dbus-send; 'a{sv}' is SIG):
 busx call org.example /obj org.example.Iface Method \
   'a{sv}' 1 'hint' 'a' 's' 2 'a' 'b'
 
@@ -93,8 +92,8 @@ busx call org.example /obj org.example.Iface Method \
 busx get org.freedesktop.systemd1 /org/freedesktop/systemd1 \
   org.freedesktop.systemd1.Manager
 
-# Monitor signals, piping to external jq
-busx monitor --signals --interface org.freedesktop.DBus.Properties \
+# Monitor signals; --json emits NDJSON to pipe to external jq
+busx --json monitor --signals --interface org.freedesktop.DBus.Properties \
   --member PropertiesChanged | jq 'select(.args[1] != {})'
 
 # Generate bash completion (once sourced, it live-introspects the bus to
@@ -102,9 +101,11 @@ busx monitor --signals --interface org.freedesktop.DBus.Properties \
 busx completion bash > /etc/bash_completion.d/busx
 ```
 
-Output is always JSON; for pretty-printing or field transformation, pipe to an
-external `jq` / python. All diagnostics (errors, warnings) go to stderr with the
-`busx:` prefix; exit code is `0` on success, `1` on failure.
+Output is human-friendly text by default; `--json` switches to type-tagged JSON
+(`monitor` is NDJSON) — pipe to an external `jq` / python for pretty-printing or
+field transformation. All diagnostics (errors, warnings) go to stderr with the
+`busx:` prefix; exit code is `0` on success, `1` on failure. Piping into
+`less`/`head` does not panic (SIGPIPE is handled the Unix way).
 
 See the [design doc] for details.
 
