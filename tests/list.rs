@@ -44,3 +44,28 @@ fn list_human_shows_table_with_test_service() {
         "missing test service row:\n{stdout}"
     );
 }
+
+/// Overlong service names are truncated (`…`) and every line stays ≤ 80 cols.
+#[test]
+fn list_human_truncates_overlong_names() {
+    let addr = common::bus().address.clone();
+    let out = Command::cargo_bin("busx")
+        .unwrap()
+        .args(["--address", &addr, "list"])
+        .ok()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    const LONG: &str = "org.busx.TestServiceNameThatIsIntentionallyVeryLongSoItExceedsTheNameColumnWidthLimitOfFiftyFour";
+    assert!(stdout.contains('…'), "expected a truncated name:\n{stdout}");
+    assert!(
+        !stdout.contains(LONG),
+        "full overlong name should be truncated, not shown in full:\n{stdout}"
+    );
+    for line in stdout.lines() {
+        assert!(
+            line.chars().count() <= 80,
+            "line is {} cols (> 80): {line}",
+            line.chars().count()
+        );
+    }
+}

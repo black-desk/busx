@@ -112,6 +112,13 @@ pub fn bus() -> &'static TestBus {
             .build()
             .expect("connect test bus");
 
+        // A second, deliberately overlong well-known name so `list` can exercise
+        // its NAME-column truncation.
+        conn.request_name(
+            "org.busx.TestServiceNameThatIsIntentionallyVeryLongSoItExceedsTheNameColumnWidthLimitOfFiftyFour",
+        )
+        .expect("request long name");
+
         TestBus {
             address,
             _conn: conn,
