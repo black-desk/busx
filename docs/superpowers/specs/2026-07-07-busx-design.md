@@ -109,12 +109,11 @@ busx/
 
 ```
 busx [--user | --system | --address=ADDR]   # 默认: session→system 回退
-     [--timeout=DUR]                        # call/属性操作超时，默认 25s
      [--verbose]
      <COMMAND>
 ```
 
-所有命令的成功输出**恒为 JSON**（值用 type-tagged JSON，`monitor` 用 NDJSON）；无需也不提供格式开关。需要缩进美化或字段变换一律 `| busx jq`（见 §11）。
+所有命令的成功输出**恒为 JSON**（值用 type-tagged JSON，`monitor` 用 NDJSON）；无需也不提供格式开关。需要缩进美化或字段变换一律 `| busx jq`（见 §11）。方法调用/属性操作的超时沿用底层库默认（libdbus/zbus 约 25s），不提供 `--timeout` 开关。
 
 子命令：
 
@@ -127,7 +126,7 @@ busx [--user | --system | --address=ADDR]   # 默认: session→system 回退
 | `get` | `busx get SVC OBJ [IFACE] [PROP...]` | 见 §8 重载规则 |
 | `set` | `busx set SVC OBJ IFACE PROP SIG ARGS...` | 写属性 |
 | `monitor` | `busx monitor [SERVICE...] [FILTER...]` | 见 §10 |
-| `jq` | `busx jq <filter> [FILE...]` | 内嵌 jaq，薄 passthrough（见 §11） |
+| `jq` | `busx jq [JQ ARGS...]` | 内嵌 jaq，参数透传（见 §11） |
 | `completion` | `busx completion <SHELL>` | 生成动态补全脚本 |
 
 ## 7. 值格式规范
@@ -192,10 +191,10 @@ busx set SVC OBJ IFACE PROP SIG ARGS...
 
 ### 错误处理
 
-- 所有错误以**纯文本**打到 stderr，前缀 `busx: error:`。
-- 所有命令的成功输出都是 JSON，但**错误不走 JSON**——始终纯文本打到 stderr（jq 只读 stdin，错误不进 jq；看退出码即可）。
+- 所有诊断（错误、警告，如总线回退提示）以**纯文本**打到 stderr，统一前缀 `busx:`（不强制 `error:` 子串，留余地给 `busx: warning:` 之类）。
+- 所有命令的成功输出都是 JSON，但**诊断不走 JSON**——始终纯文本到 stderr（jq 只读 stdin，诊断不进 jq；看退出码即可）。
 - D-Bus error reply 原样保留错误名与消息，如：
-  `busx: error: org.freedesktop.DBus.Error.ServiceUnknown: Name has no owner`。
+  `busx: org.freedesktop.DBus.Error.ServiceUnknown: Name has no owner`。
 
 ### 退出码
 
@@ -227,6 +226,7 @@ NDJSON 每条消息对象示例：
 {"type":"signal","sender":":1.5","destination":":1.100","path":"/org/foo",
  "interface":"org.freedesktop.DBus.Properties","member":"PropertiesChanged",
  "serial":47,"reply_serial":null,"error":null,
+ "signature":"sa{sv}as","flags":[],
  "ts":1720000000.123456,
  "args":[
    {"type":"s","data":"org.foo.Iface"},
@@ -235,14 +235,16 @@ NDJSON 每条消息对象示例：
  ]}
 ```
 
-字段说明：`type`（消息类型）、`sender`/`destination`、`path`/`interface`/`member`、`serial`（本次消息序号）、`reply_serial`（仅 method_return/error，关联的 call 序号）、`error`（仅 error 类型，错误名）、`ts`（收到时刻，epoch 秒浮点）、`args`（按位置的 type-tagged 值数组）。
+字段说明：`type`（消息类型）、`sender`/`destination`、`path`/`interface`/`member`、`serial`（本次消息序号）、`reply_serial`（仅 method_return/error，关联的 call 序号）、`error`（仅 error 类型，错误名）、`signature`（body 签名串）、`flags`（消息标志，如 `no_reply_expected`/`no_auto_start`，无则 `[]`）、`ts`（收到时刻，epoch 秒浮点）、`args`（按位置的 type-tagged 值数组）。
+
+**完备性**：此对象覆盖了 D-Bus 消息所有**语义相关**字段（header + 完整解码的 body）。刻意省略的只有无信息量的协议版本号；`h`（文件描述符）类型按本进程收到的 fd 编号渲染（不可移植，仅作占位）。若需逐字节原始报文，用后续的 pcapng `capture`（§15）。
 
 `PropertiesChanged`（`sa{sv}as`）天然落在 `args` 里：`args[0]`=接口名，`args[1]`=变更属性 dict（`a{sv}` 已展开），`args[2]`=失效属性名列表。脚本可直接据 `member=="PropertiesChanged"` 过滤后取 `args[1]` 处理。
 
 ## 11. busx jq（内嵌 jaq）
 
-- 形式：`busx jq <filter> [FILE...]`，行为对齐 `jq`：无 FILE 则读 stdin，应用 filter，输出结果。
-- 实现：薄 passthrough 到 `jaq`（`jaq-core`/`jaq-interpret`/`jaq-std`）。支持 jq 常用 flag（`-r`/`-c`/`-n`/`-s`/`-e`/`--arg`/`--slurpfile` 等）。
+- 形式：`busx jq` **透传后续全部命令行参数**（clap 不解析 jq 的 flag，用 `trailing_var_arg` + `allow_hyphen_values` 原样收集），行为对齐 `jq`/`jaq`：无 FILE 则读 stdin，应用 filter，输出结果。用户写什么、jaq 认什么。
+- 实现：基于 `jaq`（`jaq-core`/`jaq-interpret`/`jaq-std`）。jaq 的 CLI 解析器未作为库发布，故 flag 透传的具体落地在实现阶段定（优先复用 jaq 能力，必要时镜像 jq 稳定 flag 集）；用户侧契约不变：`busx jq` 接受 `jq` 接受的那些参数。
 - **不做** type-tag 解包等特殊处理：用户直接对 busx 输出的 JSON 写 jq 表达式（如 `busx monitor | busx jq 'select(.member=="PropertiesChanged") | .args[1]'`）。
 - 由于 busx 输出恒为 JSON，`busx jq` 既是查询/变换工具，也是**缩进美化**的途径（如 `busx get SVC OBJ IFACE | busx jq`）。
 - 目的：让 busx **自带 jq**，在任何未装 jq 的环境也能基于 busx 派生脚本；除此之外不引入额外耦合。
@@ -259,7 +261,7 @@ busx call svc /o <TAB> → 列 interface
 ... method <TAB>       → 据内省入参签名，逐 token 引导（键/类型/值）
 ```
 
-内省有缓存以避免每次按键都打总线。补全失败（如未连总线）静默退化为不补，不影响主命令。
+每次补全都**实时内省总线，不缓存**。补全失败（如未连总线）静默退化为不补，不影响主命令。
 
 ## 13. 依赖
 
@@ -278,18 +280,19 @@ busx call svc /o <TAB> → 列 interface
 | `thiserror` | `2` | 错误类型 |
 | `anyhow` | `1` | bin 层错误聚合 |
 
+开发依赖（`[dev-dependencies]`）：`assert_cmd`、`predicates`。集成测试另需系统装有 `dbus-daemon` 二进制。
+
 实现阶段以 `cargo add` 时解析到的最新兼容版本为准。
 
 ## 14. 测试策略
 
-- **单测（lib）**：
-  - 值编解码往返：覆盖嵌套 variant、`a{sv}`、struct、空容器、**非 string 键 dict（`a{uv}`/`a{ys}`）**，断言无崩溃且无损。
-  - 内省 XML 解析：典型 introspection XML → 结构化接口/成员树。
-  - 入参文本解析：busctl 风格各类型 token → `Value`。
-- **集成测试**：
-  - 真实 session bus + 进程内小 zbus 测试服务，覆盖 `call`（含嵌套入参）、`get`（`GetAll`/`Get`）、`monitor`（含触发 `PropertiesChanged`）。
-  - 默认总线回退逻辑（构造无 session 环境，断言回退 system）。
-- **补全**：冒烟测试 `__complete` 对固定总线的候选输出。
+**只做集成测试，不做单元测试。**
+
+- 每个集成测试用例**另起一条独立消息总线**：spawn `dbus-daemon --session --print-address` 取其地址，进程内用 zbus 注册一个小测试服务（暴露含嵌套类型 / 属性 / 信号 / 非 string 键 dict 的接口）。
+- 用 [`assert_cmd`](https://crates.io/crates/assert_cmd) 以子进程方式驱动 `busx` 二进制，通过 `--address=<该总线地址>` 指向测试总线，断言 stdout（type-tagged JSON / NDJSON）与退出码。
+- 覆盖：`list`/`tree`/`introspect`/`call`（含嵌套入参）/`get`（`GetAll`/`Get`）/`set`/`monitor`（含触发 `PropertiesChanged` 与非 string 键 dict，断言不崩溃）/`jq`/`completion`。
+- 默认总线 session→system 回退：构造无 session 环境的用例断言回退。
+- CI 需安装 `dbus-daemon`（如 Debian 系 `apt install dbus`）。
 
 ## 15. 路线图（后续阶段，不在 v1）
 
