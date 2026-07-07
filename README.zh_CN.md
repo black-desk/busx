@@ -1,99 +1,126 @@
 <!--
-SPDX-FileCopyrightText: 2025 Chen Linxuan <me@black-desk.cn>
+SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 
 SPDX-License-Identifier: MIT
 -->
 
-<!-- TODO: 更新项目名称 -->
-
-# 模版
+# busx
 
 [![checks][badge-shields-io-checks]][actions]
 [![commit activity][badge-shields-io-commit-activity]][commits]
 [![contributors][badge-shields-io-contributors]][contributors]
 [![release date][badge-shields-io-release-date]][releases]
 ![commits since release][badge-shields-io-commits-since-release]
-[![codecov][badge-shields-io-codecov]][codecov]
-
-<!-- TODO: 更新项目链接 -->
 
 [badge-shields-io-checks]:
-  https://img.shields.io/github/check-runs/black-desk/template/master
-
-<!-- TODO: 更新项目链接 -->
-
-[actions]: https://github.com/black-desk/template/actions
-
-<!-- TODO: 更新项目链接 -->
-
+  https://img.shields.io/github/check-runs/black-desk/busx/master
+[actions]: https://github.com/black-desk/busx/actions
 [badge-shields-io-commit-activity]:
-  https://img.shields.io/github/commit-activity/w/black-desk/template/master
-
-<!-- TODO: 更新项目链接 -->
-
-[commits]: https://github.com/black-desk/template/commits/master
-
-<!-- TODO: 更新项目链接 -->
-
+  https://img.shields.io/github/commit-activity/w/black-desk/busx/master
+[commits]: https://github.com/black-desk/busx/commits/master
 [badge-shields-io-contributors]:
-  https://img.shields.io/github/contributors/black-desk/template
-
-<!-- TODO: 更新项目链接 -->
-
-[contributors]: https://github.com/black-desk/template/graphs/contributors
-
-<!-- TODO: 更新项目链接 -->
-
+  https://img.shields.io/github/contributors/black-desk/busx
+[contributors]: https://github.com/black-desk/busx/graphs/contributors
 [badge-shields-io-release-date]:
-  https://img.shields.io/github/release-date/black-desk/template
-
-<!-- TODO: 更新项目链接 -->
-
-[releases]: https://github.com/black-desk/template/releases
-
-<!-- TODO: 更新项目链接 -->
-
+  https://img.shields.io/github/release-date/black-desk/busx
+[releases]: https://github.com/black-desk/busx/releases
 [badge-shields-io-commits-since-release]:
-  https://img.shields.io/github/commits-since/black-desk/template/latest
-
-<!-- TODO: 更新项目链接 -->
-
-[badge-shields-io-codecov]:
-  https://codecov.io/github/black-desk/template/graph/badge.svg?token=6TSVGQ4L9X
-[codecov]: https://codecov.io/github/black-desk/template
+  https://img.shields.io/github/commits-since/black-desk/busx/latest
 
 [en](README.md) | zh_CN
 
-<!-- TODO: 添加项目简介 -->
+`busx` 是一个用 Rust（基于 [zbus]）实现的 D-Bus 命令行工具，目标是替代
+`dbus-send` / `busctl` / `qdbus` 三件套，把它们各自的痛点一次性补齐：
 
-## 使用
+- 入参采用 `busctl` 风格（签名串 + 位置参数），**完整支持嵌套与空容器**
+  ——补齐 `dbus-send` 的硬伤；
+- 输出统一为**带类型标签的 JSON**（值恒为 `{"type":..,"data":..}`，监听为
+  每行一个对象的 NDJSON），对脚本友好，可直接管道到 `jq` / python；
+- **不会重蹈 sd-bus 的覆辙**：非 string 键的 dict（如 `a{uu}`）正常渲染成
+  `[{"key":..,"value":..}]`，绝不崩溃（对比 systemd#32904）；
+- 自带**动态 shell 补全**（bash/zsh），实时内省总线；
+- **单二进制、零运行时依赖**（纯 Rust，不依赖 libdbus）。
 
-<!-- TODO: 添加项目使用说明 -->
+[zbus]: https://crates.io/crates/zbus
 
-1. 使用gh，从模版创建仓库：
+## 功能
 
-   ```bash
-   gh repo create --public --template black-desk/template
-   ```
+- `list` —— 列出总线上的服务名。
+- `tree` —— 递归内省，画出服务的对象路径树。
+- `introspect` —— 列出对象的接口 / 方法 / 信号 / 属性。
+- `call` —— 调用方法（入参 busctl 风格，支持任意嵌套）。
+- `get` / `set` —— 读取（不传属性名走 `GetAll`）/ 写入属性。
+- `monitor` —— 监听总线消息，按 match rule 过滤，输出 NDJSON（含
+  `PropertiesChanged` 解码）。
+- `completion` —— 生成动态 shell 补全脚本。
 
-2. 编辑项目文件，填充内容后移除所有的`TODO`。
+## 安装与构建
 
-3. 运行检查脚本，确定所有`TODO`均已被移除：
+需要 Rust 工具链与一个 D-Bus 环境（仅 Linux）。系统需装有 `dbus-daemon`
+（运行/测试时用）。
 
-   ```bash
-   ./scripts/ls-todo.sh
-   ```
+```bash
+cargo build --release        # 产物在 target/release/busx
+cargo install --path .       # 或直接安装到 ~/.cargo/bin
+```
+
+## 用法
+
+```bash
+# 列服务（默认连 session bus，连不上自动回退 system bus）
+busx list
+
+# 内省某个对象
+busx introspect org.freedesktop.systemd1 /org/freedesktop/systemd1
+
+# 调方法（入参 busctl 风格：签名串 + 位置参数）
+busx call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
+  org.freedesktop.systemd1.Manager ListUnits
+
+# 嵌套入参（dbus-send 做不到的 a{sv} 内含数组）：
+busx call org.example /obj org.example.Iface Method \
+  'a{sv}' 1 'hint' 'a' 's' 2 'a' 'b'
+
+# 读属性（不传属性名 = GetAll）
+busx get org.freedesktop.systemd1 /org/freedesktop/systemd1 \
+  org.freedesktop.systemd1.Manager
+
+# 监听信号，管道到外部 jq 处理
+busx monitor --signals --interface org.freedesktop.DBus.Properties \
+  --member PropertiesChanged | jq 'select(.args[1] != {})'
+
+# 生成 bash 补全（写入后会实时内省总线补全服务/路径/接口/方法）
+busx completion bash > /etc/bash_completion.d/busx
+```
+
+输出恒为 JSON；需要缩进美化或字段变换，管道到外部 `jq` / python 等。
+所有诊断（错误、警告）打到 stderr，前缀 `busx:`；退出码 `0` 成功 / `1`
+失败。
+
+更多设计细节见 [设计文档]。
+
+[设计文档]: docs/superpowers/specs/2026-07-07-busx-design.md
+
+## 路线图
+
+1. **TUI**：基于本 crate 的模块（加第二个 `[[bin]]` 或届时抽 lib），提供交互式
+   浏览 / call / monitor；支持 `copy as dbus-send / busctl / gdbus`。
+2. `emit`（发信号）、pcapng `capture`。
+3. `--host` / `--machine` 远程与容器总线。
+4. `ay` 的 bytestring 字符串视图等值渲染增强。
+5. 若 `jaq` 将来发布可复用的「flag 解析 + 运行」库入口，重新评估内嵌
+   `busx jq` 子命令。
 
 ## 许可证
 
-如无特殊说明，该项目的代码以GNU通用公共许可协议第三版或任何更新的版本开源，文档、配置文件以及开发维护过程中使用的脚本等以MIT许可证开源。
+如无特殊说明，该项目的代码以 GNU 通用公共许可协议第三版或任何更新的版本
+开源，文档、配置文件以及开发维护过程中使用的脚本等以 MIT 许可证开源。
 
-该项目遵守[REUSE规范]。
-
-你可以使用[reuse-tool](https://github.com/fsfe/reuse-tool)生成这个项目的SPDX列表：
+该项目遵守 [REUSE 规范]。你可以使用
+[reuse-tool](https://github.com/fsfe/reuse-tool) 生成这个项目的 SPDX 列表：
 
 ```bash
 reuse spdx
 ```
 
-[REUSE规范]: https://reuse.software/spec-3.3/
+[REUSE 规范]: https://reuse.software/spec-3.3/
