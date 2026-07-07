@@ -20,6 +20,7 @@ pub fn run(
     system: bool,
     address: Option<&str>,
     verbose: bool,
+    json: bool,
     service: &str,
     object: &str,
     interface: &str,
@@ -51,17 +52,20 @@ pub fn run(
     // Structure>()` accepts any body signature (wrapping a single value in a
     // one-field struct), so it works for 0/1/N return values uniformly.
     let body = reply.body();
-    let out: Vec<_> = if body.is_empty() {
+    let fields: Vec<zvariant::Value<'_>> = if body.is_empty() {
         Vec::new()
     } else {
         let structure: Structure = body.deserialize()?;
-        structure
-            .fields()
-            .iter()
-            .map(crate::value::decode::to_tagged)
-            .collect()
+        structure.fields().to_vec()
     };
 
-    crate::out::print_json(&json!(out));
+    if json {
+        let out: Vec<_> = fields.iter().map(crate::value::decode::to_tagged).collect();
+        crate::out::print_json(&json!(out));
+    } else {
+        for f in &fields {
+            println!("{}  {}", f.value_signature(), crate::value::pretty::pretty(f));
+        }
+    }
     Ok(())
 }

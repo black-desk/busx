@@ -8,6 +8,7 @@ fn getall_returns_tagged_json() {
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
+            "--json",
             "--address",
             &addr,
             "get",
@@ -62,6 +63,7 @@ fn get_single_property() {
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
+            "--json",
             "--address",
             &addr,
             "get",
@@ -77,4 +79,29 @@ fn get_single_property() {
     assert_eq!(arr.len(), 1);
     assert_eq!(arr[0]["type"], "s");
     assert_eq!(arr[0]["data"], "busx-test");
+}
+
+/// Human `get` (single property) prints `<type>  <pretty value>` — e.g.
+/// `d  0.5` for the fixture's `volume`.
+#[test]
+fn get_single_property_human() {
+    let addr = common::bus().address.clone();
+    let out = Command::cargo_bin("busx")
+        .unwrap()
+        .args([
+            "--address",
+            &addr,
+            "get",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "volume",
+        ])
+        .ok()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("d  0.5"),
+        "expected `d  0.5` in human output:\n{stdout}"
+    );
 }

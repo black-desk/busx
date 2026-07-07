@@ -59,6 +59,7 @@ pub fn run(
     system: bool,
     address: Option<&str>,
     verbose: bool,
+    json: bool,
     services: &[String],
 ) -> Result<()> {
     let conn = connect(user, system, address, verbose)?;
@@ -73,15 +74,27 @@ pub fn run(
         services.to_vec()
     };
 
-    let mut tree = serde_json::Map::new();
-    for svc in services {
-        let mut paths = Vec::new();
-        // A service that vanishes mid-walk, or that refuses introspection at
-        // `/`, shouldn't abort the whole command — its entry is just left empty.
-        let _ = walk(&conn, &svc, "/", &mut paths);
-        paths.sort();
-        tree.insert(svc, json!(paths));
+    if json {
+        let mut tree = serde_json::Map::new();
+        for svc in &services {
+            let mut paths = Vec::new();
+            // A service that vanishes mid-walk, or that refuses introspection at
+            // `/`, shouldn't abort the whole command — its entry is just left empty.
+            let _ = walk(&conn, svc, "/", &mut paths);
+            paths.sort();
+            tree.insert(svc.clone(), json!(paths));
+        }
+        crate::out::print_json(&json!(tree));
+    } else {
+        for svc in &services {
+            let mut paths = Vec::new();
+            let _ = walk(&conn, svc, "/", &mut paths);
+            paths.sort();
+            println!("{svc}");
+            for p in &paths {
+                println!("└─ {p}");
+            }
+        }
     }
-    crate::out::print_json(&json!(tree));
     Ok(())
 }

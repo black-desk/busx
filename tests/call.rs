@@ -8,6 +8,7 @@ fn call_with_string_array_encodes_and_returns() {
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
+            "--json",
             "--address",
             &addr,
             "call",
@@ -34,6 +35,7 @@ fn call_with_dict_of_variant_encodes() {
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
+            "--json",
             "--address",
             &addr,
             "call",
@@ -65,6 +67,7 @@ fn call_with_multi_entry_dict_encodes() {
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
+            "--json",
             "--address",
             &addr,
             "call",
@@ -86,4 +89,34 @@ fn call_with_multi_entry_dict_encodes() {
     let v: Value = serde_json::from_slice(&out.stdout).expect("valid json");
     assert_eq!(v[0]["type"], "u");
     assert_eq!(v[0]["data"], 2, "two entries should be counted: {v}");
+}
+
+/// Human `call` output: one line per return value as `<type>  <pretty value>`.
+/// `Join(["a","b","c"])` returns `"a-b-c"`, rendered `s  "a-b-c"`.
+#[test]
+fn call_human_prints_type_and_pretty_value() {
+    let addr = common::bus().address.clone();
+    let out = Command::cargo_bin("busx")
+        .unwrap()
+        .args([
+            "--address",
+            &addr,
+            "call",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "Join",
+            "as",
+            "3",
+            "a",
+            "b",
+            "c",
+        ])
+        .ok()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("s  \"a-b-c\""),
+        "expected `s  \"a-b-c\"` in human output:\n{stdout}"
+    );
 }

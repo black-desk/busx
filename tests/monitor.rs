@@ -21,6 +21,7 @@ fn monitor_emits_propertieschanged() {
     // if the signal is missed (it should never fire in the happy path).
     let child = Command::new(cargo_bin!("busx"))
         .args([
+            "--json",
             "--address",
             &addr,
             "monitor",
@@ -91,4 +92,73 @@ fn monitor_emits_propertieschanged() {
 
     // Only one line because of --limit-messages 1.
     assert_eq!(lines.len(), 1, "expected exactly one line:\n{stdout}");
+}
+
+/// Human `monitor` (no `--json`) emits a multi-line block per message instead
+/// of NDJSON: the first line names the type, the second carries member/serial,
+/// then each body argument. `set` triggers a `PropertiesChanged` signal.
+#[test]
+fn monitor_human_emits_block() {
+    let addr = common::bus().address.clone();
+
+    let child = Command::new(cargo_bin!("busx"))
+        .args([
+            "--address",
+            &addr,
+            "monitor",
+            "--signals",
+            "--interface",
+            "org.freedesktop.DBus.Properties",
+            "--member",
+            "PropertiesChanged",
+            "--limit-messages",
+            "1",
+            "--timeout",
+            "10s",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn monitor");
+
+    thread::sleep(Duration::from_millis(800));
+
+    let trigger = Command::new(cargo_bin!("busx"))
+        .args([
+            "--address",
+            &addr,
+            "set",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "volume",
+            "d",
+            "0.5",
+        ])
+        .status()
+        .expect("trigger set");
+    assert!(trigger.success(), "set volume call failed");
+
+    let out = child.wait_with_output().expect("monitor exit");
+    assert!(out.status.success(), "monitor failed: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    // The block must NOT be JSON (no leading `{`) and must carry the signal's
+    // identity fields. The first non-empty line names the message type.
+    let first_line = stdout.lines().next().unwrap_or("");
+    assert!(
+        first_line.starts_with("signal"),
+        "human block should start with `signal`:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("member=PropertiesChanged"),
+        "missing member line:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("org.busx.Test"),
+        "missing changed interface in body:\n{stdout}"
+    );
+    assert!(
+        !stdout.trim_start().starts_with('{'),
+        "human mode must not emit JSON:\n{stdout}"
+    );
 }

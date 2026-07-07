@@ -25,6 +25,7 @@ fn set_then_get_roundtrips() {
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
+            "--json",
             "--address",
             &addr,
             "get",
