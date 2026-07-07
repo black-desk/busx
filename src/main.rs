@@ -82,7 +82,31 @@ fn run(cli: Cli) -> error::Result<()> {
             cli.verbose,
             &services,
         ),
-        Command::Monitor { .. } => Err(error::Error::Msg("not yet implemented".into())),
+        Command::Monitor {
+            services,
+            interface,
+            member,
+            path,
+            sender,
+            r#match,
+            signals,
+            limit_messages,
+            timeout,
+        } => ops::monitor::run(
+            cli.user,
+            cli.system,
+            cli.address.as_deref(),
+            cli.verbose,
+            services,
+            interface,
+            member,
+            path,
+            sender,
+            r#match,
+            signals,
+            limit_messages,
+            timeout.as_deref(),
+        ),
         Command::Completion { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), "busx", &mut std::io::stdout());
             Ok(())
