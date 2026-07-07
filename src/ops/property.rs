@@ -71,8 +71,8 @@ pub fn get(
 /// Implementation of `busx set`.
 ///
 /// `signature` is the busctl-style type code of the single value; `value_tokens`
-/// are the positional value tokens. Both are routed through the shared encoder
-/// (which expects the signature as its first token), and the resulting value is
+/// are the positional value tokens. Both are routed through the shared encoder,
+/// and the resulting value is
 /// written via `org.freedesktop.DBus.Properties.Set`. The peer emits
 /// `PropertiesChanged` as a side effect (when the property is annotated
 /// `emits_changed_signal`).
@@ -92,11 +92,9 @@ pub fn set(
     let conn = connect(user, system, address, verbose)?;
     let proxy = PropertiesProxy::new(&conn, service, object)?;
 
-    // Build the value via the shared encoder: first token is the signature,
-    // the rest are value tokens.
-    let mut tokens = vec![signature.to_string()];
-    tokens.extend(value_tokens.iter().cloned());
-    let mut parsed = crate::value::encode::parse(&tokens)?;
+    // Build the value via the shared encoder: `signature` and the value tokens
+    // are passed separately.
+    let mut parsed = crate::value::encode::parse(signature, value_tokens)?;
     let value = parsed
         .pop()
         .ok_or_else(|| crate::error::Error::Msg("set: missing value".into()))?;

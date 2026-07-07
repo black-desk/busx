@@ -112,6 +112,7 @@ fn command() -> Command {
                 .arg(positional("object", Path))
                 .arg(positional("interface", Interface))
                 .arg(positional("method", Method))
+                .arg(positional("signature", Signature))
                 .arg(positional_vec("args", None)),
             subcommand("get")
                 .arg(positional("service", Service))
@@ -147,13 +148,14 @@ fn command() -> Command {
 }
 
 /// The "kind" of bus value a positional holds. `None` ⇒ no dynamic completion
-/// (e.g. method args, signatures, property values — out of scope for v1).
+/// (e.g. method args, property values — out of scope for v1).
 #[derive(Clone, Copy)]
 enum Kind {
     Service,
     Path,
     Interface,
     Method,
+    Signature,
 }
 
 // Short lowercase aliases read better at the `positional(...)` call sites than
@@ -166,6 +168,8 @@ const Path: Option<Kind> = Some(Kind::Path);
 const Interface: Option<Kind> = Some(Kind::Interface);
 #[allow(non_upper_case_globals)]
 const Method: Option<Kind> = Some(Kind::Method);
+#[allow(non_upper_case_globals)]
+const Signature: Option<Kind> = Some(Kind::Signature);
 
 fn subcommand(name: &'static str) -> Command {
     Command::new(name).about(match name {
@@ -217,6 +221,7 @@ fn attach(arg: Arg, kind: Option<Kind>) -> Arg {
         Some(Kind::Path) => arg.add(ArgValueCompleter::new(complete_path)),
         Some(Kind::Interface) => arg.add(ArgValueCompleter::new(complete_interface)),
         Some(Kind::Method) => arg.add(ArgValueCompleter::new(complete_method)),
+        Some(Kind::Signature) => arg.add(ArgValueCompleter::new(complete_signature)),
         None => arg,
     }
 }
@@ -239,6 +244,12 @@ fn complete_interface(current: &OsStr) -> Vec<CompletionCandidate> {
 /// Completer fn for the method positional.
 fn complete_method(current: &OsStr) -> Vec<CompletionCandidate> {
     complete_positional(Kind::Method, current)
+}
+
+/// Completer fn for the signature positional of `call`. Returns the method's
+/// input signature (a single candidate), filtered by the partial token.
+fn complete_signature(current: &OsStr) -> Vec<CompletionCandidate> {
+    complete_positional(Kind::Signature, current)
 }
 
 /// The per-positional dynamic completer. Reads the bus flags + filled
@@ -396,6 +407,9 @@ fn positional_candidates(
             interface_names(conn, nth(0), nth(1), partial)
         }
         ("call", Kind::Method) => method_names(conn, nth(0), nth(1), nth(2), partial),
+        ("call", Kind::Signature) => method_input_signature_candidates(
+            conn, nth(0), nth(1), nth(2), nth(3), partial,
+        ),
         _ => Ok(Vec::new()),
     }
 }
@@ -467,6 +481,39 @@ fn method_names(
     Ok(names)
 }
 
+/// The input signature of `method` on `interface` (`service` at `object`), as a
+/// single-candidate completion list filtered by the partial token. For a no-arg
+/// method the signature is `""`, which is returned as-is so the user can accept
+/// it.
+fn method_input_signature_candidates(
+    conn: &Connection,
+    service: &str,
+    object: &str,
+    interface: &str,
+    method: &str,
+    partial: &str,
+) -> Result<Vec<String>> {
+    match method_input_signature(conn, service, object, interface, method) {
+        Some(sig) if sig.starts_with(partial) => Ok(vec![sig]),
+        _ => Ok(Vec::new()),
+    }
+}
+
+/// Best-effort: introspect `object`, find `<interface name=interface>`, find its
+/// `<method name=method>`, and concatenate the `type` of every
+/// `<arg direction="in">` child into one signature string. Returns `None` on any
+/// error or if the method is not found.
+fn method_input_signature(
+    conn: &Connection,
+    service: &str,
+    object: &str,
+    interface: &str,
+    method: &str,
+) -> Option<String> {
+    let xml = introspect_xml(conn, service, object).ok()?;
+    parse_method_input_signature(&xml, interface, method)
+}
+
 /// Call `Introspect` on `service` at `path`, returning the raw XML.
 ///
 /// The dedicated `IntrospectableProxy` hard-codes `default_path = "/"`, so it
@@ -519,6 +566,27 @@ fn parse_interface_methods(xml: &str, interface: &str) -> Vec<String> {
                 .filter_map(|n| n.attribute("name").map(|s| s.to_string()))
         })
         .collect()
+}
+
+/// Concatenate the `type` attribute of every `<arg direction="in">` child of the
+/// named `<method>` in the named `<interface>`. Returns `None` if the document
+/// can't be parsed or the method is absent; returns `Some("")` for a method that
+/// takes no input args.
+fn parse_method_input_signature(xml: &str, interface: &str, method: &str) -> Option<String> {
+    let doc = parse_doc(xml)?;
+    let iface = doc
+        .root_element()
+        .children()
+        .find(|n| n.has_tag_name("interface") && n.attribute("name") == Some(interface))?;
+    let m = iface
+        .children()
+        .find(|n| n.has_tag_name("method") && n.attribute("name") == Some(method))?;
+    let sig: String = m
+        .children()
+        .filter(|n| n.has_tag_name("arg") && n.attribute("direction") == Some("in"))
+        .filter_map(|n| n.attribute("type").map(|s| s.to_string()))
+        .collect();
+    Some(sig)
 }
 
 /// Parse introspection XML with DTD support (zbus XML ships a `<!DOCTYPE>`).

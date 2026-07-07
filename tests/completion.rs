@@ -185,6 +185,90 @@ fn complete_method_position_lists_methods() {
     );
 }
 
+// === Signature completion (call's signature positional) =====================
+
+/// Signature position: completing the signature of `Join` returns its input
+/// signature `as`.
+#[test]
+fn complete_signature_position_returns_join_input_sig() {
+    let addr = common::bus().address.clone();
+    // words: busx(0) --address(1) <addr>(2) call(3) svc(4) obj(5) iface(6)
+    //        Join(7) ""(8) ; cursor on the empty signature slot.
+    let out = complete_bash(
+        &[
+            "busx",
+            "--address",
+            &addr,
+            "call",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "Join",
+            "",
+        ],
+        8,
+    );
+    assert!(
+        out.lines().any(|l| l == "as"),
+        "signature candidate `as` missing:\n{out}"
+    );
+}
+
+/// Signature position: completing the signature of `TakeHints` returns its input
+/// signature `a{sv}`.
+#[test]
+fn complete_signature_position_returns_takehints_input_sig() {
+    let addr = common::bus().address.clone();
+    let out = complete_bash(
+        &[
+            "busx",
+            "--address",
+            &addr,
+            "call",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "TakeHints",
+            "",
+        ],
+        8,
+    );
+    assert!(
+        out.lines().any(|l| l == "a{sv}"),
+        "signature candidate `a{{sv}}` missing:\n{out}"
+    );
+}
+
+/// Signature position: a no-arg method (`BumpVolume`) yields the empty
+/// signature. No real signature (e.g. `as`, `a{sv}`) should be offered. The
+/// empty candidate itself is `""`; clap_complete may also surface the global
+/// flags at an empty position, which is harmless structural behavior.
+#[test]
+fn complete_signature_position_no_arg_method_is_empty() {
+    let addr = common::bus().address.clone();
+    let out = complete_bash(
+        &[
+            "busx",
+            "--address",
+            &addr,
+            "call",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "BumpVolume",
+            "",
+        ],
+        8,
+    );
+    // No real (type-code) signature candidate should be offered for a no-arg
+    // method. Flags may legitimately appear; filter them out.
+    let sigs: Vec<&str> = out.lines().filter(|l| !l.is_empty() && !l.starts_with('-')).collect();
+    assert!(
+        sigs.is_empty(),
+        "unexpected signature candidate(s) for no-arg method:\n{out}"
+    );
+}
+
 // === Robustness ============================================================
 
 /// Completion never fails the command even when the bus is unreachable: an

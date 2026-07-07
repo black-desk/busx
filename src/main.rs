@@ -56,7 +56,7 @@ fn run(cli: Cli) -> error::Result<()> {
             interface.as_deref(),
             &props,
         ),
-        Command::Call { service, object, interface, method, args } => ops::call::run(
+        Command::Call { service, object, interface, method, signature, args } => ops::call::run(
             cli.user,
             cli.system,
             cli.address.as_deref(),
@@ -66,6 +66,7 @@ fn run(cli: Cli) -> error::Result<()> {
             &object,
             &interface,
             &method,
+            &signature,
             &args,
         ),
         Command::Set { service, object, interface, property, signature, value } => {

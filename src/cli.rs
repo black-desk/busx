@@ -29,7 +29,14 @@ pub enum Command {
     /// Show interfaces/methods/signals/properties of an object.
     Introspect { service: String, object: String, interface: Option<String> },
     /// Call a method.
-    Call { service: String, object: String, interface: String, method: String, args: Vec<String> },
+    Call {
+        service: String,
+        object: String,
+        interface: String,
+        method: String,
+        signature: String,
+        args: Vec<String>,
+    },
     /// Get properties (no property names => GetAll).
     Get { service: String, object: String, interface: Option<String>, props: Vec<String> },
     /// Set a property.
