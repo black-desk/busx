@@ -102,7 +102,7 @@ fn command() -> Command {
         .arg(global("json", "Emit type-tagged JSON (default: human text)"))
         .subcommands([
             subcommand("list").arg(flag("unique")).arg(flag("acquired")).arg(flag("activatable")),
-            subcommand("tree").arg(positional_vec("services", Service)),
+            subcommand("tree").arg(positional("service", Service)),
             subcommand("introspect")
                 .arg(positional("service", Service))
                 .arg(positional("object", Path))
@@ -177,7 +177,7 @@ const Property: Option<Kind> = Some(Kind::Property);
 fn subcommand(name: &'static str) -> Command {
     Command::new(name).about(match name {
         "list" => "List service names on the bus",
-        "tree" => "Show the object path tree of services",
+        "tree" => "Show the object path tree of a service",
         "introspect" => "Show interfaces/methods/signals/properties of an object",
         "call" => "Call a method",
         "get" => "Get properties",
