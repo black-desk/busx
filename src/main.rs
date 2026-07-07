@@ -103,13 +103,13 @@ fn run(cli: Cli) -> error::Result<()> {
             &object,
             interface.as_deref(),
         ),
-        Command::Tree { services } => ops::tree::run(
+        Command::Tree { service } => ops::tree::run(
             cli.user,
             cli.system,
             cli.address.as_deref(),
             cli.verbose,
             cli.json,
-            &services,
+            &service,
         ),
         Command::Monitor {
             services,

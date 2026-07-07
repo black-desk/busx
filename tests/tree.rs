@@ -22,6 +22,27 @@ fn tree_of_test_service_lists_paths() {
     );
 }
 
+/// `tree` now requires exactly one service: no service → usage error.
+#[test]
+fn tree_requires_a_service() {
+    Command::cargo_bin("busx")
+        .unwrap()
+        .args(["tree"])
+        .assert()
+        .failure();
+}
+
+/// `tree` rejects more than one service.
+#[test]
+fn tree_rejects_multiple_services() {
+    let addr = common::bus().address.clone();
+    Command::cargo_bin("busx")
+        .unwrap()
+        .args(["--address", &addr, "tree", "org.busx.Test", "org.busx.Test"])
+        .assert()
+        .failure();
+}
+
 /// Human tree output: service name on its own line, each path beneath.
 #[test]
 fn tree_human_shows_service_and_paths() {

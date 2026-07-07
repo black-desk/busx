@@ -24,8 +24,8 @@ pub struct Cli {
 pub enum Command {
     /// List service names on the bus.
     List { #[arg(long)] unique: bool, #[arg(long)] acquired: bool, #[arg(long)] activatable: bool },
-    /// Show the object path tree of services.
-    Tree { services: Vec<String> },
+    /// Show the object path tree of a service.
+    Tree { service: String },
     /// Show interfaces/methods/signals/properties of an object.
     Introspect { service: String, object: String, interface: Option<String> },
     /// Call a method.

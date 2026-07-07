@@ -50,50 +50,33 @@ fn walk(conn: &Connection, service: &str, path: &str, out: &mut Vec<String>) -> 
     Ok(())
 }
 
-/// Implementation of `busx tree [SERVICE...]`.
+/// Implementation of `busx tree SERVICE`.
 ///
-/// With no services the walk runs over every well-known (non-unique) name on
-/// the bus; otherwise it runs over exactly the names given.
+/// Recursively walks the single given service from `/`, collecting every
+/// object path it exposes.
 pub fn run(
     user: bool,
     system: bool,
     address: Option<&str>,
     verbose: bool,
     json: bool,
-    services: &[String],
+    service: &str,
 ) -> Result<()> {
     let conn = connect(user, system, address, verbose)?;
-    let services: Vec<String> = if services.is_empty() {
-        zbus::blocking::fdo::DBusProxy::new(&conn)?
-            .list_names()?
-            .into_iter()
-            .filter(|n| !n.starts_with(':'))
-            .map(|n| n.to_string())
-            .collect()
-    } else {
-        services.to_vec()
-    };
+    let mut paths = Vec::new();
+    // A service that refuses introspection at `/` just yields an empty tree
+    // rather than aborting.
+    let _ = walk(&conn, service, "/", &mut paths);
+    paths.sort();
 
     if json {
         let mut tree = serde_json::Map::new();
-        for svc in &services {
-            let mut paths = Vec::new();
-            // A service that vanishes mid-walk, or that refuses introspection at
-            // `/`, shouldn't abort the whole command — its entry is just left empty.
-            let _ = walk(&conn, svc, "/", &mut paths);
-            paths.sort();
-            tree.insert(svc.clone(), json!(paths));
-        }
+        tree.insert(service.to_string(), json!(paths));
         crate::out::print_json(&json!(tree));
     } else {
-        for svc in &services {
-            let mut paths = Vec::new();
-            let _ = walk(&conn, svc, "/", &mut paths);
-            paths.sort();
-            println!("{svc}");
-            for p in &paths {
-                println!("└─ {p}");
-            }
+        println!("{service}");
+        for p in &paths {
+            println!("└─ {p}");
         }
     }
     Ok(())
