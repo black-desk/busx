@@ -75,9 +75,14 @@ fn run(cli: Cli) -> error::Result<()> {
             &object,
             interface.as_deref(),
         ),
-        Command::Tree { .. } | Command::Monitor { .. } => {
-            Err(error::Error::Msg("not yet implemented".into()))
-        }
+        Command::Tree { services } => ops::tree::run(
+            cli.user,
+            cli.system,
+            cli.address.as_deref(),
+            cli.verbose,
+            &services,
+        ),
+        Command::Monitor { .. } => Err(error::Error::Msg("not yet implemented".into())),
         Command::Completion { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), "busx", &mut std::io::stdout());
             Ok(())

@@ -21,8 +21,15 @@ pub fn parse_xml(xml: &str) -> Json {
         Err(e) => return json!({ "error": format!("parse introspection XML: {e}") }),
     };
 
+    // A zbus introspection XML document is *recursive*: a registered child
+    // object is reported as a `<node name="...">` element whose own subtree
+    // repeats the child's interfaces. The interfaces of *this* object are only
+    // the `<interface>` elements that are direct children of the root `<node>`,
+    // so iterate those rather than every interface in the document (which would
+    // double-count interfaces also exposed by registered sub-objects).
+    let root = doc.root_element();
     let mut ifaces = Vec::new();
-    for iface in doc.descendants().filter(|n| n.has_tag_name("interface")) {
+    for iface in root.children().filter(|n| n.has_tag_name("interface")) {
         let mut methods = Vec::new();
         let mut signals = Vec::new();
         let mut props = Vec::new();
