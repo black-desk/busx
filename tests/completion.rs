@@ -269,6 +269,93 @@ fn complete_signature_position_no_arg_method_is_empty() {
     );
 }
 
+// === Property-name completion (get/set property positional(s)) ==============
+
+/// `get`'s property position: completing after `get SVC OBJ IFACE <TAB>` lists
+/// the fixture's property names. `get` carries service(0)/object(1)/interface(2),
+/// so the first prop sits at position 3.
+#[test]
+fn complete_get_property_position_lists_properties() {
+    let addr = common::bus().address.clone();
+    // words: busx(0) --address(1) <addr>(2) get(3) svc(4) obj(5) iface(6) ""(7)
+    //        ; cursor on the empty property slot.
+    let out = complete_bash(
+        &[
+            "busx",
+            "--address",
+            &addr,
+            "get",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "",
+        ],
+        7,
+    );
+    for prop in ["volume", "name", "counts", "hints"] {
+        assert!(
+            out.lines().any(|l| l == prop),
+            "property `{prop}` missing:\n{out}"
+        );
+    }
+}
+
+/// `get`'s property position is variadic: a second `<TAB>` (after the first prop)
+/// still completes property names, not nothing.
+#[test]
+fn complete_get_second_property_still_completes() {
+    let addr = common::bus().address.clone();
+    // words: busx(0) --address(1) <addr>(2) get(3) svc(4) obj(5) iface(6)
+    //        volume(7) ""(8) ; cursor on the next variadic prop slot.
+    let out = complete_bash(
+        &[
+            "busx",
+            "--address",
+            &addr,
+            "get",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "volume",
+            "",
+        ],
+        8,
+    );
+    assert!(
+        out.lines().any(|l| l == "name"),
+        "second property `name` missing (variadic completion broke):\n{out}"
+    );
+}
+
+/// `set`'s property position: completing after `set SVC OBJ IFACE <TAB>` lists
+/// the fixture's property names. `set` carries service(0)/object(1)/interface(2),
+/// so the property sits at position 3.
+#[test]
+fn complete_set_property_position_lists_properties() {
+    let addr = common::bus().address.clone();
+    // words: busx(0) --address(1) <addr>(2) set(3) svc(4) obj(5) iface(6) ""(7)
+    //        ; cursor on the empty property slot.
+    let out = complete_bash(
+        &[
+            "busx",
+            "--address",
+            &addr,
+            "set",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "",
+        ],
+        7,
+    );
+    for prop in ["volume", "name", "counts", "hints"] {
+        assert!(
+            out.lines().any(|l| l == prop),
+            "property `{prop}` missing:\n{out}"
+        );
+    }
+}
+
 // === Robustness ============================================================
 
 /// Completion never fails the command even when the bus is unreachable: an
