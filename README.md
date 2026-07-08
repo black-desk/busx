@@ -66,14 +66,19 @@ once:
 - `monitor` — monitor bus messages, filter by match rule (`--json` emits NDJSON with `PropertiesChanged` decoded).
 - `completion` — generate a dynamic shell-completion script (live-completes services/paths/interfaces/methods/signature/properties).
 
-## Build & install
+## Install
 
 You need a Rust toolchain and a D-Bus environment (Linux only). The system must
 provide `dbus-daemon` (used at run/test time).
 
 ```bash
-cargo build --release        # binary at target/release/busx
-cargo install --path .       # or install straight to ~/.cargo/bin
+# Install the latest from GitHub (binary lands in ~/.cargo/bin, on $PATH if you
+# use rustup)
+cargo install --git https://github.com/black-desk/busx
+
+# Update later (one-time setup: `cargo install cargo-update`). -g is required:
+# git-originating packages are skipped by default.
+cargo install-update -g busx       # or `cargo install-update -ag` for everything
 ```
 
 ## Usage
@@ -101,9 +106,9 @@ busx get org.freedesktop.systemd1 /org/freedesktop/systemd1 \
 busx --json monitor --signals --interface org.freedesktop.DBus.Properties \
   --member PropertiesChanged | jq 'select(.args[1] != {})'
 
-# Generate bash completion (once sourced, it live-introspects the bus to
-# complete services/paths/interfaces/methods)
-busx completion bash > /etc/bash_completion.d/busx
+# Enable completion: add this to ~/.bashrc (or ~/.zshrc for zsh) and restart
+# your shell — it live-introspects the bus to complete services/paths/etc.
+eval "$(busx completion bash)"     # zsh: eval "$(busx completion zsh)"
 ```
 
 Output is human-friendly text by default; `--json` switches to type-tagged JSON
