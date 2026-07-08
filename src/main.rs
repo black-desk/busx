@@ -9,6 +9,7 @@ mod dbus;
 mod error;
 mod ops;
 mod out;
+mod tui;
 mod value;
 
 use clap::Parser;
@@ -38,7 +39,12 @@ fn main() -> std::process::ExitCode {
     }
 
     let cli = Cli::parse();
-    match run(cli) {
+    let Cli { user, system, address, verbose, json, command } = cli;
+    let result = match command {
+        None => tui::run(user, system, address.as_deref(), verbose),
+        Some(command) => run_command(user, system, address, verbose, json, command),
+    };
+    match result {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("busx: {e}");
@@ -47,35 +53,42 @@ fn main() -> std::process::ExitCode {
     }
 }
 
-fn run(cli: Cli) -> error::Result<()> {
-    match cli.command {
+fn run_command(
+    user: bool,
+    system: bool,
+    address: Option<String>,
+    verbose: bool,
+    json: bool,
+    command: Command,
+) -> error::Result<()> {
+    match command {
         Command::List { unique, acquired, activatable } => ops::list::run(
-            cli.user,
-            cli.system,
-            cli.address.as_deref(),
-            cli.verbose,
-            cli.json,
+            user,
+            system,
+            address.as_deref(),
+            verbose,
+            json,
             unique,
             acquired,
             activatable,
         ),
         Command::Get { service, object, interface, props } => ops::property::get(
-            cli.user,
-            cli.system,
-            cli.address.as_deref(),
-            cli.verbose,
-            cli.json,
+            user,
+            system,
+            address.as_deref(),
+            verbose,
+            json,
             &service,
             &object,
             interface.as_deref(),
             &props,
         ),
         Command::Call { service, object, interface, method, signature, args } => ops::call::run(
-            cli.user,
-            cli.system,
-            cli.address.as_deref(),
-            cli.verbose,
-            cli.json,
+            user,
+            system,
+            address.as_deref(),
+            verbose,
+            json,
             &service,
             &object,
             &interface,
@@ -85,10 +98,10 @@ fn run(cli: Cli) -> error::Result<()> {
         ),
         Command::Set { service, object, interface, property, signature, value } => {
             ops::property::set(
-                cli.user,
-                cli.system,
-                cli.address.as_deref(),
-                cli.verbose,
+                user,
+                system,
+                address.as_deref(),
+                verbose,
                 &service,
                 &object,
                 &interface,
@@ -98,21 +111,21 @@ fn run(cli: Cli) -> error::Result<()> {
             )
         }
         Command::Introspect { service, object, interface } => ops::introspect::run(
-            cli.user,
-            cli.system,
-            cli.address.as_deref(),
-            cli.verbose,
-            cli.json,
+            user,
+            system,
+            address.as_deref(),
+            verbose,
+            json,
             &service,
             &object,
             interface.as_deref(),
         ),
         Command::Tree { service } => ops::tree::run(
-            cli.user,
-            cli.system,
-            cli.address.as_deref(),
-            cli.verbose,
-            cli.json,
+            user,
+            system,
+            address.as_deref(),
+            verbose,
+            json,
             &service,
         ),
         Command::Monitor {
@@ -126,11 +139,11 @@ fn run(cli: Cli) -> error::Result<()> {
             limit_messages,
             timeout,
         } => ops::monitor::run(
-            cli.user,
-            cli.system,
-            cli.address.as_deref(),
-            cli.verbose,
-            cli.json,
+            user,
+            system,
+            address.as_deref(),
+            verbose,
+            json,
             services,
             interface,
             member,
