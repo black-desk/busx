@@ -103,10 +103,9 @@ fn print_map(map: &[(String, OwnedValue)], json: bool) -> Result<()> {
         }
         crate::out::print_json(&Json::Object(obj));
     } else {
-        let mut names: Vec<&String> = map.iter().map(|(k, _)| k).collect();
-        names.sort();
-        for k in names {
-            let (_, v) = map.iter().find(|(kk, _)| kk == k).unwrap();
+        let mut entries: Vec<_> = map.iter().collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        for (k, v) in entries {
             println!("{}  {}  {}", k, v.value_signature(), crate::value::pretty::pretty(v));
         }
     }
