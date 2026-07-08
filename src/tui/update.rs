@@ -48,7 +48,7 @@ fn update_service_key(s: &mut ServiceScreen, code: KeyCode) {
     let last = s.services.len() - 1;
     match code {
         KeyCode::Down | KeyCode::Char('j') => s.selected = (s.selected + 1).min(last),
-        KeyCode::Up | KeyCode::Char('k') => s.selected = s.selected.checked_sub(1).unwrap_or(0),
+        KeyCode::Up | KeyCode::Char('k') => s.selected = s.selected.saturating_sub(1),
         _ => {}
     }
 }
