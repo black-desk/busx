@@ -24,8 +24,12 @@ thiserror = "2"
 anyhow = "1"
 zbus_xml = "5"
 async-global-executor = "2"
+ratatui = "0.30"
+crossterm = "0.29"
+flume = "0.12"
 
 [dev-dependencies]
 assert_cmd = "2"
 predicates = "3"
 nix = { version = "0.31", features = ["signal"] }
+insta = "1"

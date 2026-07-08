@@ -21,7 +21,7 @@ pub struct Cli {
     #[arg(long, global = true, help = "Emit type-tagged JSON (default: human text)")]
     pub json: bool,
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Subcommand, Debug)]

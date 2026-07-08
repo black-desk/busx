@@ -1,0 +1,13 @@
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//! Interactive TUI (spec §5–§8). Built on the async `dbus::` core.
+
+pub mod app;
+pub mod msg;
+pub mod render;
+pub mod state;
+pub mod update;
+
+pub use app::run;
