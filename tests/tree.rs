@@ -24,6 +24,14 @@ fn tree_of_test_service_lists_paths() {
         paths.iter().any(|p| p == "/org/busx/Test/sub"),
         "missing /org/busx/Test/sub: {v}"
     );
+
+    // v1's descendants()-based walk fabricated a phantom `/org/busx/sub` from
+    // nested repeated <node> entries in zbus's introspection XML. The zbus_xml
+    // direct-children walk (matching `busctl tree`) does not — lock it in.
+    assert!(
+        !paths.iter().any(|p| p == "/org/busx/sub"),
+        "phantom path /org/busx/sub should be absent: {v}"
+    );
 }
 
 /// `tree` now requires exactly one service: no service → usage error.
