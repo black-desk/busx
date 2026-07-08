@@ -100,46 +100,6 @@ fn msg_to_json(m: &zbus::Message) -> Json {
     })
 }
 
-/// Assemble the match rule from the convenience flags (+`type='signal'` when
-/// `--signals`). `raw_match`, if given, is parsed directly and overrides the
-/// builder path so users get exactly what they typed.
-fn build_match_rule(
-    interface: Option<&str>,
-    member: Option<&str>,
-    path: Option<&str>,
-    sender: Option<&str>,
-    raw_match: Option<&str>,
-    signals: bool,
-) -> Result<MatchRule<'static>> {
-    if let Some(raw) = raw_match {
-        return MatchRule::try_from(raw)
-            .map(|r| r.into_owned())
-            .map_err(|e| Error::Msg(format!("invalid --match rule: {e}")));
-    }
-
-    let mut builder = MatchRule::builder();
-    if signals {
-        builder = builder.msg_type(Type::Signal);
-    }
-    // `sender` matches the origin of the message; for a well-known service that
-    // is its unique name, but the bus also accepts the well-known name here.
-    if let Some(s) = sender {
-        builder = builder.sender(s)?;
-    }
-    if let Some(iface) = interface {
-        builder = builder.interface(iface)?;
-    }
-    if let Some(mem) = member {
-        builder = builder.member(mem)?;
-    }
-    if let Some(p) = path {
-        builder = builder.path(p)?;
-    }
-    // Positional services don't map cleanly onto a single match-rule field, so
-    // they are applied as client-side filtering after receipt (see
-    // `matches_service`). The convenience flags above do go into the rule.
-    Ok(builder.build().into_owned())
-}
 
 /// Does the message originate from (or address) any of the requested services?
 /// With no positional services every message passes.
@@ -206,7 +166,7 @@ pub fn run(
 ) -> Result<()> {
     let conn = connect(user, system, address, verbose)?;
 
-    let rule = build_match_rule(
+    let rule = crate::dbus::monitor::build_match_rule(
         interface.as_deref(),
         member.as_deref(),
         path.as_deref(),
