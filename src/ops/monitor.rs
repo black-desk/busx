@@ -100,7 +100,6 @@ fn msg_to_json(m: &zbus::Message) -> Json {
     })
 }
 
-
 /// Does the message originate from (or address) any of the requested services?
 /// With no positional services every message passes.
 fn matches_service(m: &zbus::Message, services: &[String]) -> bool {
