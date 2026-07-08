@@ -2,26 +2,19 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! `busx get` — read D-Bus properties via `org.freedesktop.DBus.Properties`.
+//! `busx get` / `busx set` — thin wrappers over the async core (spec §8).
 //!
-//! With no property names, runs `GetAll` (returns an object keyed by property
-//! name). With one or more names, runs `Get` per name (returns an array, order
-//! preserved). Every value is rendered as type-tagged JSON (spec §7.2).
+//! `get` overloads:
+//! - no property names ⇒ `GetAll` (empty interface = all interfaces);
+//! - named interface + no names ⇒ `GetAll(interface)`;
+//! - named interface + names ⇒ `Get` per name;
+//! - empty interface + names ⇒ error (`Get` needs an interface).
 
-use crate::conn::connect;
-use crate::error::Result;
+use crate::dbus;
+use crate::error::{Error, Result};
 use serde_json::{Map, Value as Json, json};
-use zbus::blocking::fdo::PropertiesProxy;
-use zbus::names::InterfaceName;
+use zvariant::OwnedValue;
 
-/// Implementation of `busx get`.
-///
-/// `--interface` is optional:
-/// - absent/empty with no property names → `GetAll("")`, i.e. all interfaces
-///   (empty string is not a valid `InterfaceName`, so it is injected unchecked,
-///   matching dbus-send/busctl semantics);
-/// - absent/empty with one or more property names → error (`Get` needs a name);
-/// - present → validated and reused for every call.
 #[allow(clippy::too_many_arguments)]
 pub fn get(
     user: bool,
@@ -34,32 +27,38 @@ pub fn get(
     interface: Option<&str>,
     props: &[String],
 ) -> Result<()> {
-    let conn = connect(user, system, address, verbose)?;
-    let proxy = PropertiesProxy::new(&conn, service, object)?;
-
     let get_all_only = props.is_empty();
     match interface {
         // No/empty interface: GetAll over all interfaces is allowed; Get is not.
         None | Some("") if get_all_only => {
-            get_all(&proxy, InterfaceName::from_str_unchecked(""), json)
+            let map = async_global_executor::block_on(async {
+                let conn = dbus::conn::connect(user, system, address, verbose).await?;
+                dbus::property::get_all(&conn, service, object, "").await
+            })?;
+            print_map(&map, json)
         }
-        None | Some("") => Err(crate::error::Error::Msg(
+        None | Some("") => Err(Error::Msg(
             "get: --interface is required when reading individual properties".into(),
         )),
         // Named interface.
         Some(name) => {
-            let iface = InterfaceName::try_from(name).map_err(zbus::Error::from)?;
             if get_all_only {
-                get_all(&proxy, iface, json)
+                let map = async_global_executor::block_on(async {
+                    let conn = dbus::conn::connect(user, system, address, verbose).await?;
+                    dbus::property::get_all(&conn, service, object, name).await
+                })?;
+                print_map(&map, json)
             } else {
-                let mut values: Vec<zvariant::Value<'_>> = Vec::with_capacity(props.len());
-                for p in props {
-                    let v = proxy.get(iface.as_ref(), p)?;
-                    values.push(v.into());
-                }
+                let values = async_global_executor::block_on(async {
+                    let conn = dbus::conn::connect(user, system, address, verbose).await?;
+                    let mut vs: Vec<OwnedValue> = Vec::with_capacity(props.len());
+                    for p in props {
+                        vs.push(dbus::property::get_one(&conn, service, object, name, p).await?);
+                    }
+                    Ok::<_, Error>(vs)
+                })?;
                 if json {
-                    let arr: Vec<_> =
-                        values.iter().map(crate::value::decode::to_tagged).collect();
+                    let arr: Vec<_> = values.iter().map(|v| crate::value::decode::to_tagged(v)).collect();
                     crate::out::print_json(&json!(arr));
                 } else {
                     for v in &values {
@@ -72,14 +71,9 @@ pub fn get(
     }
 }
 
-/// Implementation of `busx set`.
-///
-/// `signature` is the busctl-style type code of the single value; `value_tokens`
-/// are the positional value tokens. Both are routed through the shared encoder,
-/// and the resulting value is
-/// written via `org.freedesktop.DBus.Properties.Set`. The peer emits
-/// `PropertiesChanged` as a side effect (when the property is annotated
-/// `emits_changed_signal`).
+/// Implementation of `busx set` (spec §8). `signature` is the busctl-style type
+/// code of the single value; `value_tokens` are the positional value tokens,
+/// both routed through the shared encoder.
 #[allow(clippy::too_many_arguments)]
 pub fn set(
     user: bool,
@@ -91,44 +85,28 @@ pub fn set(
     interface: &str,
     property: &str,
     signature: &str,
-    value_tokens: &[String],
+    value: &[String],
 ) -> Result<()> {
-    let conn = connect(user, system, address, verbose)?;
-    let proxy = PropertiesProxy::new(&conn, service, object)?;
-
-    // Build the value via the shared encoder: `signature` and the value tokens
-    // are passed separately.
-    let mut parsed = crate::value::encode::parse(signature, value_tokens)?;
-    let value = parsed
-        .pop()
-        .ok_or_else(|| crate::error::Error::Msg("set: missing value".into()))?;
-    if !parsed.is_empty() {
-        return Err(crate::error::Error::Msg(
-            "set: expected exactly one value".into(),
-        ));
-    }
-
-    let iface = InterfaceName::try_from(interface).map_err(zbus::Error::from)?;
-    proxy.set(iface, property, value)?;
-    Ok(())
+    async_global_executor::block_on(async {
+        let conn = dbus::conn::connect(user, system, address, verbose).await?;
+        dbus::property::set(&conn, service, object, interface, property, signature, value).await
+    })
 }
 
-/// Run `GetAll` and print the result as a type-tagged JSON object keyed by
-/// property name, or — in human mode — one `<name>  <type>  <pretty>` line per
-/// property (sorted by name for stable output).
-fn get_all(proxy: &PropertiesProxy<'_>, iface: InterfaceName<'_>, json: bool) -> Result<()> {
-    let map = proxy.get_all(iface)?;
+/// Print a `GetAll` result keyed by property name (sorted human form, or JSON
+/// object).
+fn print_map(map: &[(String, OwnedValue)], json: bool) -> Result<()> {
     if json {
         let mut obj = Map::new();
-        for (k, v) in map.iter() {
+        for (k, v) in map {
             obj.insert(k.clone(), crate::value::decode::to_tagged(v));
         }
         crate::out::print_json(&Json::Object(obj));
     } else {
-        let mut names: Vec<&String> = map.keys().collect();
+        let mut names: Vec<&String> = map.iter().map(|(k, _)| k).collect();
         names.sort();
         for k in names {
-            let v = &map[k];
+            let (_, v) = map.iter().find(|(kk, _)| kk == k).unwrap();
             println!("{}  {}  {}", k, v.value_signature(), crate::value::pretty::pretty(v));
         }
     }
