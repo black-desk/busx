@@ -26,6 +26,7 @@ use clap::{Arg, ArgAction, Command};
 use clap_complete::{ArgValueCompleter, CompletionCandidate, CompleteEnv, Shell};
 use zbus::blocking::Connection;
 use zbus::blocking::fdo::DBusProxy;
+use zbus_xml::{ArgDirection, Node};
 
 use crate::conn::connect;
 use crate::error::Result;
@@ -563,97 +564,65 @@ fn introspect_xml(conn: &Connection, service: &str, path: &str) -> Result<String
     Ok(proxy.introspect()?)
 }
 
-/// Parse `<node name="..."/>` child entries from introspection XML.
+/// Parse introspection XML into a `zbus_xml::Node`. Returns `None` on parse
+/// failure so callers degrade to empty candidates. (`Node::from_reader` handles
+/// the `<!DOCTYPE>` zbus ships.)
+fn parse_node(xml: &str) -> Option<Node<'static>> {
+    Node::from_reader(xml.as_bytes()).ok()
+}
+
+/// Parse `<node name="..."/>` child entries — the immediate children of the root
+/// (only one level; the shell re-invokes completion for the next path segment).
 fn parse_node_names(xml: &str) -> Vec<String> {
-    let doc = match parse_doc(xml) {
-        Some(d) => d,
-        None => return Vec::new(),
-    };
-    doc.descendants()
-        .filter(|n| n.has_tag_name("node"))
-        .filter_map(|n| n.attribute("name").map(|s| s.to_string()))
+    let Some(node) = parse_node(xml) else { return Vec::new() };
+    node.nodes()
+        .iter()
+        .filter_map(|c| c.name().map(|s| s.to_string()))
         .collect()
 }
 
-/// Parse the interface names that are *direct children of the root `<node>`*
-/// (the object's own interfaces, not those of registered sub-objects).
+/// The interface names that are direct children of the root `<node>` (the
+/// object's own interfaces, including the standard ones).
 fn parse_root_interface_names(xml: &str) -> Vec<String> {
-    let doc = match parse_doc(xml) {
-        Some(d) => d,
-        None => return Vec::new(),
-    };
-    doc.root_element()
-        .children()
-        .filter(|n| n.has_tag_name("interface"))
-        .filter_map(|n| n.attribute("name").map(|s| s.to_string()))
-        .collect()
+    let Some(node) = parse_node(xml) else { return Vec::new() };
+    node.interfaces().iter().map(|i| i.name().to_string()).collect()
 }
 
-/// Parse the method names of a given interface (a direct child of the root).
+/// The method names of `interface` (a direct child of the root).
 fn parse_interface_methods(xml: &str, interface: &str) -> Vec<String> {
-    let doc = match parse_doc(xml) {
-        Some(d) => d,
-        None => return Vec::new(),
-    };
-    doc.root_element()
-        .children()
-        .filter(|n| n.has_tag_name("interface") && n.attribute("name") == Some(interface))
-        .flat_map(|iface| {
-            iface
-                .children()
-                .filter(|n| n.has_tag_name("method"))
-                .filter_map(|n| n.attribute("name").map(|s| s.to_string()))
-        })
+    let Some(node) = parse_node(xml) else { return Vec::new() };
+    node.interfaces()
+        .iter()
+        .find(|i| i.name().as_ref() == interface)
+        .into_iter()
+        .flat_map(|iface| iface.methods().iter().map(|m| m.name().to_string()))
         .collect()
 }
 
-/// Parse the property names of a given interface (a direct child of the root).
-/// If `interface` is empty, collects properties from *all* of the root's own
-/// interfaces — useful for `get` when the interface positional is omitted.
+/// The property names of `interface` (a direct child of the root). If
+/// `interface` is empty, collects from all of the root's own interfaces — useful
+/// for `get` when the interface positional is omitted.
 fn parse_interface_properties(xml: &str, interface: &str) -> Vec<String> {
-    let doc = match parse_doc(xml) {
-        Some(d) => d,
-        None => return Vec::new(),
-    };
-    doc.root_element()
-        .children()
-        .filter(|n| {
-            n.has_tag_name("interface")
-                && (interface.is_empty() || n.attribute("name") == Some(interface))
-        })
-        .flat_map(|iface| {
-            iface
-                .children()
-                .filter(|n| n.has_tag_name("property"))
-                .filter_map(|n| n.attribute("name").map(|s| s.to_string()))
-        })
+    let Some(node) = parse_node(xml) else { return Vec::new() };
+    node.interfaces()
+        .iter()
+        .filter(|i| interface.is_empty() || i.name().as_ref() == interface)
+        .flat_map(|i| i.properties().iter().map(|p| p.name().to_string()))
         .collect()
 }
 
-/// Concatenate the `type` attribute of every `<arg direction="in">` child of the
-/// named `<method>` in the named `<interface>`. Returns `None` if the document
-/// can't be parsed or the method is absent; returns `Some("")` for a method that
-/// takes no input args.
+/// Concatenate the signature of every in-arg of the named `<method>` in the named
+/// `<interface>`. `None` if the document can't parse or the method is absent;
+/// `Some("")` for a no-arg method.
 fn parse_method_input_signature(xml: &str, interface: &str, method: &str) -> Option<String> {
-    let doc = parse_doc(xml)?;
-    let iface = doc
-        .root_element()
-        .children()
-        .find(|n| n.has_tag_name("interface") && n.attribute("name") == Some(interface))?;
-    let m = iface
-        .children()
-        .find(|n| n.has_tag_name("method") && n.attribute("name") == Some(method))?;
+    let node = parse_node(xml)?;
+    let iface = node.interfaces().iter().find(|i| i.name().as_ref() == interface)?;
+    let m = iface.methods().iter().find(|m| m.name().as_ref() == method)?;
     let sig: String = m
-        .children()
-        .filter(|n| n.has_tag_name("arg") && n.attribute("direction") == Some("in"))
-        .filter_map(|n| n.attribute("type").map(|s| s.to_string()))
+        .args()
+        .iter()
+        .filter(|a| a.direction() == Some(ArgDirection::In))
+        .map(|a| a.ty().inner().to_string())
         .collect();
     Some(sig)
-}
-
-/// Parse introspection XML with DTD support (zbus XML ships a `<!DOCTYPE>`).
-/// Returns `None` on parse failure so callers degrade to empty candidates.
-fn parse_doc(xml: &str) -> Option<roxmltree::Document<'_>> {
-    let opts = roxmltree::ParsingOptions { allow_dtd: true, ..Default::default() };
-    roxmltree::Document::parse_with_options(xml, opts).ok()
 }
