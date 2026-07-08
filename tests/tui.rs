@@ -6,7 +6,8 @@
 //! ratatui TestBackend, compare to an insta golden snapshot. No real bus.
 
 use busx::dbus::types::ServiceInfo;
-use busx::tui::{render, State};
+use busx::tui::{render, update, Msg, Screen, State};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
@@ -30,4 +31,41 @@ fn service_screen_renders_populated_list() {
         svc("org.busx.Other", None, None),
     ]);
     insta::assert_snapshot!(render_to_string(&state, 60, 8));
+}
+
+fn key(code: KeyCode) -> Msg {
+    Msg::Key(KeyEvent::new(code, KeyModifiers::NONE))
+}
+
+fn selected_of(state: &State) -> usize {
+    match &state.screen {
+        Screen::Service(s) => s.selected,
+    }
+}
+
+#[test]
+fn service_screen_down_arrow_moves_selection() {
+    let mut state =
+        State::service(vec![svc("a", None, None), svc("b", None, None), svc("c", None, None)]);
+    assert_eq!(selected_of(&state), 0, "starts on row 0");
+    update(&mut state, key(KeyCode::Down));
+    assert_eq!(selected_of(&state), 1, "Down → row 1");
+    insta::assert_snapshot!(render_to_string(&state, 40, 7));
+}
+
+#[test]
+fn service_screen_up_clamps_at_top() {
+    let mut state = State::service(vec![svc("a", None, None), svc("b", None, None)]);
+    update(&mut state, key(KeyCode::Up));
+    assert_eq!(selected_of(&state), 0, "Up at top stays at 0");
+}
+
+#[test]
+fn quit_on_q_and_escape() {
+    let mut state = State::service(vec![]);
+    update(&mut state, key(KeyCode::Char('q')));
+    assert!(state.quit, "q quits");
+    let mut state = State::service(vec![]);
+    update(&mut state, key(KeyCode::Esc));
+    assert!(state.quit, "Esc quits");
 }
