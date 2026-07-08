@@ -2,18 +2,8 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-mod cli;
-mod complete;
-mod conn;
-mod dbus;
-mod error;
-mod ops;
-mod out;
-mod tui;
-mod value;
-
+use busx::{cli::{Cli, Command}, complete, error, ops, tui};
 use clap::Parser;
-use cli::{Cli, Command};
 
 fn main() -> std::process::ExitCode {
     // Rust sets SIGPIPE to SIG_IGN at startup, so a downstream pipe reader
@@ -155,7 +145,7 @@ fn run_command(
             timeout.as_deref(),
         ),
         Command::Completion { shell } => {
-            crate::complete::emit_script(shell);
+            complete::emit_script(shell);
             Ok(())
         }
     }
