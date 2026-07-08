@@ -56,14 +56,17 @@ SPDX-License-Identifier: MIT
 - `monitor` —— 监听总线消息，按 match rule 过滤（`--json` 出 NDJSON，含 `PropertiesChanged` 解码）。
 - `completion` —— 生成动态 shell 补全脚本（实时内省总线补全服务/路径/接口/方法/签名/属性）。
 
-## 安装与构建
+## 安装
 
 需要 Rust 工具链与一个 D-Bus 环境（仅 Linux）。系统需装有 `dbus-daemon`
 （运行/测试时用）。
 
 ```bash
-cargo build --release        # 产物在 target/release/busx
-cargo install --path .       # 或直接安装到 ~/.cargo/bin
+# 从 GitHub 安装最新版（二进制落到 ~/.cargo/bin，用 rustup 的话已在 $PATH 里）
+cargo install --git https://github.com/black-desk/busx
+
+# 之后升级（一次性：`cargo install cargo-update`）。-g 必加：git 来源默认会被跳过
+cargo install-update -g busx       # 或 `cargo install-update -ag` 升级全部
 ```
 
 ## 用法
@@ -91,8 +94,9 @@ busx get org.freedesktop.systemd1 /org/freedesktop/systemd1 \
 busx --json monitor --signals --interface org.freedesktop.DBus.Properties \
   --member PropertiesChanged | jq 'select(.args[1] != {})'
 
-# 生成 bash 补全（写入后会实时内省总线补全服务/路径/接口/方法）
-busx completion bash > /etc/bash_completion.d/busx
+# 开启补全：把这行加进 ~/.bashrc（zsh 加进 ~/.zshrc）后重开 shell ——
+# 它会实时内省总线，补全服务/路径/接口/方法
+eval "$(busx completion bash)"     # zsh: eval "$(busx completion zsh)"
 ```
 
 默认输出人类可读文本；`--json` 切到 type-tagged JSON（`monitor` 为 NDJSON），
