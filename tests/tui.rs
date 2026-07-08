@@ -72,15 +72,7 @@ fn quit_on_q_and_escape() {
 
 #[test]
 fn service_screen_loading_state() {
-    let state = State {
-        screen: busx::tui::Screen::Service(busx::tui::ServiceScreen {
-            services: vec![],
-            selected: 0,
-            loading: true,
-            error: None,
-        }),
-        quit: false,
-    };
+    let state = State::loading_service();
     insta::assert_snapshot!(render_to_string(&state, 40, 6));
 }
 

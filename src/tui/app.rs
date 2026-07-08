@@ -33,6 +33,10 @@ pub struct App {
 impl App {
     /// Render, then consume one event, repeating until `state.quit` or the event
     /// source is exhausted. Generic over the backend so tests pass a TestBackend.
+    ///
+    /// Draws at the top of each iteration, so a non-quit mutation IS rendered on
+    /// the next pass; a quit mutation exits without a final redraw (the screen is
+    /// discarded when the terminal is torn down).
     pub fn run_loop<B: Backend>(
         &mut self,
         terminal: &mut Terminal<B>,
@@ -61,7 +65,11 @@ pub fn run(user: bool, system: bool, address: Option<&str>, verbose: bool) -> Re
     let mut app = App { state: State::loading_service() };
     let mut terminal = setup_terminal()?;
     let result = app.run_loop(&mut terminal, CrosstermSource { rx });
-    restore_terminal(&mut terminal)?;
+    // Always try to restore the terminal; prefer the loop's result over a
+    // restore failure (don't mask the real error), but warn on restore failure.
+    if let Err(e) = restore_terminal(&mut terminal) {
+        eprintln!("busx: warning: failed to restore terminal: {e}");
+    }
     result
 }
 
@@ -88,11 +96,17 @@ impl Iterator for CrosstermSource {
             if let Ok(msg) = self.rx.try_recv() {
                 return Some(msg);
             }
-            if event::poll(Duration::from_millis(50)).ok()? {
-                if let Ok(ev) = event::read() {
-                    if let Some(msg) = non_mouse(ev) {
-                        return Some(msg);
-                    }
+            match event::poll(Duration::from_millis(50)) {
+                Ok(false) => continue, // timeout: re-drain the channel
+                Ok(true) => {}
+                Err(e) => {
+                    eprintln!("busx: warning: input poll failed: {e}");
+                    return None; // can't read input — exit cleanly
+                }
+            }
+            if let Ok(ev) = event::read() {
+                if let Some(msg) = non_mouse(ev) {
+                    return Some(msg);
                 }
             }
         }

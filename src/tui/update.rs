@@ -25,7 +25,7 @@ pub fn update(state: &mut State, msg: Msg) {
                 Screen::Service(s) => update_service_key(s, k.code),
             }
         }
-        Msg::Resize(_, _) => {}
+        Msg::Resize(_, _) => {} // handled implicitly: the next draw reads frame.area()
         Msg::ServicesLoaded(res) => match &mut state.screen {
             Screen::Service(s) => {
                 s.loading = false;
