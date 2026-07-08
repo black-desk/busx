@@ -12,7 +12,10 @@ const INTROSPECTABLE: &str = "org.freedesktop.DBus.Introspectable";
 
 pub async fn object_tree(conn: &zbus::Connection, service: &str) -> Result<ObjectNode> {
     let mut root = ObjectNode { path: "/".to_string(), children: vec![] };
-    walk(conn, service, "/", &mut root.children).await?;
+    let mut visited = std::collections::HashSet::from(["/".to_string()]);
+    // Best-effort: a service that refuses introspection (e.g. at `/`) yields the
+    // paths gathered so far rather than aborting — matches the prior CLI behaviour.
+    let _ = walk(conn, service, "/", &mut root.children, &mut visited).await;
     Ok(root)
 }
 
@@ -21,6 +24,7 @@ async fn walk(
     service: &str,
     path: &str,
     out: &mut Vec<ObjectNode>,
+    visited: &mut std::collections::HashSet<String>,
 ) -> Result<()> {
     let proxy = zbus::Proxy::new(conn, service, path, INTROSPECTABLE).await?;
     let xml: String = proxy.call_method("Introspect", &()).await?.body().deserialize()?;
@@ -33,11 +37,16 @@ async fn walk(
             continue;
         }
         let child_path = format!("{}/{}", path.trim_end_matches('/'), name);
+        // Cycle guard: skip a path we've already visited. Defends against
+        // self-referential introspection data that would otherwise loop forever.
+        if !visited.insert(child_path.clone()) {
+            continue;
+        }
         let mut child_node = ObjectNode { path: child_path.clone(), children: vec![] };
         // Recurse before pushing so the borrow on `out` is released each iteration.
         // `Box::pin` is required: a recursive `async fn` call would otherwise grow an
         // infinitely sized future (E0733).
-        Box::pin(walk(conn, service, &child_path, &mut child_node.children)).await?;
+        Box::pin(walk(conn, service, &child_path, &mut child_node.children, visited)).await?;
         out.push(child_node);
     }
     Ok(())
