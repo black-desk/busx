@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use std::convert::Infallible;
 use std::process::ExitCode;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -20,6 +21,10 @@ pub enum Error {
     Json(#[from] serde_json::Error),
     #[error("{0}")]
     Msg(String),
+    // Never occurs in practice (TestBackend's draw is infallible); exists so the
+    // generic `App::run_loop` can lift `<B as Backend>::Error` into our `Error`.
+    #[error("infallible")]
+    Infallible(#[from] Infallible),
 }
 
 impl Error {

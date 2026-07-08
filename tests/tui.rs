@@ -97,3 +97,23 @@ fn service_screen_error_state() {
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 6));
 }
+
+use busx::tui::app::App;
+
+#[test]
+fn loop_loads_services_then_navigates() {
+    let services = vec![
+        svc("org.busx.A", Some(111), None),
+        svc("org.busx.B", None, None),
+    ];
+    let events = vec![
+        Msg::ServicesLoaded(Ok(services)),
+        Msg::Key(crossterm::event::KeyCode::Down.into()),
+    ];
+    let mut app = App { state: busx::tui::State::loading_service() };
+    let backend = TestBackend::new(44, 8);
+    let mut term = Terminal::new(backend).unwrap();
+    app.run_loop(&mut term, events.into_iter()).unwrap();
+    // Final frame: populated list, selection on row 1 (org.busx.B).
+    insta::assert_snapshot!(format!("{}", term.backend()));
+}

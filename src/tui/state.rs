@@ -43,4 +43,12 @@ impl State {
             quit: false,
         }
     }
+
+    /// A Service screen in the loading state (the TUI's initial screen).
+    pub fn loading_service() -> Self {
+        State {
+            screen: Screen::Service(ServiceScreen { services: vec![], selected: 0, loading: true, error: None }),
+            quit: false,
+        }
+    }
 }
