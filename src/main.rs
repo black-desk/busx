@@ -7,7 +7,6 @@ mod complete;
 mod conn;
 mod dbus;
 mod error;
-mod introspect;
 mod ops;
 mod out;
 mod value;
