@@ -10,7 +10,7 @@ SPDX-License-Identifier: MIT
 
 **Goal:** Bare `busx` (no subcommand) opens a fullscreen TUI showing the live service list; the user can move the selection with ↑↓/jk and quit with `q`/`Esc`. Existing CLI subcommands keep working.
 
-**Architecture:** Elm-style split — pure `State` + `update(state, Msg)` + `render(frame, &State)` (verified by `ratatui` `TestBackend` snapshots), and a thin terminal glue `App::run` (raw-mode/alt-screen setup, crossterm poll, flume channel, `async_global_executor` task to fetch `dbus::list::list_names`) that is manual-smoke-tested. The async `dbus::` core from Phase 0 backs the data.
+**Architecture:** Elm-style split — pure `State` + `update(state, Msg)` + `render(frame, &State)`, verified by `ratatui` `TestBackend` snapshots. The event loop `App::run_loop` is dependency-injected (generic backend + an event-source `Iterator<Item=Msg>`), so tests drive it end-to-end with `TestBackend` + a scripted `Msg` sequence (keys + data results); the crossterm-on-tty wrapper (`run`/`CrosstermSource`) isn't snapshot-covered (it needs a real tty) and is left to your acceptance run. The async `dbus::` core from Phase 0 backs the data.
 
 **Tech Stack:** ratatui 0.30 · crossterm 0.29 · flume 0.12 · async-global-executor 2 · the existing async `dbus::` core · insta (dev) for snapshots.
 
@@ -22,7 +22,7 @@ SPDX-License-Identifier: MIT
 
 - REUSE SPDX header on every new file: copyright `2026 Chen Linxuan <me@black-desk.cn>`, license `GPL-3.0-or-later`.
 - Every commit message ends with a blank line then exactly: `Assisted-by: claude:glm-5.2`
-- **Testing:** e2e-only. TUI logic is tested via `ratatui::backend::TestBackend` snapshots (`insta`) — drive keys through `update`, render to an in-memory buffer, compare to a golden snapshot. This is the "key + screen" e2e dimension for the TUI (per spec §13). The real terminal loop (needs a tty) is manual-smoke-tested, not in the suite.
+- **Testing:** e2e-only. TUI logic is tested via `ratatui::backend::TestBackend` snapshots (`insta`) — render `State` to an in-memory buffer and compare to a golden snapshot. "Input" is **programmatic**: the test feeds `Msg::Key(...)` (and `Msg::ServicesLoaded(...)`) straight into `update` / `run_loop` — `TestBackend` is an *output* backend, it does not generate key events; the test code supplies them. The loop itself is tested the same way: `App::run_loop` takes an injected event iterator + a generic backend, so a test feeds a scripted `Msg` sequence through `run_loop` with a `TestBackend` and snapshots the resulting frame. Only the raw crossterm-on-tty wrapper (`run`/`CrosstermSource`) isn't snapshot-covered (it needs a real tty); there's no automated test for it — you verify it at acceptance.
 - **API notes (confirm against the compiler — ratatui/crossterm move fast):**
   - ratatui 0.30: `Terminal::new(backend)`, `terminal.draw(|frame: &mut Frame| ...)`, `frame.area() -> Rect`, `frame.render_widget/widget_ref`, `frame.render_stateful_widget`. `widgets::{Block, Borders, List, ListItem, ListState, Paragraph}`, `layout::{Layout, Constraint, Direction}`, `text::Line`, `style::{Style, Modifier}`. `backend::{CrosstermBackend, TestBackend}`.
   - crossterm 0.29: `terminal::{enable_raw_mode, disable_raw_mode}`, `execute!(stdout, EnterAlternateScreen)` / `LeaveAlternateScreen`, `event::{poll, read, Event, KeyEvent, KeyCode, KeyEventKind}`. `From<KeyCode> for KeyEvent` exists, so `KeyCode::Down.into()` works in tests.
@@ -51,16 +51,12 @@ SPDX-License-Identifier: MIT
 
 - [ ] **Step 1: Add dependencies**
 
-In `Cargo.toml` `[dependencies]` add:
+In `Cargo.toml` `[dependencies]` add (Phase 1 needs only these — `tui-tree-widget`/`tui-input`/`arboard`/`futures` are added in their later phases P2/P3/P5/P4):
 
 ```toml
 ratatui = "0.30"
 crossterm = "0.29"
-tui-tree-widget = "0.24"
-tui-input = "0.15"
-arboard = "3"
 flume = "0.12"
-futures = "0.3"
 ```
 
 In `[dev-dependencies]` add:
@@ -466,22 +462,12 @@ Expected: FAIL (compile error — `Msg` / `update` not implemented).
 //! arrive from the async `dbus::` workers over the flume channel.
 
 use crate::dbus::types::ServiceInfo;
-use crossterm::event::{Event, KeyEvent};
+use crossterm::event::KeyEvent;
 
 pub enum Msg {
     Key(KeyEvent),
     Resize(u16, u16),
     ServicesLoaded(Result<Vec<ServiceInfo>, String>),
-}
-
-impl From<Event> for Msg {
-    fn from(ev: Event) -> Self {
-        match ev {
-            Event::Key(k) => Msg::Key(k),
-            Event::Resize(w, h) => Msg::Resize(w, h),
-            _ => Msg::Resize(0, 0), // mouse etc. are ignored for now
-        }
-    }
 }
 ```
 
@@ -620,13 +606,58 @@ Assisted-by: claude:glm-5.2"
 
 ---
 
-## Task 5: Terminal run loop (glue) — real `busx` shows the live service list
+## Task 5: Event loop — injectable, TestBackend-tested
 
-**Files:** Modify `src/tui/app.rs`.
+**Files:** Modify `src/tui/state.rs` (loading constructor), `src/tui/app.rs`; Modify `tests/tui.rs` (loop test).
 
-This is the untestable-by-snapshot glue (it drives a real tty). Verify with `cargo build` and a **manual** smoke test.
+The loop is testable by injecting two things: the **backend** (`TestBackend` in tests, `CrosstermBackend` in production) and the **event source** (a scripted `Iterator<Item = Msg>` in tests, a crossterm+flume merger in production). Only the raw crossterm-on-tty bits (raw mode, alt screen, real key input) stay manual-smoke.
 
-- [ ] **Step 1: Implement `App` (loop driver) + `run`**
+- [ ] **Step 1: Write the failing loop test**
+
+Append to `tests/tui.rs`:
+
+```rust
+use busx::tui::app::App;
+
+#[test]
+fn loop_loads_services_then_navigates() {
+    let services = vec![
+        svc("org.busx.A", Some(111), None),
+        svc("org.busx.B", None, None),
+    ];
+    let events = vec![
+        Msg::ServicesLoaded(Ok(services)),
+        Msg::Key(crossterm::event::KeyCode::Down.into()),
+    ];
+    let mut app = App { state: busx::tui::State::loading_service() };
+    let backend = TestBackend::new(44, 8);
+    let mut term = Terminal::new(backend).unwrap();
+    app.run_loop(&mut term, events.into_iter()).unwrap();
+    // Final frame: populated list, selection on row 1.
+    insta::assert_snapshot!(format!("{}", term.backend()));
+}
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `cargo test --test tui loop_loads_services_then_navigates`
+Expected: FAIL (compile error — `App` / `run_loop` / `State::loading_service` not defined).
+
+- [ ] **Step 3: Add the loading constructor**
+
+In `src/tui/state.rs`, add to `impl State`:
+
+```rust
+    /// A Service screen in the loading state (the TUI's initial screen).
+    pub fn loading_service() -> Self {
+        State {
+            screen: Screen::Service(ServiceScreen { services: vec![], selected: 0, loading: true, error: None }),
+            quit: false,
+        }
+    }
+```
+
+- [ ] **Step 4: Implement `App` + the injectable `run_loop` + production wiring**
 
 `src/tui/app.rs`:
 
@@ -635,9 +666,9 @@ This is the untestable-by-snapshot glue (it drives a real tty). Verify with `car
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The terminal event loop (spec §5). Owns the async connection + flume channel
-//! + `State`; drives crossterm input and redraws. Not snapshot-tested (needs a
-//! real tty) — manual-smoke only.
+//! Event loop (spec §5). `run_loop` is backend- and event-source-agnostic so it
+//! is exercised end-to-end with `TestBackend` + a scripted event iterator; the
+//! real crossterm + flume wiring lives in `run`.
 
 use std::io::{self, Stdout};
 use std::time::Duration;
@@ -645,41 +676,57 @@ use std::time::Duration;
 use crossterm::event::{self, Event};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::execute;
-use ratatui::backend::CrosstermBackend;
+use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::Terminal;
 use zbus::Connection;
 
 use crate::dbus;
 use crate::error::Result;
 use crate::tui::msg::Msg;
-use crate::tui::state::{Screen, ServiceScreen, State};
+use crate::tui::state::State;
 use crate::tui::{render, update};
 
 type Tui = Terminal<CrosstermBackend<Stdout>>;
 
-/// Launch the TUI: connect to the bus, set up the terminal, run the loop, and
-/// always restore the terminal on exit (via the guard).
+/// Loop driver: holds the display `State` and advances it from a stream of
+/// `Msg`s. Built directly in tests; `run` builds it for production.
+pub struct App {
+    pub state: State,
+}
+
+impl App {
+    /// Render, then consume one event, repeating until `state.quit` or the event
+    /// source is exhausted. Generic over the backend so tests pass a `TestBackend`.
+    pub fn run_loop<B: Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        mut events: impl Iterator<Item = Msg>,
+    ) -> Result<()> {
+        while !self.state.quit {
+            terminal.draw(|f| render(f, &self.state))?;
+            match events.next() {
+                Some(msg) => update(&mut self.state, msg),
+                None => break, // scripted test source exhausted
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Launch the TUI against the real terminal.
 pub fn run(user: bool, system: bool, address: Option<&str>, verbose: bool) -> Result<()> {
     let conn = async_global_executor::block_on(dbus::conn::connect(user, system, address, verbose))?;
     let (tx, rx) = flume::unbounded::<Msg>();
+    spawn_list_names(conn.clone(), tx);
 
-    // Kick off the initial service-list fetch.
-    spawn_list_names(conn.clone(), tx.clone());
-
-    let state = State {
-        screen: Screen::Service(ServiceScreen { services: vec![], selected: 0, loading: true, error: None }),
-        quit: false,
-    };
-    let mut app = App { conn, tx, rx, state };
-
+    let mut app = App { state: State::loading_service() };
     let mut terminal = setup_terminal()?;
-    let result = app.main_loop(&mut terminal);
+    let result = app.run_loop(&mut terminal, CrosstermSource { rx });
     restore_terminal(&mut terminal)?;
     result
 }
 
-/// Spawn the service-list fetch on the async executor; deliver the result as a
-/// `Msg::ServicesLoaded` back to the UI channel.
+/// Spawn the service-list fetch; deliver the result as `Msg::ServicesLoaded`.
 fn spawn_list_names(conn: Connection, tx: flume::Sender<Msg>) {
     async_global_executor::spawn(async move {
         let res = dbus::list::list_names(&conn, false, false, false).await;
@@ -688,39 +735,31 @@ fn spawn_list_names(conn: Connection, tx: flume::Sender<Msg>) {
     .detach();
 }
 
-struct App {
-    conn: Connection,
-    tx: flume::Sender<Msg>,
+/// Production event source: drains the worker channel, and between messages
+/// polls crossterm for keys (short timeout so worker results flow promptly).
+struct CrosstermSource {
     rx: flume::Receiver<Msg>,
-    state: State,
 }
 
-impl App {
-    fn main_loop(&mut self, terminal: &mut Tui) -> Result<()> {
-        while !self.state.quit {
-            terminal.draw(|f| render(f, &self.state))?;
-            // Drain any worker results first.
-            while let Ok(msg) = self.rx.try_recv() {
-                update(&mut self.state, msg);
+impl Iterator for CrosstermSource {
+    type Item = Msg;
+
+    fn next(&mut self) -> Option<Msg> {
+        loop {
+            if let Ok(msg) = self.rx.try_recv() {
+                return Some(msg);
             }
-            if self.state.quit {
-                break;
-            }
-            // Block briefly for a key; the short timeout keeps worker results
-            // flowing (max ~50 ms latency to a redraw after data arrives).
-            if event::poll(Duration::from_millis(50))? {
+            if event::poll(Duration::from_millis(50)).ok()? {
                 if let Ok(ev) = event::read() {
                     if let Some(msg) = non_mouse(ev) {
-                        update(&mut self.state, msg);
+                        return Some(msg);
                     }
                 }
             }
         }
-        Ok(())
     }
 }
 
-/// Map a crossterm event to a `Msg`, dropping mouse/unsupported events.
 fn non_mouse(ev: Event) -> Option<Msg> {
     match ev {
         Event::Key(k) => Some(Msg::Key(k)),
@@ -733,8 +772,7 @@ fn setup_terminal() -> Result<Tui> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
-    let backend = CrosstermBackend::new(stdout);
-    Ok(Terminal::new(backend)?)
+    Ok(Terminal::new(CrosstermBackend::new(stdout))?)
 }
 
 fn restore_terminal(terminal: &mut Tui) -> Result<()> {
@@ -745,29 +783,21 @@ fn restore_terminal(terminal: &mut Tui) -> Result<()> {
 }
 ```
 
-> Robustness: if `main_loop` returns early on an error (e.g. a draw failure), `restore_terminal` still runs (it's called unconditionally in `run`). For panic-safety during development, wrapping the body of `run` in `std::panic::catch_unwind` + restore is a future hardening; Phase 1 keeps the happy-path restore.
+> The loop body, the channel-drain → update → redraw path, and quit handling are all covered by the Task-5 snapshot test (scripted `Msg`s + `TestBackend`). `restore_terminal` runs unconditionally in `run`, so a draw error still restores the terminal; panic-safety (`catch_unwind` + restore) is a later hardening.
 
-- [ ] **Step 2: Build + full snapshot/CLI suite**
-
-Run: `cargo build && cargo test -q`
-Expected: builds; all TUI snapshots + all CLI e2e pass.
-
-- [ ] **Step 3: Manual smoke test**
-
-Run the binary against the test bus to confirm it really launches. Start a throwaway session bus and point the TUI at it:
+- [ ] **Step 5: Generate + pin the loop snapshot, run the full suite**
 
 ```bash
-addr=$(dbus-daemon --session --print-address=1 --fork 2>/dev/null | head -1)   # or use an existing busx test bus
-cargo run -q -- --address "$addr"   # bare busx → TUI
+INSTA_UPDATE=always cargo test --test tui && cargo test -q
 ```
 
-Expected: a fullscreen TUI appears, the service list fills in, ↑↓/jk move the highlight, `q` (or `Esc`) exits cleanly back to the shell with the terminal restored. (If you don't have a handy session bus, `cargo run -q -- --system` against the system bus works too — the list reflects real services.)
+Expected: the new loop snapshot is generated and pinned; all TUI snapshots + all CLI e2e pass.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/tui/app.rs
-git commit -m "feat(busx): tui run loop — bare busx shows live service list
+git add src/tui/app.rs src/tui/state.rs tests/tui.rs tests/snapshots/
+git commit -m "feat(busx): tui event loop (injectable) — bare busx shows live service list
 
 Assisted-by: claude:glm-5.2"
 ```
