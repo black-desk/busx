@@ -69,3 +69,31 @@ fn quit_on_q_and_escape() {
     update(&mut state, key(KeyCode::Esc));
     assert!(state.quit, "Esc quits");
 }
+
+#[test]
+fn service_screen_loading_state() {
+    let state = State {
+        screen: busx::tui::Screen::Service(busx::tui::ServiceScreen {
+            services: vec![],
+            selected: 0,
+            loading: true,
+            error: None,
+        }),
+        quit: false,
+    };
+    insta::assert_snapshot!(render_to_string(&state, 40, 6));
+}
+
+#[test]
+fn service_screen_error_state() {
+    let state = State {
+        screen: busx::tui::Screen::Service(busx::tui::ServiceScreen {
+            services: vec![],
+            selected: 0,
+            loading: false,
+            error: Some("org.freedesktop.DBus.Error.ServiceUnknown: no owner".into()),
+        }),
+        quit: false,
+    };
+    insta::assert_snapshot!(render_to_string(&state, 40, 6));
+}
