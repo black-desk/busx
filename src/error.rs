@@ -21,10 +21,14 @@ pub enum Error {
     Json(#[from] serde_json::Error),
     #[error("{0}")]
     Msg(String),
-    // Never occurs in practice (TestBackend's draw is infallible); exists so the
-    // generic `App::run_loop` can lift `<B as Backend>::Error` into our `Error`.
-    #[error("infallible")]
-    Infallible(#[from] Infallible),
+}
+
+// `TestBackend`'s draw is infallible; this lets the generic `App::run_loop` lift
+// `<B as Backend>::Error` into `Error` without a dead enum variant.
+impl From<Infallible> for Error {
+    fn from(i: Infallible) -> Self {
+        match i {}
+    }
 }
 
 impl Error {
