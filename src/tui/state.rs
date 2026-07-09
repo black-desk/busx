@@ -6,8 +6,6 @@
 //! draws the top screen + a breadcrumb. `update`/`render` read only this.
 
 use crate::dbus::types::{ObjectNode, ServiceInfo};
-use std::cell::RefCell;
-use tui_tree_widget::TreeState;
 
 #[derive(Default)]
 pub struct State {
@@ -32,16 +30,13 @@ pub struct ServiceScreen {
     pub error: Option<String>,
 }
 
-/// The object-path tree of one service. `tree` is the walked `ObjectNode` root;
-/// `items` is the `tui-tree-widget` representation built from it. `state` holds
-/// the widget's selection/opened set across frames; it is a `RefCell` because
-/// `tui-tree-widget` 0.24's `TreeState` is not `Clone` and `render` must mutate
-/// it from a `&State` (interior mutability).
+/// The object paths of one service, shown as a flat list (d-feet style): each
+/// row is a full path like `/org/freedesktop/DBus` — multi-level paths expanded
+/// rather than collapsed into a tree.
 pub struct ObjectsScreen {
     pub service: String,
-    pub tree: ObjectNode,
-    pub items: Vec<tui_tree_widget::TreeItem<'static, String>>,
-    pub state: RefCell<TreeState<String>>,
+    pub paths: Vec<String>,
+    pub selected: usize,
     pub loading: bool,
     pub error: Option<String>,
 }
@@ -129,19 +124,12 @@ impl State {
     }
 }
 
-/// Build tui-tree-widget items from a walked object-path tree. Each item's
-/// identifier is its full path (unique), text is the last path segment.
-pub fn tree_items(root: &ObjectNode) -> Vec<tui_tree_widget::TreeItem<'static, String>> {
-    root.children.iter().map(child_item).collect()
-}
-
-fn child_item(node: &ObjectNode) -> tui_tree_widget::TreeItem<'static, String> {
-    let text = node.path.rsplit('/').next().unwrap_or(&node.path).to_string();
-    let children: Vec<_> = node.children.iter().map(child_item).collect();
-    if children.is_empty() {
-        tui_tree_widget::TreeItem::new_leaf(node.path.clone(), text)
-    } else {
-        // `new` rejects duplicate child ids; our paths are unique, so this can't fail.
-        tui_tree_widget::TreeItem::new(node.path.clone(), text, children).unwrap()
+/// Flatten the walked object-path tree into a depth-first list of full paths
+/// (root first), e.g. `["/", "/org", "/org/freedesktop"]` — the d-feet flat view.
+pub fn flatten_paths(root: &ObjectNode) -> Vec<String> {
+    let mut out = vec![root.path.clone()];
+    for child in &root.children {
+        out.extend(flatten_paths(child));
     }
+    out
 }

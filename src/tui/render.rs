@@ -81,15 +81,15 @@ fn render_objects(frame: &mut Frame, area: Rect, o: &crate::tui::state::ObjectsS
         frame.render_widget(Paragraph::new(format!("error: {err}")).block(block), area);
         return;
     }
-    // `TreeState` is not `Clone` in tui-tree-widget 0.24, so render through the
-    // stored `RefCell` instead of cloning a per-frame copy — selection/opened
-    // state persists across frames this way.
-    let mut state = o.state.borrow_mut();
-    let tree = tui_tree_widget::Tree::new(&o.items)
-        .expect("object-path tree identifiers are unique")
+    let items: Vec<ListItem> = o.paths.iter().map(|p| ListItem::new(Line::from(p.clone()))).collect();
+    let list = List::new(items)
         .block(block)
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-    frame.render_stateful_widget(tree, area, &mut state);
+    let mut ls = ListState::default();
+    if !o.paths.is_empty() {
+        ls.select(Some(o.selected));
+    }
+    frame.render_stateful_widget(list, area, &mut ls);
 }
 
 fn render_interfaces(frame: &mut Frame, area: Rect, i: &crate::tui::state::InterfacesScreen) {
@@ -184,7 +184,7 @@ fn render_sub_list(
 fn render_keyhint(frame: &mut Frame, area: Rect, screen: &Screen) {
     let hint = match screen {
         Screen::Service(_) => "↑↓ select · Enter open · q quit · ? help",
-        Screen::Objects(_) => "↑↓/→← navigate · Enter open · Esc back · q quit",
+        Screen::Objects(_) => "↑↓ select · Enter open · Esc back · q quit",
         Screen::Interfaces(_) => "↑↓ select · Enter open · Esc back · q quit",
         Screen::Interface(_) => "Tab switch · ↑↓ select · r refresh · Esc back · q quit",
     };

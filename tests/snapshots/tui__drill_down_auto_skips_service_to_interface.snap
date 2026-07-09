@@ -2,7 +2,7 @@
 source: tests/tui.rs
 expression: "format!(\"{}\", term.backend())"
 ---
-"services > org.busx.Test > org.busx.Test /org > org.busx.Tes"
+"services > org.busx.Test > org.busx.Test / > org.busx.Test:/"
 "┌▶ methods─────────────────────────────────────────────────┐"
 "│Ping                                                      │"
 "│                                                          │"
