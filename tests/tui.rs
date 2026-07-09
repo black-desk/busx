@@ -923,3 +923,180 @@ fn call_result_renders_reply_value() {
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 8));
 }
+
+// --- Phase 3 Task 3: property get/set Detail + Result ---
+
+/// An Interface screen whose Properties column has one property (name, sig,
+/// access) and is focused on the button bar with `button_selected` on the given
+/// action (`读取`=0 / `设置`=1).
+fn interface_on_prop_button(button: usize, sig: &str) -> busx::tui::State {
+    let screen = busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
+        service: "s".into(),
+        object: "/o".into(),
+        interface: "i".into(),
+        methods: vec![],
+        properties: vec![("p1".into(), sig.into(), "readwrite".into())],
+        signals: vec![],
+        prop_values: vec![],
+        focus: InterfaceFocus::Buttons,
+        active_column: InterfaceFocus::Properties,
+        button_selected: button,
+        selected: [0, 0, 0],
+        loading: false,
+        error: None,
+    });
+    busx::tui::State { screens: vec![screen], quit: false }
+}
+
+#[test]
+fn get_button_pushes_detail_with_no_inputs() {
+    // `读取` on p1 → a Get Detail with zero inputs and zero labels.
+    let mut state = interface_on_prop_button(0, "d");
+    update(&mut state, key(KeyCode::Enter));
+    match state.top() {
+        Screen::Detail(d) => {
+            match &d.kind {
+                ActionKind::Get { property } => assert_eq!(property, "p1"),
+                other => panic!("expected Get, got {other:?}"),
+            }
+            assert!(d.inputs.is_empty(), "Get → no input fields");
+            assert!(d.field_labels.is_empty());
+        }
+        _ => panic!("Enter should push a Detail screen"),
+    }
+}
+
+#[test]
+fn get_trigger_pushes_result_and_requests_get() {
+    let mut state = interface_on_prop_button(0, "d");
+    update(&mut state, key(KeyCode::Enter)); // push the Get Detail (0 inputs)
+    // 0 inputs → a single Tab lands on the trigger.
+    update(&mut state, key(KeyCode::Tab));
+    let effect = update(&mut state, key(KeyCode::Enter));
+    match effect {
+        Some(Effect::GetProperty { service, object, iface, property }) => {
+            assert_eq!(service, "s");
+            assert_eq!(object, "/o");
+            assert_eq!(iface, "i");
+            assert_eq!(property, "p1");
+        }
+        other => panic!("trigger Enter should request GetProperty, got {other:?}"),
+    }
+    match state.top() {
+        Screen::Result(r) => {
+            assert!(r.loading);
+            assert_eq!(r.title, "p1");
+        }
+        _ => panic!("trigger pushed a Result screen"),
+    }
+    // The result payload populates the Result screen.
+    update(&mut state, Msg::ActionResult(Ok(ActionResult::Get("0.5".into()))));
+    match state.top() {
+        Screen::Result(r) => match &r.result {
+            Some(ActionResult::Get(v)) => assert_eq!(v, "0.5"),
+            other => panic!("expected Get result, got {other:?}"),
+        },
+        _ => panic!("still on Result"),
+    }
+}
+
+#[test]
+fn set_button_pushes_detail_with_one_input_labeled_by_signature() {
+    // `设置` on p1 (signature "s") → a Set Detail with one input, label "s".
+    let mut state = interface_on_prop_button(1, "s");
+    update(&mut state, key(KeyCode::Enter));
+    match state.top() {
+        Screen::Detail(d) => {
+            match &d.kind {
+                ActionKind::Set { property, signature } => {
+                    assert_eq!(property, "p1");
+                    assert_eq!(signature, "s");
+                }
+                other => panic!("expected Set, got {other:?}"),
+            }
+            assert_eq!(d.inputs.len(), 1, "Set → one input field");
+            assert_eq!(d.field_labels, vec!["s".to_string()], "label is the signature");
+        }
+        _ => panic!("Enter should push a Detail screen"),
+    }
+}
+
+#[test]
+fn set_trigger_pushes_result_with_typed_value() {
+    let mut state = interface_on_prop_button(1, "s");
+    update(&mut state, key(KeyCode::Enter)); // push the Set Detail (1 input)
+    // Type "hi" into the field.
+    update(&mut state, key(KeyCode::Char('h')));
+    update(&mut state, key(KeyCode::Char('i')));
+    match state.top() {
+        Screen::Detail(d) => assert_eq!(d.inputs[0].value(), "hi"),
+        _ => panic!("still on Detail while typing"),
+    }
+    // Tab to the trigger, Enter → Result (loading) + SetProperty effect.
+    update(&mut state, key(KeyCode::Tab));
+    let effect = update(&mut state, key(KeyCode::Enter));
+    match effect {
+        Some(Effect::SetProperty { service, object, iface, property, signature, value }) => {
+            assert_eq!(service, "s");
+            assert_eq!(object, "/o");
+            assert_eq!(iface, "i");
+            assert_eq!(property, "p1");
+            assert_eq!(signature, "s");
+            assert_eq!(value, "hi", "typed field value flows as the set value");
+        }
+        other => panic!("trigger Enter should request SetProperty, got {other:?}"),
+    }
+    match state.top() {
+        Screen::Result(r) => {
+            assert!(r.loading);
+            assert_eq!(r.title, "p1");
+        }
+        _ => panic!("trigger pushed a Result screen"),
+    }
+    // Set success populates the Result screen.
+    update(&mut state, Msg::ActionResult(Ok(ActionResult::Set)));
+    match state.top() {
+        Screen::Result(r) => match &r.result {
+            Some(ActionResult::Set) => {}
+            other => panic!("expected Set result, got {other:?}"),
+        },
+        _ => panic!("still on Result"),
+    }
+}
+
+#[test]
+fn set_detail_form_renders_one_field() {
+    // A Set Detail with one field (label "s"), field focused.
+    let state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Detail(DetailScreen {
+            service: "s".into(),
+            object: "/o".into(),
+            interface: "i".into(),
+            kind: ActionKind::Set { property: "p1".into(), signature: "s".into() },
+            inputs: vec!["hi".into()],
+            field_labels: vec!["s".into()],
+            field_selected: 0,
+            focus: DetailFocus::Field,
+            loading: false,
+            error: None,
+        })],
+        quit: false,
+    };
+    insta::assert_snapshot!(render_to_string(&state, 40, 8));
+}
+
+#[test]
+fn get_result_renders_value() {
+    // A completed Get Result shows the property value.
+    let state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Result(ResultScreen {
+            title: "p1".into(),
+            result: Some(ActionResult::Get("0.5".into())),
+            error: None,
+            loading: false,
+            scroll: 0,
+        })],
+        quit: false,
+    };
+    insta::assert_snapshot!(render_to_string(&state, 40, 8));
+}
