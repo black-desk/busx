@@ -1,0 +1,10 @@
+---
+source: tests/tui.rs
+expression: "render_to_string(&state, 44, 6)"
+---
+"listen org.busx.Test.Ping                   "
+"┌listen org.busx.Test.Ping─────────────────┐"
+"│error: BecomeMonitor refused: ...         │"
+"│                                          │"
+"└──────────────────────────────────────────┘"
+"↑↓ scroll · Esc back/stop · q quit          "

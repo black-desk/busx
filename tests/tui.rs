@@ -1403,3 +1403,119 @@ fn method_listen_button_and_trigger_target_method() {
     }
     assert!(matches!(state.top(), Screen::Result(_)));
 }
+
+// --- Phase 4 Task 4: listen capstone loop test (full signal listen through run_loop) ---
+
+/// Drive a full signal listen through `run_loop`: Interface (Signals column) →
+/// Tab to the button bar → Enter (`监听`) pushes the Listen Detail → Tab to the
+/// trigger → Enter pushes the streaming Result (loading) + `Effect::Listen`
+/// (no-op'd by the bus-free handler) → a scripted `ListenStarted` arms the
+/// cancel + clears loading → two `ListenMessage`s append message blocks → Esc
+/// pops the Result, dropping the cancel sender, so the matching receiver sees
+/// `Canceled` (the listen task would exit). Snapshots the streaming Result frame
+/// (two message blocks) *before* the Esc.
+///
+/// Focus sequence to reach the signal's `监听` button: start on the Signals
+/// column (`focus == active_column == Signals`, one signal `Changed`), then a
+/// single `Tab` toggles focus to the button bar (Signals offers only `监听`, so
+/// `button_selected` 0 is already on it).
+#[test]
+fn listen_action_flows_interface_to_streaming_result() {
+    // Start on the Signals column (not yet on the button bar) so the first Tab
+    // exercises the column→Buttons toggle, just as a real user would.
+    let screen = busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
+        service: "s".into(),
+        object: "/o".into(),
+        interface: "org.busx.Test".into(),
+        methods: vec![],
+        properties: vec![],
+        signals: vec![("Changed".into(), "u".into())],
+        prop_values: vec![],
+        focus: InterfaceFocus::Signals,
+        active_column: InterfaceFocus::Signals,
+        button_selected: 0, // 监听 (Signals offers only one button)
+        selected: [0, 0, 0],
+        loading: false,
+        error: None,
+    });
+    let state = busx::tui::State { screens: vec![screen], quit: false };
+
+    // Arm a real cancel pair we keep the receiver of, so the Esc-drop assertion
+    // can observe the sender going away. The ListenStarted message carries the
+    // sender onto the Result; the receiver stays here in the test.
+    let (cancel_tx, cancel_rx) = futures::channel::oneshot::channel::<()>();
+
+    // Events up to (but excluding) the Esc: the streaming Result is fully armed
+    // with two message blocks when this list is exhausted.
+    let events = vec![
+        key(KeyCode::Tab),  // Signals column → Buttons
+        key(KeyCode::Enter), // 监听 → push Listen Detail (0 inputs)
+        key(KeyCode::Tab),   // 0 inputs → Trigger
+        key(KeyCode::Enter), // push Result (loading) + Effect::Listen (no-op'd)
+        Msg::ListenStarted(cancel_tx), // store cancel, clear loading
+        Msg::ListenMessage("signal  sender=:1.1\n  …block1\n".into()),
+        Msg::ListenMessage("signal  sender=:1.2\n  …block2\n".into()),
+    ];
+    let mut app = App { state };
+    let backend = TestBackend::new(40, 10);
+    let mut term = Terminal::new(backend).unwrap();
+    app.run_loop(&mut term, events.into_iter(), |_| {}).unwrap();
+
+    // The streaming Result is armed: two messages, not loading, cancel stored.
+    match app.state.top() {
+        Screen::Result(r) => {
+            assert_eq!(r.messages.len(), 2, "two message blocks streamed in");
+            assert!(!r.loading, "ListenStarted cleared loading");
+            assert!(r.cancel.is_some(), "cancel sender stored on the Result");
+        }
+        _ => panic!("should land on the streaming Result before Esc"),
+    }
+    // Snapshot the streaming Result frame (two message blocks), BEFORE Esc.
+    insta::assert_snapshot!(format!("{}", term.backend()));
+
+    // Esc through a second run_loop pass: pops the Result → drops the cancel
+    // sender → the receiver we kept yields Canceled (proves Esc-stop).
+    app.run_loop(&mut term, std::iter::once(key(KeyCode::Esc)), |_| {}).unwrap();
+    assert!(
+        !matches!(app.state.top(), Screen::Result(_)),
+        "Esc popped the streaming Result",
+    );
+    use futures::FutureExt;
+    assert!(
+        matches!(cancel_rx.now_or_never(), Some(Err(futures::channel::oneshot::Canceled))),
+        "popping the Result dropped the cancel sender → Canceled (listen task exits)",
+    );
+}
+
+/// A streaming-listen Result whose BecomeMonitor (or match-rule setup) was
+/// refused renders the error rather than a blank/loading body — and the keyhint
+/// reflects the live listen (Esc back/stop) until the error clears it.
+#[test]
+fn listen_refused_renders_error_on_result() {
+    // An armed streaming Result that then receives a refused error (the
+    // `Msg::ActionResult(Err(..))` path BecomeMonitor refuses emit). The cancel
+    // sender is still present, so the keyhint still reads "back/stop".
+    let (cancel_tx, _cancel_rx) = futures::channel::oneshot::channel::<()>();
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Result(ResultScreen {
+            title: "listen org.busx.Test.Ping".into(),
+            result: None,
+            error: None,
+            loading: true,
+            scroll: 0,
+            messages: vec![],
+            cancel: Some(cancel_tx),
+        })],
+        quit: false,
+    };
+    update(&mut state, Msg::ActionResult(Err("BecomeMonitor refused: ...".into())));
+    match state.top() {
+        Screen::Result(r) => {
+            assert!(!r.loading, "the error cleared loading");
+            assert_eq!(r.error.as_deref(), Some("BecomeMonitor refused: ..."));
+            assert!(r.result.is_none());
+        }
+        _ => panic!("still on Result"),
+    }
+    insta::assert_snapshot!(render_to_string(&state, 44, 6));
+}

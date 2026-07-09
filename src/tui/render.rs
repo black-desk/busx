@@ -338,6 +338,12 @@ fn render_keyhint(frame: &mut Frame, area: Rect, screen: &Screen) {
         Screen::Interfaces(_) => "↑↓ select · Enter open · Esc back · q quit",
         Screen::Interface(_) => "Tab buttons · Shift+Tab column · ↑↓ select · r refresh · Esc back · q quit",
         Screen::Detail(_) => "Tab move · Enter trigger · Esc back · q quit",
+        // A streaming-listen Result is armed when it has streamed messages or a
+        // live cancel sender; on those, Esc both pops the screen and stops the
+        // listen (the cancel sender drops). One-shot Results keep "Esc back".
+        Screen::Result(r) if !r.messages.is_empty() || r.cancel.is_some() => {
+            "↑↓ scroll · Esc back/stop · q quit"
+        }
         Screen::Result(_) => "↑↓ scroll · Esc back · q quit",
     };
     frame.render_widget(Paragraph::new(hint), area);
