@@ -27,6 +27,7 @@ async-global-executor = "2"
 ratatui = "0.30"
 crossterm = "0.29"
 flume = "0.12"
+tui-input = "0.15"
 
 [dev-dependencies]
 assert_cmd = "2"

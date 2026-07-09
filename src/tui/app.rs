@@ -19,8 +19,13 @@ use zbus::Connection;
 use crate::dbus;
 use crate::error::Result;
 use crate::tui::msg::{Effect, Msg};
-use crate::tui::state::State;
+use crate::tui::state::{ActionResult, State};
 use crate::tui::{render, update};
+
+/// Pretty-print an owned value (the common tail of call/get result rendering).
+fn pretty(v: &zvariant::OwnedValue) -> String {
+    crate::value::pretty::pretty(v)
+}
 
 type Tui = Terminal<CrosstermBackend<Stdout>>;
 
@@ -113,6 +118,40 @@ fn run_effect(effect: Effect, conn: Connection, tx: flume::Sender<Msg>) {
             async_global_executor::spawn(async move {
                 let res = dbus::property::get_all(&conn, &service, &object, &iface).await;
                 let _ = tx.send(Msg::PropertiesLoaded(res.map_err(|e| e.to_string())));
+            })
+            .detach();
+        }
+        Effect::CallMethod { service, object, iface, method, signature, args } => {
+            async_global_executor::spawn(async move {
+                let res = dbus::call::call_method(
+                    &conn, &service, &object, &iface, &method, &signature, &args,
+                )
+                .await;
+                let _ = tx.send(Msg::ActionResult(
+                    res.map(|vs| ActionResult::Call(vs.iter().map(pretty).collect()))
+                        .map_err(|e| e.to_string()),
+                ));
+            })
+            .detach();
+        }
+        Effect::GetProperty { service, object, iface, property } => {
+            async_global_executor::spawn(async move {
+                let res = dbus::property::get_one(&conn, &service, &object, &iface, &property).await;
+                let _ = tx.send(
+                    Msg::ActionResult(res.map(|v| ActionResult::Get(pretty(&v))).map_err(|e| e.to_string())),
+                );
+            })
+            .detach();
+        }
+        Effect::SetProperty { service, object, iface, property, signature, value } => {
+            async_global_executor::spawn(async move {
+                let res =
+                    dbus::property::set(&conn, &service, &object, &iface, &property, &signature, &[
+                        value,
+                    ])
+                    .await;
+                let _ = tx
+                    .send(Msg::ActionResult(res.map(|_| ActionResult::Set).map_err(|e| e.to_string())));
             })
             .detach();
         }

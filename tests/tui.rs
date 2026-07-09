@@ -378,7 +378,10 @@ fn interface_screen_renders_three_columns() {
             service: "org.busx.Test".into(),
             object: "/org/busx/Test".into(),
             interface: "org.busx.Test".into(),
-            methods: vec![("BumpVolume".into(), "".into()), ("Join".into(), "as".into())],
+            methods: vec![
+                method("BumpVolume", ""),
+                method("Join", "as"),
+            ],
             properties: vec![
                 ("volume".into(), "d".into(), "readwrite".into()),
                 ("name".into(), "s".into(), "read".into()),
@@ -386,6 +389,8 @@ fn interface_screen_renders_three_columns() {
             signals: vec![],
             prop_values: vec![("volume".into(), "0.5".into()), ("name".into(), r#""busx-test""#.into())],
             focus: InterfaceFocus::Properties,
+            active_column: InterfaceFocus::Properties,
+            button_selected: 0,
             selected: [0, 1, 0],
             loading: false,
             error: None,
@@ -408,6 +413,8 @@ fn properties_loaded_fills_pretty_values() {
             signals: vec![],
             prop_values: vec![],
             focus: Default::default(),
+            active_column: Default::default(),
+            button_selected: 0,
             selected: [0, 0, 0],
             loading: true,
             error: None,
@@ -431,25 +438,46 @@ fn interface_screen() -> busx::tui::state::InterfaceScreen {
         service: "s".into(),
         object: "/o".into(),
         interface: "i".into(),
-        methods: vec![("m1".into(), "u".into()), ("m2".into(), "".into())],
+        methods: vec![method("m1", "u"), method("m2", "")],
         properties: vec![("p1".into(), "s".into(), "read".into())],
         signals: vec![("sig1".into(), "u".into())],
         prop_values: vec![],
         focus: InterfaceFocus::Methods,
+        active_column: InterfaceFocus::Methods,
+        button_selected: 0,
         selected: [0, 0, 0],
         loading: false,
         error: None,
     }
 }
 
+/// A `MethodMember` with no per-arg detail (Task 2 fills `args`).
+fn method(name: &str, signature: &str) -> busx::tui::state::MethodMember {
+    busx::tui::state::MethodMember { name: name.into(), signature: signature.into(), args: vec![] }
+}
+
 #[test]
-fn interface_tab_cycles_focus() {
+fn interface_tab_toggles_column_and_buttons() {
     let mut state = busx::tui::State { screens: vec![Screen::Interface(interface_screen())], quit: false };
+    // Start on the Methods column (focus == active_column == Methods).
+    assert_eq!(state.top_focus(), InterfaceFocus::Methods);
+    // Tab jumps to the button bar.
     update(&mut state, key(KeyCode::Tab));
+    assert_eq!(state.top_focus(), InterfaceFocus::Buttons);
+    // Tab again returns to the active column.
+    update(&mut state, key(KeyCode::Tab));
+    assert_eq!(state.top_focus(), InterfaceFocus::Methods);
+}
+
+#[test]
+fn interface_backtab_cycles_active_column() {
+    let mut state = busx::tui::State { screens: vec![Screen::Interface(interface_screen())], quit: false };
+    // Shift+Tab (BackTab) cycles the active column Methods→Properties→Signals→Methods.
+    update(&mut state, key(KeyCode::BackTab));
     assert_eq!(state.top_focus(), InterfaceFocus::Properties);
-    update(&mut state, key(KeyCode::Tab));
+    update(&mut state, key(KeyCode::BackTab));
     assert_eq!(state.top_focus(), InterfaceFocus::Signals);
-    update(&mut state, key(KeyCode::Tab));
+    update(&mut state, key(KeyCode::BackTab));
     assert_eq!(state.top_focus(), InterfaceFocus::Methods);
 }
 
@@ -461,9 +489,10 @@ fn interface_arrows_move_within_focused_column() {
     assert_eq!(state.top_selected(), [1, 0, 0]);
     update(&mut state, key(KeyCode::Down));
     assert_eq!(state.top_selected(), [1, 0, 0], "clamped at last method");
-    // Tab to signals (1 signal), Down clamps.
-    update(&mut state, key(KeyCode::Tab));
-    update(&mut state, key(KeyCode::Tab));
+    // BackTab to signals (1 signal), Down clamps.
+    update(&mut state, key(KeyCode::BackTab));
+    update(&mut state, key(KeyCode::BackTab));
+    assert_eq!(state.top_focus(), InterfaceFocus::Signals);
     update(&mut state, key(KeyCode::Down));
     assert_eq!(state.top_selected(), [1, 0, 0]);
     update(&mut state, key(KeyCode::Up)); // no-op above 0
@@ -522,4 +551,102 @@ fn drill_down_auto_skips_service_to_interface() {
         _ => panic!("auto-skip chain should land on Interface"),
     }
     insta::assert_snapshot!(format!("{}", term.backend()));
+}
+
+// --- Phase 3: action buttons push a stub Detail screen ---
+
+#[test]
+fn interface_button_enter_pushes_call_detail() {
+    // Methods column, focus on the button bar, button_selected on `调用`.
+    let mut screen = interface_screen();
+    screen.active_column = InterfaceFocus::Methods;
+    screen.focus = InterfaceFocus::Buttons;
+    screen.button_selected = 0;
+    screen.selected = [0, 0, 0]; // m1 (signature "u")
+    let mut state = busx::tui::State { screens: vec![Screen::Interface(screen)], quit: false };
+    let effect = update(&mut state, key(KeyCode::Enter));
+    assert!(effect.is_none(), "button Enter pushes a stub (no Effect this task)");
+    match state.top() {
+        Screen::Detail(d) => {
+            assert_eq!(d.service, "s");
+            assert_eq!(d.object, "/o");
+            assert_eq!(d.interface, "i");
+            match &d.kind {
+                busx::tui::state::ActionKind::Call { method, signature } => {
+                    assert_eq!(method, "m1");
+                    assert_eq!(signature, "u");
+                }
+                other => panic!("expected Call, got {other:?}"),
+            }
+            assert!(d.inputs.is_empty(), "stub Detail has no inputs yet");
+            assert!(!d.loading);
+        }
+        _ => panic!("Enter should push a Detail screen"),
+    }
+}
+
+#[test]
+fn interface_button_enter_pushes_get_detail() {
+    // Properties column, `读取` button (index 0) on p1.
+    let mut screen = interface_screen();
+    screen.active_column = InterfaceFocus::Properties;
+    screen.focus = InterfaceFocus::Buttons;
+    screen.button_selected = 0;
+    screen.selected = [0, 0, 0]; // p1
+    let mut state = busx::tui::State { screens: vec![Screen::Interface(screen)], quit: false };
+    update(&mut state, key(KeyCode::Enter));
+    match state.top() {
+        Screen::Detail(d) => match &d.kind {
+            busx::tui::state::ActionKind::Get { property } => assert_eq!(property, "p1"),
+            other => panic!("expected Get, got {other:?}"),
+        },
+        _ => panic!("Detail screen expected"),
+    }
+}
+
+#[test]
+fn interface_button_enter_pushes_set_detail() {
+    // Properties column, `设置` button (index 1) on p1 (signature "s").
+    let mut screen = interface_screen();
+    screen.active_column = InterfaceFocus::Properties;
+    screen.focus = InterfaceFocus::Buttons;
+    screen.button_selected = 1; // 设置
+    screen.selected = [0, 0, 0];
+    let mut state = busx::tui::State { screens: vec![Screen::Interface(screen)], quit: false };
+    update(&mut state, key(KeyCode::Enter));
+    match state.top() {
+        Screen::Detail(d) => match &d.kind {
+            busx::tui::state::ActionKind::Set { property, signature } => {
+                assert_eq!(property, "p1");
+                assert_eq!(signature, "s");
+            }
+            other => panic!("expected Set, got {other:?}"),
+        },
+        _ => panic!("Detail screen expected"),
+    }
+}
+
+#[test]
+fn interface_renders_action_button_bar() {
+    // Methods column with a method selected → the right panel shows `actions` /
+    // `调用`, focused when focus == Buttons.
+    let state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
+            service: "org.busx.Test".into(),
+            object: "/org/busx/Test".into(),
+            interface: "org.busx.Test".into(),
+            methods: vec![method("Ping", ""), method("Echo", "ss")],
+            properties: vec![("Name".into(), "s".into(), "read".into())],
+            signals: vec![],
+            prop_values: vec![],
+            focus: InterfaceFocus::Buttons,
+            active_column: InterfaceFocus::Methods,
+            button_selected: 0,
+            selected: [0, 0, 0],
+            loading: false,
+            error: None,
+        })],
+        quit: false,
+    };
+    insta::assert_snapshot!(render_to_string(&state, 64, 16));
 }
