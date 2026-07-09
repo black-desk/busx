@@ -1110,7 +1110,7 @@ fn get_result_renders_value() {
 /// Result screen. Snapshots the final Result frame.
 #[test]
 fn call_action_flows_interface_to_result() {
-    let mut state = busx::tui::State {
+    let state = busx::tui::State {
         screens: vec![busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
             service: "s".into(),
             object: "/o".into(),
@@ -1129,7 +1129,6 @@ fn call_action_flows_interface_to_result() {
         })],
         quit: false,
     };
-    let _ = &mut state; // (kept for parity with the literal style; state moves below)
     let events = vec![
         key(KeyCode::Tab),           // Methods column → Buttons
         key(KeyCode::Enter),         // 调用 → push Call Detail (1 input)
