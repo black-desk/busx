@@ -31,7 +31,9 @@ pub async fn list_names(
     } else if acquired && !unique {
         names.retain(|n| !n.starts_with(':'));
     }
-    names.sort();
+    // Well-known names first (alphabetical), then unique (`:1.x`) names — the
+    // meaningful service names lead, the bus-driver plumbing trails.
+    names.sort_by(|a, b| a.starts_with(':').cmp(&b.starts_with(':')).then_with(|| a.cmp(b)));
 
     let mut out = Vec::with_capacity(names.len());
     for n in &names {
