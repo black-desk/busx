@@ -1100,3 +1100,59 @@ fn get_result_renders_value() {
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 8));
 }
+
+// --- Phase 3 Task 4: capstone loop test (full call through run_loop) ---
+
+/// Drive a full method call through `run_loop`: Interface → Tab to the button
+/// bar → Enter (`调用`) pushes the Detail → type "42" → Tab to the trigger →
+/// Enter pushes the Result (loading) + a `CallMethod` Effect (no-op'd by the
+/// bus-free handler) → a scripted `ActionResult::Call` reply lands in the
+/// Result screen. Snapshots the final Result frame.
+#[test]
+fn call_action_flows_interface_to_result() {
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
+            service: "s".into(),
+            object: "/o".into(),
+            interface: "i".into(),
+            // One method "Add(n: u)" → signature "u", one IN-arg input field.
+            methods: vec![method_with_args("Add", &[("n", "u")])],
+            properties: vec![],
+            signals: vec![],
+            prop_values: vec![],
+            focus: InterfaceFocus::Methods,
+            active_column: InterfaceFocus::Methods,
+            button_selected: 0, // 调用
+            selected: [0, 0, 0], // Add
+            loading: false,
+            error: None,
+        })],
+        quit: false,
+    };
+    let _ = &mut state; // (kept for parity with the literal style; state moves below)
+    let events = vec![
+        key(KeyCode::Tab),           // Methods column → Buttons
+        key(KeyCode::Enter),         // 调用 → push Call Detail (1 input)
+        key(KeyCode::Char('4')),     // type into the field
+        key(KeyCode::Char('2')),
+        key(KeyCode::Tab),           // Field → Trigger
+        key(KeyCode::Enter),         // push Result (loading) + CallMethod (no-op'd)
+        Msg::ActionResult(Ok(ActionResult::Call(vec!["42".into()]))), // scripted reply
+    ];
+    let mut app = App { state };
+    let backend = TestBackend::new(40, 8);
+    let mut term = Terminal::new(backend).unwrap();
+    app.run_loop(&mut term, events.into_iter(), |_| {}).unwrap();
+    match app.state.top() {
+        Screen::Result(r) => {
+            assert!(!r.loading, "the scripted reply cleared loading");
+            assert_eq!(r.title, "i.Add");
+            match &r.result {
+                Some(ActionResult::Call(v)) => assert_eq!(v, &vec!["42".to_string()]),
+                other => panic!("expected Call result, got {other:?}"),
+            }
+        }
+        _ => panic!("should land on Result"),
+    }
+    insta::assert_snapshot!(format!("{}", term.backend()));
+}
