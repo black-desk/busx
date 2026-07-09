@@ -6,7 +6,7 @@
 //! ratatui TestBackend, compare to an insta golden snapshot. No real bus.
 
 use busx::dbus::types::ServiceInfo;
-use busx::tui::{render, update, Msg, Screen, State};
+use busx::tui::{render, update, Effect, Msg, Screen, State};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
@@ -139,4 +139,91 @@ fn objects_screen_renders_tree() {
         quit: false,
     };
     insta::assert_snapshot!(render_to_string(&state, 48, 9));
+}
+
+// --- Objects screen behavior: Enter / load / auto-skip / error (pure `update`) ---
+
+fn objects_screen(service: &str) -> busx::tui::state::ObjectsScreen {
+    busx::tui::state::ObjectsScreen {
+        service: service.into(),
+        tree: ObjectNode { path: "/".into(), children: vec![] },
+        items: vec![],
+        state: Default::default(),
+        loading: true,
+        error: None,
+    }
+}
+
+#[test]
+fn service_enter_pushes_objects_and_requests_fetch() {
+    let mut state = State::service(vec![
+        svc("org.busx.A", None, None),
+        svc("org.busx.B", None, None),
+    ]);
+    let effect = update(&mut state, key(KeyCode::Enter));
+    match effect {
+        Some(Effect::FetchObjects(s)) => assert_eq!(s, "org.busx.A"),
+        _ => panic!("Enter should request FetchObjects"),
+    }
+    assert_eq!(state.screens.len(), 2, "Enter pushed an Objects screen");
+    match state.top() {
+        Screen::Objects(o) => {
+            assert_eq!(o.service, "org.busx.A");
+            assert!(o.loading, "new Objects screen starts loading");
+            assert!(o.items.is_empty());
+        }
+        _ => panic!("top screen should be Objects"),
+    }
+}
+
+#[test]
+fn objects_loaded_populates_items_without_skip() {
+    let mut state = State { screens: vec![Screen::Objects(objects_screen("org.busx.A"))], quit: false };
+    let tree = obj("/", vec![obj("/a", vec![]), obj("/b", vec![])]);
+    let effect = update(&mut state, Msg::ObjectsLoaded(Ok(tree)));
+    assert!(effect.is_none(), "two children ⇒ no auto-skip, no fetch");
+    match state.top() {
+        Screen::Objects(o) => {
+            assert!(!o.loading);
+            assert_eq!(o.items.len(), 2, "two top-level items");
+        }
+        _ => panic!("still on Objects"),
+    }
+}
+
+#[test]
+fn objects_loaded_single_child_auto_skips_to_interfaces() {
+    let mut state = State { screens: vec![Screen::Objects(objects_screen("org.busx.A"))], quit: false };
+    let tree = obj("/", vec![obj("/org", vec![])]);
+    let effect = update(&mut state, Msg::ObjectsLoaded(Ok(tree)));
+    match effect {
+        Some(Effect::FetchInterfaces(s, p)) => {
+            assert_eq!(s, "org.busx.A");
+            assert_eq!(p, "/org");
+        }
+        _ => panic!("single child ⇒ FetchInterfaces"),
+    }
+    assert_eq!(state.screens.len(), 2, "auto-skip pushed Interfaces");
+    match state.top() {
+        Screen::Interfaces(i) => {
+            assert_eq!(i.service, "org.busx.A");
+            assert_eq!(i.object, "/org");
+            assert!(i.loading, "Interfaces pushed in loading state");
+        }
+        _ => panic!("top should be Interfaces after auto-skip"),
+    }
+}
+
+#[test]
+fn objects_loaded_error_sets_error_without_skip() {
+    let mut state = State { screens: vec![Screen::Objects(objects_screen("org.busx.A"))], quit: false };
+    let effect = update(&mut state, Msg::ObjectsLoaded(Err("boom".into())));
+    assert!(effect.is_none(), "error path requests no fetch");
+    match state.top() {
+        Screen::Objects(o) => {
+            assert!(!o.loading);
+            assert_eq!(o.error.as_deref(), Some("boom"));
+        }
+        _ => panic!("still Objects on error"),
+    }
 }
