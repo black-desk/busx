@@ -59,6 +59,7 @@ fn action_title(kind: &ActionKind) -> String {
         ActionKind::Call { method, .. } => format!("call {method}"),
         ActionKind::Get { property } => format!("get {property}"),
         ActionKind::Set { property, .. } => format!("set {property}"),
+        ActionKind::Listen { .. } => "listen".to_string(),
     }
 }
 
@@ -191,9 +192,9 @@ fn render_interface(frame: &mut Frame, area: Rect, i: &crate::tui::state::Interf
 /// The action buttons offered for a given active column (mirrors `update`).
 fn action_buttons(column: InterfaceFocus) -> &'static [&'static str] {
     match column {
-        InterfaceFocus::Methods => &["调用"],
-        InterfaceFocus::Properties => &["读取", "设置"],
-        InterfaceFocus::Signals => &[],
+        InterfaceFocus::Methods => &["调用", "监听"],
+        InterfaceFocus::Properties => &["读取", "设置", "监听"],
+        InterfaceFocus::Signals => &["监听"],
         InterfaceFocus::Buttons => &[],
     }
 }
@@ -278,14 +279,23 @@ fn render_result(frame: &mut Frame, area: Rect, r: &ResultScreen) {
     };
     let block = Block::default().borders(Borders::ALL).title(title);
 
+    // Streaming-listen mode takes precedence over the one-shot result/loading:
+    // if any message block has arrived, show the joined blocks (skipped by scroll).
     let body = if let Some(err) = &r.error {
         format!("error: {err}")
+    } else if !r.messages.is_empty() {
+        r.messages
+            .iter()
+            .skip(r.scroll)
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join("\n")
     } else if r.loading {
         "…".to_string()
     } else {
         match &r.result {
             Some(ActionResult::Call(lines)) => {
-                // Skip `scroll` leading lines (Task 4 clamps the scroll value).
+                // Skip `scroll` leading lines (update clamps the scroll value).
                 lines.iter().skip(r.scroll).map(String::as_str).collect::<Vec<_>>().join("\n")
             }
             Some(ActionResult::Get(v)) => v.clone(),

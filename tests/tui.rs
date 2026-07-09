@@ -665,7 +665,7 @@ fn interface_renders_action_button_bar() {
 
 // --- Phase 3 Task 2: method-call Detail form + Result ---
 
-use busx::tui::state::{ActionKind, ActionResult, DetailFocus, DetailScreen, ResultScreen};
+use busx::tui::state::{ActionKind, ActionResult, DetailFocus, DetailScreen, ListenTarget, ResultScreen};
 
 /// An Interface screen focused on the button bar, with `button_selected` on the
 /// given button index; `selected[0]` points at `methods[idx]`.
@@ -870,6 +870,8 @@ fn action_result_populates_result_screen() {
             error: None,
             loading: true,
             scroll: 0,
+            messages: vec![],
+            cancel: None,
         })],
         quit: false,
     };
@@ -918,6 +920,8 @@ fn call_result_renders_reply_value() {
             error: None,
             loading: false,
             scroll: 0,
+            messages: vec![],
+            cancel: None,
         })],
         quit: false,
     };
@@ -1095,6 +1099,8 @@ fn get_result_renders_value() {
             error: None,
             loading: false,
             scroll: 0,
+            messages: vec![],
+            cancel: None,
         })],
         quit: false,
     };
@@ -1154,4 +1160,225 @@ fn call_action_flows_interface_to_result() {
         _ => panic!("should land on Result"),
     }
     insta::assert_snapshot!(format!("{}", term.backend()));
+}
+
+// --- Phase 4 Task 2: signal/property listen — Listen Detail + streaming Result ---
+
+/// An Interface screen whose Signals column has one signal and is focused on the
+/// button bar with `button_selected` on `监听` (the only signal button). Uses a
+/// valid D-Bus interface name so the match-rule preview parses cleanly.
+fn interface_on_signal_button() -> busx::tui::State {
+    let screen = busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
+        service: "s".into(),
+        object: "/o".into(),
+        interface: "org.busx.Test".into(),
+        methods: vec![],
+        properties: vec![],
+        signals: vec![("Changed".into(), "u".into())],
+        prop_values: vec![],
+        focus: InterfaceFocus::Buttons,
+        active_column: InterfaceFocus::Signals,
+        button_selected: 0, // 监听
+        selected: [0, 0, 0],
+        loading: false,
+        error: None,
+    });
+    busx::tui::State { screens: vec![screen], quit: false }
+}
+
+#[test]
+fn signal_listen_button_pushes_detail_with_match_rule_preview() {
+    // Signals column, `监听` button → a Listen Detail whose single label is the
+    // match-rule preview (no inputs).
+    let mut state = interface_on_signal_button();
+    let effect = update(&mut state, key(KeyCode::Enter));
+    assert!(effect.is_none(), "the button just pushes a Detail (no Effect)");
+    match state.top() {
+        Screen::Detail(d) => {
+            match &d.kind {
+                ActionKind::Listen { target } => match target {
+                    ListenTarget::Signal { member } => assert_eq!(member, "Changed"),
+                    other => panic!("expected Signal listen, got {other:?}"),
+                },
+                other => panic!("expected Listen, got {other:?}"),
+            }
+            assert!(d.inputs.is_empty(), "Listen Detail has no input fields");
+            assert_eq!(d.field_labels.len(), 1, "one label: the match-rule preview");
+            // The preview is the signal's match rule on (iface, member, object).
+            let rule = &d.field_labels[0];
+            assert!(rule.contains("type='signal'"), "preview {rule} is a signal rule");
+            assert!(rule.contains("interface='org.busx.Test'"));
+            assert!(rule.contains("member='Changed'"));
+            assert!(rule.contains("path='/o'"));
+        }
+        _ => panic!("Enter should push a Detail screen"),
+    }
+}
+
+#[test]
+fn property_listen_button_targets_propertieschanged_rule() {
+    // Properties column, `监听` button (index 2) → the preview subscribes the
+    // shared PropertiesChanged signal on the object.
+    let screen = busx::tui::state::InterfaceScreen {
+        service: "s".into(),
+        object: "/o".into(),
+        interface: "org.busx.Test".into(),
+        methods: vec![],
+        properties: vec![("volume".into(), "d".into(), "readwrite".into())],
+        signals: vec![],
+        prop_values: vec![],
+        focus: InterfaceFocus::Buttons,
+        active_column: InterfaceFocus::Properties,
+        button_selected: 2, // 监听
+        selected: [0, 0, 0],
+        loading: false,
+        error: None,
+    };
+    let mut state = busx::tui::State { screens: vec![busx::tui::Screen::Interface(screen)], quit: false };
+    update(&mut state, key(KeyCode::Enter));
+    match state.top() {
+        Screen::Detail(d) => {
+            match &d.kind {
+                ActionKind::Listen { target: ListenTarget::Property { property } } => {
+                    assert_eq!(property, "volume");
+                }
+                other => panic!("expected Property listen, got {other:?}"),
+            }
+            let rule = &d.field_labels[0];
+            assert!(rule.contains("member='PropertiesChanged'"), "preview {rule} is PropertiesChanged");
+            assert!(rule.contains("path='/o'"));
+        }
+        _ => panic!("Detail screen expected"),
+    }
+}
+
+#[test]
+fn listen_trigger_pushes_result_and_requests_listen() {
+    // From a Listen Detail, Tab to the trigger, Enter → Result (loading) +
+    // Effect::Listen { target: Signal }.
+    let mut state = interface_on_signal_button();
+    update(&mut state, key(KeyCode::Enter)); // push the Listen Detail (0 inputs)
+    // 0 inputs → a single Tab lands on the trigger.
+    update(&mut state, key(KeyCode::Tab));
+    let effect = update(&mut state, key(KeyCode::Enter));
+    match effect {
+        Some(Effect::Listen { service, object, iface, target }) => {
+            assert_eq!(service, "s");
+            assert_eq!(object, "/o");
+            assert_eq!(iface, "org.busx.Test");
+            match target {
+                ListenTarget::Signal { member } => assert_eq!(member, "Changed"),
+                other => panic!("expected Signal listen, got {other:?}"),
+            }
+        }
+        other => panic!("trigger Enter should request Listen, got {other:?}"),
+    }
+    match state.top() {
+        Screen::Result(r) => {
+            assert!(r.loading, "Result starts loading until ListenStarted arrives");
+            assert_eq!(r.title, "listen org.busx.Test.Changed");
+            assert!(r.messages.is_empty());
+            assert!(r.cancel.is_none(), "cancel arrives with ListenStarted");
+        }
+        _ => panic!("trigger pushed a Result screen"),
+    }
+}
+
+#[test]
+fn listen_started_stores_cancel_and_clears_loading() {
+    // ListenStarted carries the cancel sender onto the Result and clears loading.
+    let mut state = interface_on_signal_button();
+    update(&mut state, key(KeyCode::Enter)); // push Listen Detail
+    update(&mut state, key(KeyCode::Tab)); // → trigger
+    update(&mut state, key(KeyCode::Enter)); // push Result + Effect.Listen (no-op'd)
+    let (cancel_tx, _cancel_rx) = futures::channel::oneshot::channel::<()>();
+    update(&mut state, Msg::ListenStarted(cancel_tx));
+    match state.top() {
+        Screen::Result(r) => {
+            assert!(r.cancel.is_some(), "cancel sender stored on the Result");
+            assert!(!r.loading, "ListenStarted cleared loading");
+        }
+        _ => panic!("still on Result"),
+    }
+}
+
+#[test]
+fn listen_messages_append_and_esc_stops() {
+    // Two ListenMessages append to the Result; Esc pops it and drops the cancel
+    // sender, so the matching receiver sees Canceled (the listen task exits).
+    let mut state = interface_on_signal_button();
+    update(&mut state, key(KeyCode::Enter)); // push Listen Detail
+    update(&mut state, key(KeyCode::Tab)); // → trigger
+    update(&mut state, key(KeyCode::Enter)); // push Result + Effect.Listen (no-op'd)
+    // Arm the listen with a real cancel pair we hold the receiver of.
+    let (cancel_tx, cancel_rx) = futures::channel::oneshot::channel::<()>();
+    update(&mut state, Msg::ListenStarted(cancel_tx));
+    update(&mut state, Msg::ListenMessage("signal  sender=:1.1\n  …block1\n".into()));
+    update(&mut state, Msg::ListenMessage("signal  sender=:1.2\n  …block2\n".into()));
+    match state.top() {
+        Screen::Result(r) => assert_eq!(r.messages.len(), 2, "two message blocks appended"),
+        _ => panic!("still on Result"),
+    }
+    // Esc pops the Result → cancel sender drops → receiver errors Canceled.
+    update(&mut state, key(KeyCode::Esc));
+    assert!(!matches!(state.top(), Screen::Result(_)), "Esc popped the Result");
+    use futures::FutureExt;
+    assert!(
+        matches!(cancel_rx.now_or_never(), Some(Err(futures::channel::oneshot::Canceled))),
+        "dropping the Result dropped the cancel sender → Canceled",
+    );
+}
+
+#[test]
+fn listen_result_renders_streaming_messages() {
+    // A streaming Result with two message blocks renders them joined.
+    let state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Result(ResultScreen {
+            title: "listen i.Changed".into(),
+            result: None,
+            error: None,
+            loading: false,
+            scroll: 0,
+            messages: vec![
+                "signal  sender=:1.1\n  interface=i  member=Changed  serial=7\n  3".into(),
+                "signal  sender=:1.1\n  interface=i  member=Changed  serial=9\n  4".into(),
+            ],
+            cancel: None,
+        })],
+        quit: false,
+    };
+    insta::assert_snapshot!(render_to_string(&state, 52, 10));
+}
+
+#[test]
+fn method_listen_trigger_returns_not_implemented_error() {
+    // Methods column, `监听` button → a Listen Detail targeting a Method; on the
+    // app side Method listen is Task 3. Here we assert the trigger pushes a
+    // Result and requests Effect::Listen { target: Method } (the app stubs it).
+    let screen = busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
+        service: "s".into(),
+        object: "/o".into(),
+        interface: "i".into(),
+        methods: vec![method("Ping", "")],
+        properties: vec![],
+        signals: vec![],
+        prop_values: vec![],
+        focus: InterfaceFocus::Buttons,
+        active_column: InterfaceFocus::Methods,
+        button_selected: 1, // 监听
+        selected: [0, 0, 0],
+        loading: false,
+        error: None,
+    });
+    let mut state = busx::tui::State { screens: vec![screen], quit: false };
+    update(&mut state, key(KeyCode::Enter)); // push the Method Listen Detail
+    update(&mut state, key(KeyCode::Tab)); // → trigger
+    let effect = update(&mut state, key(KeyCode::Enter));
+    match effect {
+        Some(Effect::Listen { target: ListenTarget::Method { member }, .. }) => {
+            assert_eq!(member, "Ping");
+        }
+        other => panic!("expected Method Listen, got {other:?}"),
+    }
+    assert!(matches!(state.top(), Screen::Result(_)));
 }

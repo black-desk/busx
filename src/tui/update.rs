@@ -13,8 +13,8 @@ use crate::dbus::types::{ObjectNode, ServiceInfo};
 use crate::tui::msg::{Effect, Msg};
 use crate::tui::state::{
     flatten_paths, ActionKind, ActionResult, DetailFocus, DetailScreen, InterfaceFocus,
-    InterfaceScreen, InterfacesScreen, MethodMember, ObjectsScreen, ResultScreen, Screen,
-    ServiceScreen, State,
+    InterfaceScreen, InterfacesScreen, ListenTarget, MethodMember, ObjectsScreen, ResultScreen,
+    Screen, ServiceScreen, State,
 };
 use tui_input::backend::crossterm::EventHandler;
 
@@ -38,6 +38,22 @@ pub fn update(state: &mut State, msg: Msg) -> Option<Effect> {
                     Ok(ar) => r.result = Some(ar),
                     Err(e) => r.error = Some(e),
                 }
+            }
+            None
+        }
+        Msg::ListenStarted(cancel) => {
+            // Fast-Esc edge: the Result may already be gone (popped before this
+            // arrived) → `cancel` drops here, which ends the listen task's
+            // `cancel_rx` → `select!` breaks. No task leak.
+            if let Screen::Result(r) = state.top_mut() {
+                r.cancel = Some(cancel);
+                r.loading = false;
+            }
+            None
+        }
+        Msg::ListenMessage(body) => {
+            if let Screen::Result(r) = state.top_mut() {
+                r.messages.push(body);
             }
             None
         }
@@ -117,6 +133,9 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                             method: m.name.clone(),
                             signature: m.signature.clone(),
                         },
+                        "监听" => ActionKind::Listen {
+                            target: ListenTarget::Method { member: m.name.clone() },
+                        },
                         _ => return None,
                     }
                 }
@@ -125,13 +144,26 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                     match action {
                         "读取" => ActionKind::Get { property: name.clone() },
                         "设置" => ActionKind::Set { property: name.clone(), signature: sig.clone() },
+                        "监听" => ActionKind::Listen {
+                            target: ListenTarget::Property { property: name.clone() },
+                        },
+                        _ => return None,
+                    }
+                }
+                InterfaceFocus::Signals => {
+                    let (name, _sig) = i.signals.get(i.selected[2])?;
+                    match action {
+                        "监听" => ActionKind::Listen {
+                            target: ListenTarget::Signal { member: name.clone() },
+                        },
                         _ => return None,
                     }
                 }
                 _ => return None,
             };
             // Build the form fields: Call → one input per IN-arg; Set → one input
-            // (the new value), labeled with the property's signature; Get → none.
+            // (the new value), labeled with the property's signature; Get/Listen →
+            // no inputs. A Listen carries its match-rule preview as a single label.
             let (inputs, field_labels) = match &kind {
                 ActionKind::Call { .. } => {
                     let m = i.methods.get(i.selected[0]);
@@ -144,6 +176,10 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                     (vec![tui_input::Input::default()], vec![signature.clone()])
                 }
                 ActionKind::Get { .. } => (vec![], vec![]),
+                ActionKind::Listen { target } => {
+                    let rule = listen_rule(&iface, &obj, target).map(|r| r.to_string());
+                    (vec![], vec![rule.unwrap_or_else(|e| format!("invalid match rule: {e}"))])
+                }
             };
             push_detail(state, svc, obj, iface, kind, inputs, field_labels);
             None
@@ -195,6 +231,23 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                         },
                     )
                 }
+                ActionKind::Listen { target } => {
+                    // Listen targets a member/property; title surfaces which.
+                    let member_or_prop = match target {
+                        ListenTarget::Signal { member }
+                        | ListenTarget::Method { member } => member.clone(),
+                        ListenTarget::Property { property } => property.clone(),
+                    };
+                    (
+                        format!("listen {}.{}", d.interface, member_or_prop),
+                        Effect::Listen {
+                            service: d.service.clone(),
+                            object: d.object.clone(),
+                            iface: d.interface.clone(),
+                            target: target.clone(),
+                        },
+                    )
+                }
             };
             state.screens.push(Screen::Result(ResultScreen {
                 title,
@@ -202,6 +255,8 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                 error: None,
                 loading: true,
                 scroll: 0,
+                messages: vec![],
+                cancel: None,
             }));
             Some(effect)
         }
@@ -215,9 +270,15 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
 /// results simply don't scroll). Real precise scrolling matters most for
 /// streaming monitor results (Phase 4).
 fn update_result_key(r: &mut ResultScreen, code: KeyCode) {
-    let lines = match &r.result {
-        Some(ActionResult::Call(vs)) => vs.len(),
-        Some(ActionResult::Get(_)) | None | Some(ActionResult::Set) => 1,
+    // Streaming-listen mode counts received message blocks; one-shot mode counts
+    // reply lines (1 for Get/Set/empty). Clamp coarsely: render applies the offset.
+    let lines = if !r.messages.is_empty() {
+        r.messages.len()
+    } else {
+        match &r.result {
+            Some(ActionResult::Call(vs)) => vs.len(),
+            Some(ActionResult::Get(_)) | None | Some(ActionResult::Set) => 1,
+        }
     };
     match code {
         KeyCode::Down | KeyCode::Char('j') => {
@@ -351,12 +412,13 @@ fn column_len(i: &InterfaceScreen, idx: usize) -> usize {
     }
 }
 
-/// The action buttons offered for a given active column (Signals → none this phase).
+/// The action buttons offered for a given active column. Each column carries a
+/// `监听` (listen) button; methods also `调用`, properties `读取`/`设置`.
 fn buttons_for(column: InterfaceFocus) -> &'static [&'static str] {
     match column {
-        InterfaceFocus::Methods => &["调用"],
-        InterfaceFocus::Properties => &["读取", "设置"],
-        InterfaceFocus::Signals => &[],
+        InterfaceFocus::Methods => &["调用", "监听"],
+        InterfaceFocus::Properties => &["读取", "设置", "监听"],
+        InterfaceFocus::Signals => &["监听"],
         InterfaceFocus::Buttons => &[],
     }
 }
@@ -602,7 +664,8 @@ fn call_fields(args: &[(String, String)]) -> (Vec<tui_input::Input>, Vec<String>
 
 /// Push a Detail form for an action. `inputs`/`field_labels` are non-empty only
 /// for calls (one input per IN-arg) and Set (one input, labeled with the
-/// property's signature); Get keeps both empty.
+/// property's signature); Get keeps both empty. A Listen carries its match-rule
+/// preview as a single label (no inputs).
 fn push_detail(
     state: &mut State,
     service: String,
@@ -624,4 +687,45 @@ fn push_detail(
         loading: false,
         error: None,
     }));
+}
+
+/// The match rule that subscribes to a listen target — shared by the Detail
+/// preview here and the live `MessageStream` in `app.rs`.
+///
+/// - Signal → the signal's own rule on `(iface, member, object)`.
+/// - Property → subscribe `org.freedesktop.DBus.Properties.PropertiesChanged` on
+///   `object`; the named property is filtered client-side in `app.rs`.
+/// - Method → the method-call rule (BecomeMonitor sees call/return/error); Task 3
+///   replaces the live stream, this only feeds the preview.
+pub(crate) fn listen_rule(
+    iface: &str,
+    object: &str,
+    target: &ListenTarget,
+) -> crate::error::Result<zbus::MatchRule<'static>> {
+    match target {
+        ListenTarget::Signal { member } => crate::dbus::monitor::build_match_rule(
+            Some(iface),
+            Some(member),
+            Some(object),
+            None,
+            None,
+            true,
+        ),
+        ListenTarget::Property { .. } => crate::dbus::monitor::build_match_rule(
+            Some("org.freedesktop.DBus.Properties"),
+            Some("PropertiesChanged"),
+            Some(object),
+            None,
+            None,
+            true,
+        ),
+        ListenTarget::Method { member } => crate::dbus::monitor::build_match_rule(
+            Some(iface),
+            Some(member),
+            Some(object),
+            None,
+            None,
+            false,
+        ),
+    }
 }
