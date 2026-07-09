@@ -129,35 +129,71 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                 }
                 _ => return None,
             };
-            // For a Call, build one input field per IN-arg (labeled "name  sig"
-            // or just the signature when the arg is anonymous). Get/Set keep
-            // their fields empty (Task 3 fills them).
-            let (inputs, field_labels) = match (&kind, i.methods.get(i.selected[0])) {
-                (ActionKind::Call { .. }, Some(m)) => call_fields(&m.args),
-                _ => (vec![], vec![]),
+            // Build the form fields: Call → one input per IN-arg; Set → one input
+            // (the new value), labeled with the property's signature; Get → none.
+            let (inputs, field_labels) = match &kind {
+                ActionKind::Call { .. } => {
+                    let m = i.methods.get(i.selected[0]);
+                    match m {
+                        Some(m) => call_fields(&m.args),
+                        None => (vec![], vec![]),
+                    }
+                }
+                ActionKind::Set { signature, .. } => {
+                    (vec![tui_input::Input::default()], vec![signature.clone()])
+                }
+                ActionKind::Get { .. } => (vec![], vec![]),
             };
             push_detail(state, svc, obj, iface, kind, inputs, field_labels);
             None
         }
         Screen::Detail(d) => {
             // `[触发]` Enter: only fires when the trigger button is focused.
-            // Reads `d` for the Effect payload + Result title, pushes the Result
-            // screen, returns the Effect. (Get/Set have no effect yet — Task 3.)
+            // Extract owned (title, Effect) data for Call/Get/Set while holding
+            // the immutable borrow, then push one Result screen and return it.
             if d.focus != DetailFocus::Trigger {
                 return None;
             }
-            let ActionKind::Call { method, signature } = &d.kind else {
-                return None; // Get/Set — Task 3
-            };
-            let title = format!("{}.{}", d.interface, method);
-            let args: Vec<String> = d.inputs.iter().map(|i| i.value().to_string()).collect();
-            let effect = Effect::CallMethod {
-                service: d.service.clone(),
-                object: d.object.clone(),
-                iface: d.interface.clone(),
-                method: method.clone(),
-                signature: signature.clone(),
-                args,
+            let (title, effect) = match &d.kind {
+                ActionKind::Call { method, signature } => {
+                    let args: Vec<String> =
+                        d.inputs.iter().map(|i| i.value().to_string()).collect();
+                    (
+                        format!("{}.{}", d.interface, method),
+                        Effect::CallMethod {
+                            service: d.service.clone(),
+                            object: d.object.clone(),
+                            iface: d.interface.clone(),
+                            method: method.clone(),
+                            signature: signature.clone(),
+                            args,
+                        },
+                    )
+                }
+                ActionKind::Get { property } => (
+                    property.clone(),
+                    Effect::GetProperty {
+                        service: d.service.clone(),
+                        object: d.object.clone(),
+                        iface: d.interface.clone(),
+                        property: property.clone(),
+                    },
+                ),
+                ActionKind::Set { property, signature } => {
+                    let value =
+                        d.inputs.first().map(|i| i.value().to_string()).unwrap_or_default();
+                    (
+                        property.clone(),
+                        Effect::SetProperty {
+                            service: d.service.clone(),
+                            object: d.object.clone(),
+                            iface: d.interface.clone(),
+                            property: property.clone(),
+                            signature: signature.clone(),
+                            value,
+                        },
+                    )
+                }
             };
             state.screens.push(Screen::Result(ResultScreen {
                 title,
@@ -543,7 +579,8 @@ fn call_fields(args: &[(String, String)]) -> (Vec<tui_input::Input>, Vec<String>
 }
 
 /// Push a Detail form for an action. `inputs`/`field_labels` are non-empty only
-/// for calls (one per IN-arg); Task 3 fills them for Set.
+/// for calls (one input per IN-arg) and Set (one input, labeled with the
+/// property's signature); Get keeps both empty.
 fn push_detail(
     state: &mut State,
     service: String,
