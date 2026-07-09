@@ -125,9 +125,13 @@ impl State {
 }
 
 /// Flatten the walked object-path tree into a depth-first list of full paths
-/// (root first), e.g. `["/", "/org", "/org/freedesktop"]` — the d-feet flat view.
+/// (root first), e.g. `["/org/foo", "/bar"]` — the d-feet flat view. Pure
+/// container paths (no interfaces ⇒ no object of their own) are skipped.
 pub fn flatten_paths(root: &ObjectNode) -> Vec<String> {
-    let mut out = vec![root.path.clone()];
+    let mut out = Vec::new();
+    if root.interfaces > 0 {
+        out.push(root.path.clone());
+    }
     for child in &root.children {
         out.extend(flatten_paths(child));
     }
