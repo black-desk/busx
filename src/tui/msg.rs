@@ -20,3 +20,11 @@ pub enum Msg {
     /// (interface name) PropertiesChanged-style refresh result
     PropertiesLoaded(Result<Vec<(String, OwnedValue)>, String>),
 }
+
+/// A side effect `update` requests; the loop performs the IO. Keeps `update` pure.
+pub enum Effect {
+    FetchServices,
+    FetchObjects(String),
+    FetchInterfaces(String, String),
+    FetchProperties(String, String, String),
+}

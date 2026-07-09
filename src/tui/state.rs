@@ -6,6 +6,7 @@
 //! draws the top screen + a breadcrumb. `update`/`render` read only this.
 
 use crate::dbus::types::{ObjectNode, ServiceInfo};
+use std::cell::RefCell;
 use tui_tree_widget::TreeState;
 
 #[derive(Default)]
@@ -32,12 +33,15 @@ pub struct ServiceScreen {
 }
 
 /// The object-path tree of one service. `tree` is the walked `ObjectNode` root;
-/// `items` is the `tui-tree-widget` representation built from it.
+/// `items` is the `tui-tree-widget` representation built from it. `state` holds
+/// the widget's selection/opened set across frames; it is a `RefCell` because
+/// `tui-tree-widget` 0.24's `TreeState` is not `Clone` and `render` must mutate
+/// it from a `&State` (interior mutability).
 pub struct ObjectsScreen {
     pub service: String,
     pub tree: ObjectNode,
     pub items: Vec<tui_tree_widget::TreeItem<'static, String>>,
-    pub state: TreeState<String>,
+    pub state: RefCell<TreeState<String>>,
     pub loading: bool,
     pub error: Option<String>,
 }
@@ -103,5 +107,22 @@ impl State {
 
     pub fn top_mut(&mut self) -> &mut Screen {
         self.screens.last_mut().expect("screen stack never empty")
+    }
+}
+
+/// Build tui-tree-widget items from a walked object-path tree. Each item's
+/// identifier is its full path (unique), text is the last path segment.
+pub fn tree_items(root: &ObjectNode) -> Vec<tui_tree_widget::TreeItem<'static, String>> {
+    root.children.iter().map(child_item).collect()
+}
+
+fn child_item(node: &ObjectNode) -> tui_tree_widget::TreeItem<'static, String> {
+    let text = node.path.rsplit('/').next().unwrap_or(&node.path).to_string();
+    let children: Vec<_> = node.children.iter().map(child_item).collect();
+    if children.is_empty() {
+        tui_tree_widget::TreeItem::new_leaf(node.path.clone(), text)
+    } else {
+        // `new` rejects duplicate child ids; our paths are unique, so this can't fail.
+        tui_tree_widget::TreeItem::new(node.path.clone(), text, children).unwrap()
     }
 }

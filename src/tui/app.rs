@@ -18,7 +18,7 @@ use zbus::Connection;
 
 use crate::dbus;
 use crate::error::Result;
-use crate::tui::msg::Msg;
+use crate::tui::msg::{Effect, Msg};
 use crate::tui::state::State;
 use crate::tui::{render, update};
 
@@ -37,18 +37,29 @@ impl App {
     /// Draws at the top of each iteration, so a non-quit mutation IS rendered on
     /// the next pass; a quit mutation exits without a final redraw (the screen is
     /// discarded when the terminal is torn down).
-    pub fn run_loop<B: Backend>(
+    ///
+    /// `on_effect` performs any IO `update` requests (a fetch). It is injected so
+    /// tests stay bus-free (they pass `|_| {}`); production closes over the
+    /// connection + message channel.
+    pub fn run_loop<B, F>(
         &mut self,
         terminal: &mut Terminal<B>,
         mut events: impl Iterator<Item = Msg>,
+        mut on_effect: F,
     ) -> Result<()>
     where
+        B: Backend,
         crate::error::Error: From<<B as Backend>::Error>,
+        F: FnMut(Effect),
     {
         while !self.state.quit {
             terminal.draw(|f| render(f, &self.state))?;
             match events.next() {
-                Some(msg) => update(&mut self.state, msg),
+                Some(msg) => {
+                    if let Some(effect) = update(&mut self.state, msg) {
+                        on_effect(effect);
+                    }
+                }
                 None => break, // scripted test source exhausted
             }
         }
@@ -60,11 +71,12 @@ impl App {
 pub fn run(user: bool, system: bool, address: Option<&str>, verbose: bool) -> Result<()> {
     let conn = async_global_executor::block_on(dbus::conn::connect(user, system, address, verbose))?;
     let (tx, rx) = flume::unbounded::<Msg>();
-    spawn_list_names(conn.clone(), tx);
+    let on_effect = |effect: Effect| run_effect(effect, conn.clone(), tx.clone());
+    on_effect(Effect::FetchServices); // initial service-list fetch
 
     let mut app = App { state: State::loading_service() };
     let mut terminal = setup_terminal()?;
-    let result = app.run_loop(&mut terminal, CrosstermSource { rx });
+    let result = app.run_loop(&mut terminal, CrosstermSource { rx }, on_effect);
     // Always try to restore the terminal; prefer the loop's result over a
     // restore failure (don't mask the real error), but warn on restore failure.
     if let Err(e) = restore_terminal(&mut terminal) {
@@ -73,13 +85,38 @@ pub fn run(user: bool, system: bool, address: Option<&str>, verbose: bool) -> Re
     result
 }
 
-/// Spawn the service-list fetch; deliver the result as `Msg::ServicesLoaded`.
-fn spawn_list_names(conn: Connection, tx: flume::Sender<Msg>) {
-    async_global_executor::spawn(async move {
-        let res = dbus::list::list_names(&conn, false, false, false).await;
-        let _ = tx.send(Msg::ServicesLoaded(res.map_err(|e| e.to_string())));
-    })
-    .detach();
+/// Perform a requested `Effect` against the bus; deliver the result as a `Msg`.
+fn run_effect(effect: Effect, conn: Connection, tx: flume::Sender<Msg>) {
+    match effect {
+        Effect::FetchServices => {
+            async_global_executor::spawn(async move {
+                let res = dbus::list::list_names(&conn, false, false, false).await;
+                let _ = tx.send(Msg::ServicesLoaded(res.map_err(|e| e.to_string())));
+            })
+            .detach();
+        }
+        Effect::FetchObjects(service) => {
+            async_global_executor::spawn(async move {
+                let res = dbus::tree::object_tree(&conn, &service).await;
+                let _ = tx.send(Msg::ObjectsLoaded(res.map_err(|e| e.to_string())));
+            })
+            .detach();
+        }
+        Effect::FetchInterfaces(service, object) => {
+            async_global_executor::spawn(async move {
+                let res = dbus::introspect::introspect(&conn, &service, &object).await;
+                let _ = tx.send(Msg::InterfacesLoaded(service, object, res.map_err(|e| e.to_string())));
+            })
+            .detach();
+        }
+        Effect::FetchProperties(service, object, iface) => {
+            async_global_executor::spawn(async move {
+                let res = dbus::property::get_all(&conn, &service, &object, &iface).await;
+                let _ = tx.send(Msg::PropertiesLoaded(res.map_err(|e| e.to_string())));
+            })
+            .detach();
+        }
+    }
 }
 
 /// Production event source: drains the worker channel, and between messages

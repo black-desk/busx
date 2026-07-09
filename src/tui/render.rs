@@ -24,7 +24,7 @@ pub fn render(frame: &mut Frame, state: &State) {
     render_breadcrumb(frame, crumb, state);
     match state.top() {
         Screen::Service(s) => render_service(frame, main, s),
-        Screen::Objects(_) => render_placeholder(frame, main, "Objects"),
+        Screen::Objects(o) => render_objects(frame, main, o),
         Screen::Interfaces(_) => render_placeholder(frame, main, "Interfaces"),
         Screen::Interface(_) => render_placeholder(frame, main, "Interface"),
     }
@@ -76,6 +76,24 @@ fn render_service(frame: &mut Frame, area: Rect, s: &ServiceScreen) {
         list_state.select(Some(s.selected));
     }
     frame.render_stateful_widget(list, area, &mut list_state);
+}
+
+fn render_objects(frame: &mut Frame, area: Rect, o: &crate::tui::state::ObjectsScreen) {
+    let title = if o.loading { "Objects (loading…)" } else { "Objects" };
+    let block = Block::default().borders(Borders::ALL).title(title);
+    if let Some(err) = &o.error {
+        frame.render_widget(Paragraph::new(format!("error: {err}")).block(block), area);
+        return;
+    }
+    // `TreeState` is not `Clone` in tui-tree-widget 0.24, so render through the
+    // stored `RefCell` instead of cloning a per-frame copy — selection/opened
+    // state persists across frames this way.
+    let mut state = o.state.borrow_mut();
+    let tree = tui_tree_widget::Tree::new(&o.items)
+        .expect("object-path tree identifiers are unique")
+        .block(block)
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    frame.render_stateful_widget(tree, area, &mut state);
 }
 
 fn render_keyhint(frame: &mut Frame, area: Rect, screen: &Screen) {
