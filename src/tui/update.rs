@@ -12,8 +12,9 @@ use zvariant::OwnedValue;
 use crate::dbus::types::{ObjectNode, ServiceInfo};
 use crate::tui::msg::{Effect, Msg};
 use crate::tui::state::{
-    flatten_paths, ActionKind, DetailFocus, DetailScreen, InterfaceFocus, InterfaceScreen,
-    InterfacesScreen, MethodMember, ObjectsScreen, ResultScreen, Screen, ServiceScreen, State,
+    flatten_paths, ActionKind, ActionResult, DetailFocus, DetailScreen, InterfaceFocus,
+    InterfaceScreen, InterfacesScreen, MethodMember, ObjectsScreen, ResultScreen, Screen,
+    ServiceScreen, State,
 };
 use tui_input::backend::crossterm::EventHandler;
 
@@ -68,7 +69,7 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
         Screen::Interfaces(i) => update_interfaces_key(i, k.code),
         Screen::Interface(i) => return update_interface_key(i, k),
         Screen::Detail(d) => return update_detail_key(d, k),
-        Screen::Result(_) => {} // Task 4 wires scroll; Esc handled above.
+        Screen::Result(r) => update_result_key(r, k.code),
     }
     None
 }
@@ -205,6 +206,27 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
             Some(effect)
         }
         Screen::Result(_) => None,
+    }
+}
+
+/// `↑↓`/`jk` scroll the result. Clamp coarsely: never below 0, never past the
+/// last content line. `update` has no frame area, so visible-row-precise
+/// clamping can't be done here — render applies the offset (and single-line
+/// results simply don't scroll). Real precise scrolling matters most for
+/// streaming monitor results (Phase 4).
+fn update_result_key(r: &mut ResultScreen, code: KeyCode) {
+    let lines = match &r.result {
+        Some(ActionResult::Call(vs)) => vs.len(),
+        Some(ActionResult::Get(_)) | None | Some(ActionResult::Set) => 1,
+    };
+    match code {
+        KeyCode::Down | KeyCode::Char('j') => {
+            r.scroll = (r.scroll + 1).min(lines.saturating_sub(1));
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            r.scroll = r.scroll.saturating_sub(1);
+        }
+        _ => {}
     }
 }
 
