@@ -5,13 +5,16 @@
 //! Pure rendering (spec §6, §8). Reads `&State`; draws breadcrumb + top screen
 //! + key-hint. Nothing else.
 
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
-use crate::tui::state::{ActionKind, DetailScreen, InterfaceFocus, ResultScreen, Screen, ServiceScreen, State};
+use crate::tui::state::{
+    ActionKind, ActionResult, DetailFocus, DetailScreen, InterfaceFocus, ResultScreen, Screen,
+    ServiceScreen, State,
+};
 
 pub fn render(frame: &mut Frame, state: &State) {
     let area = frame.area();
@@ -195,7 +198,9 @@ fn action_buttons(column: InterfaceFocus) -> &'static [&'static str] {
     }
 }
 
-/// Placeholder Detail screen (Task 2/3 renders the real form + `[触发]` button).
+/// The action form: one row per input field (label + value), then a `[触发]`
+/// trigger button. The focused field / trigger is REVERSED (trigger is BOLD too).
+/// Zero-arg calls render just the trigger row.
 fn render_detail(frame: &mut Frame, area: Rect, d: &DetailScreen) {
     let title = if d.loading {
         format!("{} (loading…)", action_title(&d.kind))
@@ -203,15 +208,67 @@ fn render_detail(frame: &mut Frame, area: Rect, d: &DetailScreen) {
         action_title(&d.kind)
     };
     let block = Block::default().borders(Borders::ALL).title(title);
-    let body = if let Some(err) = &d.error {
-        format!("error: {err}")
-    } else {
-        "Detail".to_string()
-    };
-    frame.render_widget(Paragraph::new(body).block(block), area);
+
+    if let Some(err) = &d.error {
+        frame.render_widget(Paragraph::new(format!("error: {err}")).block(block), area);
+        return;
+    }
+
+    // Fields chunk (one row per input + a little breathing room) + a 1-line
+    // trigger chunk pinned to the bottom of the block.
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.height < 1 {
+        return;
+    }
+    let trigger_h = 1u16;
+    let fields_h = inner.height.saturating_sub(trigger_h);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(fields_h), Constraint::Length(trigger_h)])
+        .split(inner);
+    let (fields_area, trigger_area) = (chunks[0], chunks[1]);
+
+    // Render each field: "label  value" on its own line; the focused field is
+    // REVERSED. With more fields than rows, the lower ones scroll off (fine for
+    // now; methods rarely have many IN-args).
+    for (i, label) in d.field_labels.iter().enumerate() {
+        if i as u16 >= fields_area.height {
+            break;
+        }
+        let value = d.inputs.get(i).map(|v| v.value()).unwrap_or("");
+        let focused = d.focus == DetailFocus::Field && i == d.field_selected;
+        let row_area = Rect {
+            x: fields_area.x,
+            y: fields_area.y + i as u16,
+            width: fields_area.width,
+            height: 1,
+        };
+        let mut style = Style::default();
+        if focused {
+            style = style.add_modifier(Modifier::REVERSED);
+        }
+        frame.render_widget(
+            Paragraph::new(format!("{label}  {value}")).style(style),
+            row_area,
+        );
+    }
+
+    // The trigger button, centered, BOLD + REVERSED when focused.
+    let trigger_focused = d.focus == DetailFocus::Trigger;
+    let mut style = Style::default();
+    if trigger_focused {
+        style = style.add_modifier(Modifier::BOLD | Modifier::REVERSED);
+    }
+    frame.render_widget(
+        Paragraph::new("[触发]").style(style).alignment(Alignment::Center),
+        trigger_area,
+    );
 }
 
-/// Placeholder Result screen (Task 3/4 renders the real body + scroll).
+/// The outcome of a one-shot action. Loading → "calling…"; error → the message;
+/// `Call(lines)` → one reply value per line (offset by `scroll` — clamped in
+/// Task 4). `Get`/`Set` render their payload too (Task 3 owns their detail forms).
 fn render_result(frame: &mut Frame, area: Rect, r: &ResultScreen) {
     let title = if r.loading {
         format!("{} (loading…)", r.title)
@@ -219,10 +276,21 @@ fn render_result(frame: &mut Frame, area: Rect, r: &ResultScreen) {
         r.title.clone()
     };
     let block = Block::default().borders(Borders::ALL).title(title);
+
     let body = if let Some(err) = &r.error {
         format!("error: {err}")
+    } else if r.loading {
+        "calling…".to_string()
     } else {
-        "Result".to_string()
+        match &r.result {
+            Some(ActionResult::Call(lines)) => {
+                // Skip `scroll` leading lines (Task 4 clamps the scroll value).
+                lines.iter().skip(r.scroll).map(String::as_str).collect::<Vec<_>>().join("\n")
+            }
+            Some(ActionResult::Get(v)) => v.clone(),
+            Some(ActionResult::Set) => "ok".to_string(),
+            None => String::new(),
+        }
     };
     frame.render_widget(Paragraph::new(body).block(block), area);
 }
