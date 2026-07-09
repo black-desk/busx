@@ -78,7 +78,7 @@ pub struct InterfaceScreen {
     pub error: Option<String>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum InterfaceFocus {
     #[default]
     Methods,
@@ -110,6 +110,22 @@ impl State {
 
     pub fn top_mut(&mut self) -> &mut Screen {
         self.screens.last_mut().expect("screen stack never empty")
+    }
+
+    /// The focus of the top Interface screen (test convenience).
+    pub fn top_focus(&self) -> InterfaceFocus {
+        match self.top() {
+            Screen::Interface(i) => i.focus,
+            _ => InterfaceFocus::Methods,
+        }
+    }
+
+    /// The per-column selection of the top Interface screen (test convenience).
+    pub fn top_selected(&self) -> [usize; 3] {
+        match self.top() {
+            Screen::Interface(i) => i.selected,
+            _ => [0, 0, 0],
+        }
     }
 }
 
