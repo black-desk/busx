@@ -106,10 +106,37 @@ fn loop_loads_services_then_navigates() {
     let mut app = App { state: busx::tui::State::loading_service() };
     let backend = TestBackend::new(44, 8);
     let mut term = Terminal::new(backend).unwrap();
-    app.run_loop(&mut term, events.into_iter()).unwrap();
+    app.run_loop(&mut term, events.into_iter(), |_| {}).unwrap();
     // The scripted Down moved selection to row 1 (REVERSED highlight is the only
     // selection cue in the real UI; the text snapshot can't show styling, so
     // assert the selection explicitly).
     assert_eq!(selected_of(&app.state), 1, "Down moved selection to row 1");
     insta::assert_snapshot!(format!("{}", term.backend()));
+}
+
+use busx::dbus::types::ObjectNode;
+
+fn obj(path: &str, children: Vec<ObjectNode>) -> ObjectNode {
+    ObjectNode { path: path.to_string(), children }
+}
+
+#[test]
+fn objects_screen_renders_tree() {
+    let tree = obj(
+        "/",
+        vec![obj("/org", vec![obj("/org/busx", vec![])]), obj("/foo", vec![])],
+    );
+    let items = busx::tui::tree_items(&tree);
+    let state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Objects(busx::tui::state::ObjectsScreen {
+            service: "org.busx.Test".into(),
+            tree,
+            items,
+            state: Default::default(),
+            loading: false,
+            error: None,
+        })],
+        quit: false,
+    };
+    insta::assert_snapshot!(render_to_string(&state, 48, 9));
 }
