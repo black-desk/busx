@@ -347,7 +347,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "tui-tree-widget",
  "zbus",
  "zbus_xml",
  "zvariant",
@@ -2051,17 +2050,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
-]
-
-[[package]]
-name = "tui-tree-widget"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "deca119555009eee2e0cfb9c020f39f632444dc4579918d5fc009d51d75dff92"
-dependencies = [
- "ratatui-core",
- "ratatui-widgets",
- "unicode-width",
 ]
 
 [[package]]

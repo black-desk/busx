@@ -5,17 +5,14 @@
 //! Pure state machine (spec §6, §7). Returns an `Option<Effect>` so it stays
 //! IO-free: pushing/loading a screen requests a fetch the loop performs.
 
-use std::cell::RefCell;
-
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use tui_tree_widget::TreeState;
 use zbus_xml::{ArgDirection, Node, PropertyAccess, Signature};
 use zvariant::OwnedValue;
 
 use crate::dbus::types::{ObjectNode, ServiceInfo};
 use crate::tui::msg::{Effect, Msg};
 use crate::tui::state::{
-    tree_items, InterfaceFocus, InterfaceScreen, InterfacesScreen, ObjectsScreen, Screen,
+    flatten_paths, InterfaceFocus, InterfaceScreen, InterfacesScreen, ObjectsScreen, Screen,
     ServiceScreen, State,
 };
 
@@ -70,16 +67,15 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
             let svc = s.services.get(s.selected).map(|sv| sv.name.clone())?;
             state.screens.push(Screen::Objects(ObjectsScreen {
                 service: svc.clone(),
-                tree: ObjectNode { path: "/".into(), children: vec![] },
-                items: vec![],
-                state: RefCell::new(TreeState::default()),
+                paths: vec![],
+                selected: 0,
                 loading: true,
                 error: None,
             }));
             Some(Effect::FetchObjects(svc))
         }
         Screen::Objects(o) => {
-            let path = o.state.borrow().selected().last().cloned()?;
+            let path = o.paths.get(o.selected).cloned()?;
             let svc = o.service.clone();
             push_interfaces(state, svc.clone(), path.clone());
             Some(Effect::FetchInterfaces(svc, path))
@@ -107,18 +103,13 @@ fn update_service_key(s: &mut ServiceScreen, code: KeyCode) {
 }
 
 fn update_objects_key(o: &mut ObjectsScreen, code: KeyCode) {
+    // `Enter` is handled in `handle_enter` (drill into the selected path).
     match code {
-        KeyCode::Down | KeyCode::Char('j') => {
-            o.state.get_mut().key_down();
+        KeyCode::Down | KeyCode::Char('j') if !o.paths.is_empty() => {
+            o.selected = (o.selected + 1).min(o.paths.len() - 1);
         }
         KeyCode::Up | KeyCode::Char('k') => {
-            o.state.get_mut().key_up();
-        }
-        KeyCode::Right | KeyCode::Char('l') => {
-            o.state.get_mut().key_right();
-        }
-        KeyCode::Left | KeyCode::Char('h') => {
-            o.state.get_mut().key_left();
+            o.selected = o.selected.saturating_sub(1);
         }
         _ => {}
     }
@@ -197,22 +188,20 @@ fn load_services(s: &mut ServiceScreen, res: Result<Vec<ServiceInfo>, String>) {
     }
 }
 
-/// Populate the top Objects screen; select the first object so `Enter` works;
-/// auto-skip if there is exactly one top-level object.
+/// Populate the top Objects screen with the flattened path list; auto-skip if
+/// the service's only object is the root "/" (drill straight into its interfaces).
 fn load_objects(state: &mut State, res: Result<ObjectNode, String>) -> Option<Effect> {
     let mut drill = None;
     if let Screen::Objects(o) = state.top_mut() {
         o.loading = false;
         match res {
             Ok(root) => {
-                o.items = tree_items(&root);
-                if let Some(first) = root.children.first() {
-                    o.state.get_mut().select(vec![first.path.clone()]);
+                let paths = flatten_paths(&root);
+                if paths.len() == 1 {
+                    drill = Some((o.service.clone(), paths[0].clone()));
                 }
-                if root.children.len() == 1 {
-                    drill = Some((o.service.clone(), root.children[0].path.clone()));
-                }
-                o.tree = root;
+                o.selected = 0;
+                o.paths = paths;
             }
             Err(e) => o.error = Some(e),
         }
@@ -224,8 +213,8 @@ fn load_objects(state: &mut State, res: Result<ObjectNode, String>) -> Option<Ef
     None
 }
 
-/// Populate the top Interfaces screen from the introspection node, filtering out
-/// the standard D-Bus interfaces; auto-skip if exactly one remains.
+/// Populate the top Interfaces screen from the introspection node; auto-skip if
+/// the object exposes exactly one interface.
 fn load_interfaces(
     state: &mut State,
     service: String,
@@ -244,7 +233,6 @@ fn load_interfaces(
                     .interfaces()
                     .iter()
                     .map(|iface| iface.name().to_string())
-                    .filter(|n| !is_standard_interface(n))
                     .collect();
                 if names.len() == 1 {
                     drill = Some(names[0].clone());
@@ -278,12 +266,6 @@ fn load_properties(state: &mut State, res: Result<Vec<(String, OwnedValue)>, Str
         }
     }
     None
-}
-
-/// `org.freedesktop.DBus*` interfaces (Introspectable / Properties / Peer / the
-/// bus itself) are housekeeping — exclude them from the browseable list.
-fn is_standard_interface(name: &str) -> bool {
-    name.starts_with("org.freedesktop.DBus")
 }
 
 /// (name, signature) per method/signal.

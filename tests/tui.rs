@@ -121,18 +121,17 @@ fn obj(path: &str, children: Vec<ObjectNode>) -> ObjectNode {
 }
 
 #[test]
-fn objects_screen_renders_tree() {
+fn objects_screen_renders_flat_paths() {
     let tree = obj(
         "/",
         vec![obj("/org", vec![obj("/org/busx", vec![])]), obj("/foo", vec![])],
     );
-    let items = busx::tui::tree_items(&tree);
+    let paths = busx::tui::flatten_paths(&tree);
     let state = busx::tui::State {
         screens: vec![busx::tui::Screen::Objects(busx::tui::state::ObjectsScreen {
             service: "org.busx.Test".into(),
-            tree,
-            items,
-            state: Default::default(),
+            paths,
+            selected: 0,
             loading: false,
             error: None,
         })],
@@ -146,9 +145,8 @@ fn objects_screen_renders_tree() {
 fn objects_screen(service: &str) -> busx::tui::state::ObjectsScreen {
     busx::tui::state::ObjectsScreen {
         service: service.into(),
-        tree: ObjectNode { path: "/".into(), children: vec![] },
-        items: vec![],
-        state: Default::default(),
+        paths: vec![],
+        selected: 0,
         loading: true,
         error: None,
     }
@@ -170,47 +168,75 @@ fn service_enter_pushes_objects_and_requests_fetch() {
         Screen::Objects(o) => {
             assert_eq!(o.service, "org.busx.A");
             assert!(o.loading, "new Objects screen starts loading");
-            assert!(o.items.is_empty());
+            assert!(o.paths.is_empty());
         }
         _ => panic!("top screen should be Objects"),
     }
 }
 
 #[test]
-fn objects_loaded_populates_items_without_skip() {
+fn objects_loaded_populates_paths_without_skip() {
     let mut state = State { screens: vec![Screen::Objects(objects_screen("org.busx.A"))], quit: false };
     let tree = obj("/", vec![obj("/a", vec![]), obj("/b", vec![])]);
     let effect = update(&mut state, Msg::ObjectsLoaded(Ok(tree)));
-    assert!(effect.is_none(), "two children ⇒ no auto-skip, no fetch");
+    assert!(effect.is_none(), "multiple paths ⇒ no auto-skip, no fetch");
     match state.top() {
         Screen::Objects(o) => {
             assert!(!o.loading);
-            assert_eq!(o.items.len(), 2, "two top-level items");
+            // flattened depth-first: "/", "/a", "/b"
+            assert_eq!(o.paths, vec!["/", "/a", "/b"]);
         }
         _ => panic!("still on Objects"),
     }
 }
 
 #[test]
-fn objects_loaded_single_child_auto_skips_to_interfaces() {
+fn objects_loaded_single_path_auto_skips_to_interfaces() {
     let mut state = State { screens: vec![Screen::Objects(objects_screen("org.busx.A"))], quit: false };
-    let tree = obj("/", vec![obj("/org", vec![])]);
+    // Only the root "/" ⇒ one path ⇒ auto-skip straight into its interfaces.
+    let tree = obj("/", vec![]);
     let effect = update(&mut state, Msg::ObjectsLoaded(Ok(tree)));
     match effect {
         Some(Effect::FetchInterfaces(s, p)) => {
             assert_eq!(s, "org.busx.A");
-            assert_eq!(p, "/org");
+            assert_eq!(p, "/");
         }
-        _ => panic!("single child ⇒ FetchInterfaces"),
+        _ => panic!("single path ⇒ FetchInterfaces"),
     }
     assert_eq!(state.screens.len(), 2, "auto-skip pushed Interfaces");
     match state.top() {
         Screen::Interfaces(i) => {
             assert_eq!(i.service, "org.busx.A");
-            assert_eq!(i.object, "/org");
+            assert_eq!(i.object, "/");
             assert!(i.loading, "Interfaces pushed in loading state");
         }
         _ => panic!("top should be Interfaces after auto-skip"),
+    }
+}
+
+#[test]
+fn objects_enter_drills_selected_path() {
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Objects(busx::tui::state::ObjectsScreen {
+            service: "org.busx.A".into(),
+            paths: vec!["/".into(), "/org".into(), "/org/x".into()],
+            selected: 2, // "/org/x"
+            loading: false,
+            error: None,
+        })],
+        quit: false,
+    };
+    let effect = update(&mut state, key(KeyCode::Enter));
+    match effect {
+        Some(Effect::FetchInterfaces(s, p)) => {
+            assert_eq!(s, "org.busx.A");
+            assert_eq!(p, "/org/x");
+        }
+        _ => panic!("Enter drills the selected path"),
+    }
+    match state.top() {
+        Screen::Interfaces(i) => assert_eq!(i.object, "/org/x"),
+        _ => panic!("pushed an Interfaces screen"),
     }
 }
 
@@ -229,7 +255,7 @@ fn objects_loaded_error_sets_error_without_skip() {
 }
 
 #[test]
-fn interfaces_screen_lists_non_standard() {
+fn interfaces_screen_lists_interfaces() {
     let state = busx::tui::State {
         screens: vec![busx::tui::Screen::Interfaces(busx::tui::state::InterfacesScreen {
             service: "org.busx.Test".into(),
@@ -250,7 +276,8 @@ fn introspect_node(xml: &str) -> zbus_xml::Node<'static> {
 }
 
 #[test]
-fn interfaces_loaded_filters_standard_and_no_skip() {
+fn interfaces_loaded_lists_all() {
+    // No filtering: every interface (incl. standard org.freedesktop.DBus.*) is shown.
     let node = introspect_node(
         "<node>\
          <interface name=\"org.freedesktop.DBus.Peer\"/>\
@@ -275,11 +302,19 @@ fn interfaces_loaded_filters_standard_and_no_skip() {
         &mut state,
         Msg::InterfacesLoaded("org.busx.Test".into(), "/o".into(), Ok(node)),
     );
-    assert!(effect.is_none(), "two non-standard interfaces ⇒ no auto-skip");
+    assert!(effect.is_none(), "four interfaces ⇒ no auto-skip");
     match state.top() {
         Screen::Interfaces(i) => {
             assert!(!i.loading);
-            assert_eq!(i.names, vec!["org.busx.A".to_string(), "org.busx.B".to_string()]);
+            assert_eq!(
+                i.names,
+                vec![
+                    "org.freedesktop.DBus.Peer".to_string(),
+                    "org.freedesktop.DBus.Properties".to_string(),
+                    "org.busx.A".to_string(),
+                    "org.busx.B".to_string(),
+                ]
+            );
             assert!(i.node.is_some(), "node cached for drilling in");
         }
         _ => panic!("still on Interfaces"),
@@ -287,14 +322,8 @@ fn interfaces_loaded_filters_standard_and_no_skip() {
 }
 
 #[test]
-fn interfaces_loaded_single_non_standard_auto_skips() {
-    let node = introspect_node(
-        "<node>\
-         <interface name=\"org.freedesktop.DBus.Introspectable\"/>\
-         <interface name=\"org.freedesktop.DBus.Properties\"/>\
-         <interface name=\"org.busx.Test\"/>\
-         </node>",
-    );
+fn interfaces_loaded_single_interface_auto_skips() {
+    let node = introspect_node("<node><interface name=\"org.busx.Test\"/></node>");
     let mut state = busx::tui::State {
         screens: vec![busx::tui::Screen::Interfaces(busx::tui::state::InterfacesScreen {
             service: "org.busx.Test".into(),
@@ -313,7 +342,7 @@ fn interfaces_loaded_single_non_standard_auto_skips() {
     );
     match effect {
         Some(Effect::FetchProperties(_, _, iface)) => assert_eq!(iface, "org.busx.Test"),
-        _ => panic!("single non-standard interface ⇒ FetchProperties"),
+        _ => panic!("single interface ⇒ FetchProperties"),
     }
     match state.top() {
         Screen::Interface(i) => assert_eq!(i.interface, "org.busx.Test"),
@@ -442,23 +471,22 @@ fn interface_r_requests_property_refresh() {
 
 #[test]
 fn drill_down_auto_skips_service_to_interface() {
-    // One service → one object → one non-standard interface ⇒ the whole chain
-    // auto-skips, landing on the Interface screen with members parsed from the node.
+    // One service → one object ("/") → one interface ⇒ the whole chain auto-skips,
+    // landing on the Interface screen with members parsed from the node.
     let node = introspect_node(
         "<node>\
-         <interface name=\"org.freedesktop.DBus.Introspectable\"/>\
          <interface name=\"org.busx.Test\">\
          <method name=\"Ping\"/>\
          <property name=\"Name\" type=\"s\" access=\"read\"/>\
          </interface>\
          </node>",
     );
-    let tree = obj("/", vec![obj("/org", vec![])]);
+    let tree = obj("/", vec![]);
     let events = vec![
         Msg::ServicesLoaded(Ok(vec![svc("org.busx.Test", None, None)])),
         key(KeyCode::Enter),
         Msg::ObjectsLoaded(Ok(tree)),
-        Msg::InterfacesLoaded("org.busx.Test".into(), "/org".into(), Ok(node)),
+        Msg::InterfacesLoaded("org.busx.Test".into(), "/".into(), Ok(node)),
     ];
     let mut app = App { state: busx::tui::State::loading_service() };
     let backend = TestBackend::new(60, 16);
@@ -467,7 +495,7 @@ fn drill_down_auto_skips_service_to_interface() {
     match app.state.top() {
         Screen::Interface(i) => {
             assert_eq!(i.service, "org.busx.Test");
-            assert_eq!(i.object, "/org");
+            assert_eq!(i.object, "/");
             assert_eq!(i.interface, "org.busx.Test");
             assert_eq!(i.methods.len(), 1, "Ping parsed from the node");
             assert_eq!(i.properties.len(), 1, "Name parsed from the node");

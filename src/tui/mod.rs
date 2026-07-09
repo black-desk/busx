@@ -13,5 +13,5 @@ pub mod update;
 pub use app::run;
 pub use msg::{Effect, Msg};
 pub use render::render;
-pub use state::{tree_items, Screen, ServiceScreen, State};
+pub use state::{flatten_paths, Screen, ServiceScreen, State};
 pub use update::update;
