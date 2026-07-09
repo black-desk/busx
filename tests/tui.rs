@@ -1351,14 +1351,15 @@ fn listen_result_renders_streaming_messages() {
 }
 
 #[test]
-fn method_listen_trigger_returns_not_implemented_error() {
-    // Methods column, `监听` button → a Listen Detail targeting a Method; on the
-    // app side Method listen is Task 3. Here we assert the trigger pushes a
-    // Result and requests Effect::Listen { target: Method } (the app stubs it).
+fn method_listen_button_and_trigger_target_method() {
+    // Methods column, `监听` button → a Listen Detail targeting a Method (Task 3).
+    // The preview is a `type='method_call'` match rule; the trigger pushes a
+    // Result and requests `Effect::Listen { target: Method }` (no real spawn —
+    // the no-op `|_| {}` handler is used, so nothing touches the bus here).
     let screen = busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
         service: "s".into(),
         object: "/o".into(),
-        interface: "i".into(),
+        interface: "org.busx.Test".into(),
         methods: vec![method("Ping", "")],
         properties: vec![],
         signals: vec![],
@@ -1372,6 +1373,26 @@ fn method_listen_trigger_returns_not_implemented_error() {
     });
     let mut state = busx::tui::State { screens: vec![screen], quit: false };
     update(&mut state, key(KeyCode::Enter)); // push the Method Listen Detail
+    // The Detail's single label is the method_call match-rule preview.
+    match state.top() {
+        Screen::Detail(d) => {
+            match &d.kind {
+                ActionKind::Listen { target } => match target {
+                    ListenTarget::Method { member } => assert_eq!(member, "Ping"),
+                    other => panic!("expected Method listen, got {other:?}"),
+                },
+                other => panic!("expected Listen, got {other:?}"),
+            }
+            assert!(d.inputs.is_empty(), "Listen Detail has no input fields");
+            assert_eq!(d.field_labels.len(), 1, "one label: the match-rule preview");
+            let rule = &d.field_labels[0];
+            assert!(rule.contains("type='method_call'"), "preview {rule} is a method_call rule");
+            assert!(rule.contains("interface='org.busx.Test'"));
+            assert!(rule.contains("member='Ping'"));
+            assert!(rule.contains("path='/o'"));
+        }
+        _ => panic!("Enter should push a Detail screen"),
+    }
     update(&mut state, key(KeyCode::Tab)); // → trigger
     let effect = update(&mut state, key(KeyCode::Enter));
     match effect {
