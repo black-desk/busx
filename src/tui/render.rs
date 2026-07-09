@@ -25,7 +25,7 @@ pub fn render(frame: &mut Frame, state: &State) {
     match state.top() {
         Screen::Service(s) => render_service(frame, main, s),
         Screen::Objects(o) => render_objects(frame, main, o),
-        Screen::Interfaces(_) => render_placeholder(frame, main, "Interfaces"),
+        Screen::Interfaces(i) => render_interfaces(frame, main, i),
         Screen::Interface(_) => render_placeholder(frame, main, "Interface"),
     }
     render_keyhint(frame, footer, state.top());
@@ -94,6 +94,24 @@ fn render_objects(frame: &mut Frame, area: Rect, o: &crate::tui::state::ObjectsS
         .block(block)
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
     frame.render_stateful_widget(tree, area, &mut state);
+}
+
+fn render_interfaces(frame: &mut Frame, area: Rect, i: &crate::tui::state::InterfacesScreen) {
+    let title = if i.loading { "Interfaces (loading…)" } else { "Interfaces" };
+    let block = Block::default().borders(Borders::ALL).title(title);
+    if let Some(err) = &i.error {
+        frame.render_widget(Paragraph::new(format!("error: {err}")).block(block), area);
+        return;
+    }
+    let items: Vec<ListItem> = i.names.iter().map(|n| ListItem::new(Line::from(n.clone()))).collect();
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    let mut ls = ListState::default();
+    if !i.names.is_empty() {
+        ls.select(Some(i.selected));
+    }
+    frame.render_stateful_widget(list, area, &mut ls);
 }
 
 fn render_keyhint(frame: &mut Frame, area: Rect, screen: &Screen) {

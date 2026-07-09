@@ -51,6 +51,9 @@ pub struct InterfacesScreen {
     pub service: String,
     pub object: String,
     pub names: Vec<String>,
+    /// Cached introspection of this object — the source of `names` now and of the
+    /// interface members (methods/properties/signals) when drilling in (Task 4).
+    pub node: Option<zbus_xml::Node<'static>>,
     pub selected: usize,
     pub loading: bool,
     pub error: Option<String>,

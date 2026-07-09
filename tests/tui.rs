@@ -227,3 +227,96 @@ fn objects_loaded_error_sets_error_without_skip() {
         _ => panic!("still Objects on error"),
     }
 }
+
+#[test]
+fn interfaces_screen_lists_non_standard() {
+    let state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Interfaces(busx::tui::state::InterfacesScreen {
+            service: "org.busx.Test".into(),
+            object: "/org/busx/Test".into(),
+            names: vec!["org.busx.Test".into()],
+            node: None,
+            selected: 0,
+            loading: false,
+            error: None,
+        })],
+        quit: false,
+    };
+    insta::assert_snapshot!(render_to_string(&state, 44, 7));
+}
+
+fn introspect_node(xml: &str) -> zbus_xml::Node<'static> {
+    zbus_xml::Node::from_reader(xml.as_bytes()).expect("valid introspection XML")
+}
+
+#[test]
+fn interfaces_loaded_filters_standard_and_no_skip() {
+    let node = introspect_node(
+        "<node>\
+         <interface name=\"org.freedesktop.DBus.Peer\"/>\
+         <interface name=\"org.freedesktop.DBus.Properties\"/>\
+         <interface name=\"org.busx.A\"/>\
+         <interface name=\"org.busx.B\"/>\
+         </node>",
+    );
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Interfaces(busx::tui::state::InterfacesScreen {
+            service: "org.busx.Test".into(),
+            object: "/o".into(),
+            names: vec![],
+            node: None,
+            selected: 0,
+            loading: true,
+            error: None,
+        })],
+        quit: false,
+    };
+    let effect = update(
+        &mut state,
+        Msg::InterfacesLoaded("org.busx.Test".into(), "/o".into(), Ok(node)),
+    );
+    assert!(effect.is_none(), "two non-standard interfaces ⇒ no auto-skip");
+    match state.top() {
+        Screen::Interfaces(i) => {
+            assert!(!i.loading);
+            assert_eq!(i.names, vec!["org.busx.A".to_string(), "org.busx.B".to_string()]);
+            assert!(i.node.is_some(), "node cached for drilling in");
+        }
+        _ => panic!("still on Interfaces"),
+    }
+}
+
+#[test]
+fn interfaces_loaded_single_non_standard_auto_skips() {
+    let node = introspect_node(
+        "<node>\
+         <interface name=\"org.freedesktop.DBus.Introspectable\"/>\
+         <interface name=\"org.freedesktop.DBus.Properties\"/>\
+         <interface name=\"org.busx.Test\"/>\
+         </node>",
+    );
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Interfaces(busx::tui::state::InterfacesScreen {
+            service: "org.busx.Test".into(),
+            object: "/o".into(),
+            names: vec![],
+            node: None,
+            selected: 0,
+            loading: true,
+            error: None,
+        })],
+        quit: false,
+    };
+    let effect = update(
+        &mut state,
+        Msg::InterfacesLoaded("org.busx.Test".into(), "/o".into(), Ok(node)),
+    );
+    match effect {
+        Some(Effect::FetchProperties(_, _, iface)) => assert_eq!(iface, "org.busx.Test"),
+        _ => panic!("single non-standard interface ⇒ FetchProperties"),
+    }
+    match state.top() {
+        Screen::Interface(i) => assert_eq!(i.interface, "org.busx.Test"),
+        _ => panic!("auto-skip pushed an Interface screen"),
+    }
+}
