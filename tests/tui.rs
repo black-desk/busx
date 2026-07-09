@@ -320,3 +320,159 @@ fn interfaces_loaded_single_non_standard_auto_skips() {
         _ => panic!("auto-skip pushed an Interface screen"),
     }
 }
+
+use busx::tui::state::InterfaceFocus;
+
+#[test]
+fn interface_screen_renders_three_columns() {
+    let state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
+            service: "org.busx.Test".into(),
+            object: "/org/busx/Test".into(),
+            interface: "org.busx.Test".into(),
+            methods: vec![("BumpVolume".into(), "".into()), ("Join".into(), "as".into())],
+            properties: vec![
+                ("volume".into(), "d".into(), "readwrite".into()),
+                ("name".into(), "s".into(), "read".into()),
+            ],
+            signals: vec![],
+            prop_values: vec![("volume".into(), "0.5".into()), ("name".into(), r#""busx-test""#.into())],
+            focus: InterfaceFocus::Properties,
+            selected: [0, 1, 0],
+            loading: false,
+            error: None,
+        })],
+        quit: false,
+    };
+    insta::assert_snapshot!(render_to_string(&state, 60, 16));
+}
+
+#[test]
+fn properties_loaded_fills_pretty_values() {
+    use zvariant::Value;
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
+            service: "s".into(),
+            object: "/o".into(),
+            interface: "i".into(),
+            methods: vec![],
+            properties: vec![("volume".into(), "d".into(), "readwrite".into())],
+            signals: vec![],
+            prop_values: vec![],
+            focus: Default::default(),
+            selected: [0, 0, 0],
+            loading: true,
+            error: None,
+        })],
+        quit: false,
+    };
+    let vals = vec![("volume".into(), Value::F64(0.5).try_to_owned().unwrap())];
+    let effect = update(&mut state, Msg::PropertiesLoaded(Ok(vals)));
+    assert!(effect.is_none(), "PropertiesLoaded requests no fetch");
+    match state.top() {
+        Screen::Interface(i) => {
+            assert!(!i.loading);
+            assert_eq!(i.prop_values, vec![("volume".to_string(), "0.5".to_string())]);
+        }
+        _ => panic!("still on Interface"),
+    }
+}
+
+fn interface_screen() -> busx::tui::state::InterfaceScreen {
+    busx::tui::state::InterfaceScreen {
+        service: "s".into(),
+        object: "/o".into(),
+        interface: "i".into(),
+        methods: vec![("m1".into(), "u".into()), ("m2".into(), "".into())],
+        properties: vec![("p1".into(), "s".into(), "read".into())],
+        signals: vec![("sig1".into(), "u".into())],
+        prop_values: vec![],
+        focus: InterfaceFocus::Methods,
+        selected: [0, 0, 0],
+        loading: false,
+        error: None,
+    }
+}
+
+#[test]
+fn interface_tab_cycles_focus() {
+    let mut state = busx::tui::State { screens: vec![Screen::Interface(interface_screen())], quit: false };
+    update(&mut state, key(KeyCode::Tab));
+    assert_eq!(state.top_focus(), InterfaceFocus::Properties);
+    update(&mut state, key(KeyCode::Tab));
+    assert_eq!(state.top_focus(), InterfaceFocus::Signals);
+    update(&mut state, key(KeyCode::Tab));
+    assert_eq!(state.top_focus(), InterfaceFocus::Methods);
+}
+
+#[test]
+fn interface_arrows_move_within_focused_column() {
+    let mut state = busx::tui::State { screens: vec![Screen::Interface(interface_screen())], quit: false };
+    // Methods focus, two methods, starts at 0.
+    update(&mut state, key(KeyCode::Down));
+    assert_eq!(state.top_selected(), [1, 0, 0]);
+    update(&mut state, key(KeyCode::Down));
+    assert_eq!(state.top_selected(), [1, 0, 0], "clamped at last method");
+    // Tab to signals (1 signal), Down clamps.
+    update(&mut state, key(KeyCode::Tab));
+    update(&mut state, key(KeyCode::Tab));
+    update(&mut state, key(KeyCode::Down));
+    assert_eq!(state.top_selected(), [1, 0, 0]);
+    update(&mut state, key(KeyCode::Up)); // no-op above 0
+    assert_eq!(state.top_selected(), [1, 0, 0]);
+}
+
+#[test]
+fn interface_r_requests_property_refresh() {
+    let mut state = busx::tui::State { screens: vec![Screen::Interface(interface_screen())], quit: false };
+    let effect = update(&mut state, key(KeyCode::Char('r')));
+    match effect {
+        Some(Effect::FetchProperties(s, o, i)) => {
+            assert_eq!(s, "s");
+            assert_eq!(o, "/o");
+            assert_eq!(i, "i");
+        }
+        _ => panic!("r should request FetchProperties"),
+    }
+    match state.top() {
+        Screen::Interface(i) => assert!(i.loading, "r marks the screen loading until values arrive"),
+        _ => panic!(),
+    }
+}
+
+#[test]
+fn drill_down_auto_skips_service_to_interface() {
+    // One service → one object → one non-standard interface ⇒ the whole chain
+    // auto-skips, landing on the Interface screen with members parsed from the node.
+    let node = introspect_node(
+        "<node>\
+         <interface name=\"org.freedesktop.DBus.Introspectable\"/>\
+         <interface name=\"org.busx.Test\">\
+         <method name=\"Ping\"/>\
+         <property name=\"Name\" type=\"s\" access=\"read\"/>\
+         </interface>\
+         </node>",
+    );
+    let tree = obj("/", vec![obj("/org", vec![])]);
+    let events = vec![
+        Msg::ServicesLoaded(Ok(vec![svc("org.busx.Test", None, None)])),
+        key(KeyCode::Enter),
+        Msg::ObjectsLoaded(Ok(tree)),
+        Msg::InterfacesLoaded("org.busx.Test".into(), "/org".into(), Ok(node)),
+    ];
+    let mut app = App { state: busx::tui::State::loading_service() };
+    let backend = TestBackend::new(60, 16);
+    let mut term = Terminal::new(backend).unwrap();
+    app.run_loop(&mut term, events.into_iter(), |_| {}).unwrap();
+    match app.state.top() {
+        Screen::Interface(i) => {
+            assert_eq!(i.service, "org.busx.Test");
+            assert_eq!(i.object, "/org");
+            assert_eq!(i.interface, "org.busx.Test");
+            assert_eq!(i.methods.len(), 1, "Ping parsed from the node");
+            assert_eq!(i.properties.len(), 1, "Name parsed from the node");
+        }
+        _ => panic!("auto-skip chain should land on Interface"),
+    }
+    insta::assert_snapshot!(format!("{}", term.backend()));
+}

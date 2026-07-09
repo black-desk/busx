@@ -11,7 +11,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
-use crate::tui::state::{Screen, ServiceScreen, State};
+use crate::tui::state::{InterfaceFocus, Screen, ServiceScreen, State};
 
 pub fn render(frame: &mut Frame, state: &State) {
     let area = frame.area();
@@ -26,7 +26,7 @@ pub fn render(frame: &mut Frame, state: &State) {
         Screen::Service(s) => render_service(frame, main, s),
         Screen::Objects(o) => render_objects(frame, main, o),
         Screen::Interfaces(i) => render_interfaces(frame, main, i),
-        Screen::Interface(_) => render_placeholder(frame, main, "Interface"),
+        Screen::Interface(i) => render_interface(frame, main, i),
     }
     render_keyhint(frame, footer, state.top());
 }
@@ -44,10 +44,6 @@ fn screen_crumb(s: &Screen) -> String {
         Screen::Interfaces(i) => format!("{} {}", i.service, i.object),
         Screen::Interface(i) => format!("{}:{}:{}", i.service, i.object, i.interface),
     }
-}
-
-fn render_placeholder(frame: &mut Frame, area: Rect, name: &str) {
-    frame.render_widget(Paragraph::new(format!("{name} (loading…)")), area);
 }
 
 fn render_service(frame: &mut Frame, area: Rect, s: &ServiceScreen) {
@@ -111,6 +107,77 @@ fn render_interfaces(frame: &mut Frame, area: Rect, i: &crate::tui::state::Inter
     if !i.names.is_empty() {
         ls.select(Some(i.selected));
     }
+    frame.render_stateful_widget(list, area, &mut ls);
+}
+
+fn render_interface(frame: &mut Frame, area: Rect, i: &crate::tui::state::InterfaceScreen) {
+    if let Some(err) = &i.error {
+        frame.render_widget(Paragraph::new(format!("error: {err}")), area);
+        return;
+    }
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(34),
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+        ])
+        .split(area);
+
+    let methods: Vec<ListItem> = i
+        .methods
+        .iter()
+        .map(|(n, sig)| ListItem::new(Line::from(format!("{n}  {sig}"))))
+        .collect();
+    render_sub_list(frame, chunks[0], "methods", methods, i.selected[0], i.focus == InterfaceFocus::Methods);
+
+    // Properties show the GetAll value alongside name + signature.
+    let properties: Vec<ListItem> = i
+        .properties
+        .iter()
+        .map(|(n, sig, _access)| {
+            let val = i
+                .prop_values
+                .iter()
+                .find(|(k, _)| k == n)
+                .map(|(_, v)| v.as_str())
+                .unwrap_or("");
+            ListItem::new(Line::from(format!("{n}  {sig}  {val}")))
+        })
+        .collect();
+    let p_title = if i.loading { "properties (loading…)" } else { "properties" };
+    render_sub_list(frame, chunks[1], p_title, properties, i.selected[1], i.focus == InterfaceFocus::Properties);
+
+    let signals: Vec<ListItem> = i
+        .signals
+        .iter()
+        .map(|(n, sig)| ListItem::new(Line::from(format!("{n}  {sig}"))))
+        .collect();
+    render_sub_list(frame, chunks[2], "signals", signals, i.selected[2], i.focus == InterfaceFocus::Signals);
+}
+
+/// A titled list. The focused column gets a `▶` title prefix + bold border; the
+/// selected row is REVERSED in every column (so selection is visible everywhere).
+fn render_sub_list(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    items: Vec<ListItem>,
+    selected: usize,
+    focused: bool,
+) {
+    let display_title = if focused { format!("▶ {title}") } else { title.to_string() };
+    let mut block = Block::default().borders(Borders::ALL).title(display_title);
+    if focused {
+        block = block.border_style(Style::default().add_modifier(Modifier::BOLD));
+    }
+    let mut ls = ListState::default();
+    if !items.is_empty() {
+        ls.select(Some(selected));
+    }
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
     frame.render_stateful_widget(list, area, &mut ls);
 }
 
