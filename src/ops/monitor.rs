@@ -259,7 +259,7 @@ fn stream(
             let line = serde_json::to_string(&msg_to_json(&msg))?;
             writeln!(out, "{line}")?;
         } else {
-            write!(out, "{}", msg_to_human(&msg))?;
+            write!(out, "{}", crate::dbus::monitor::format_message(&msg))?;
         }
         out.flush()?; // line-buffered so a pipe consumer sees each line promptly
 
@@ -271,55 +271,4 @@ fn stream(
         }
     }
     Ok(())
-}
-
-/// Render a single received message as a `dbus-send`-style human block (spec §10
-/// human form). The first line names the type plus sender/destination/path; the
-/// second line carries interface/member/serial (and reply_serial or error when
-/// present); then each body argument pretty-printed on its own line.
-fn msg_to_human(m: &zbus::Message) -> String {
-    let h = m.header();
-    let ty = match m.message_type() {
-        Type::MethodCall => "method_call",
-        Type::MethodReturn => "method_return",
-        Type::Error => "error",
-        Type::Signal => "signal",
-    };
-    let sender = h.sender().map(|s| s.to_string()).unwrap_or_default();
-    let dest = h.destination().map(|s| s.to_string()).unwrap_or_default();
-    let path = h.path().map(|p| p.to_string()).unwrap_or_default();
-    let iface = h.interface().map(|s| s.to_string()).unwrap_or_default();
-    let member = h.member().map(|s| s.to_string()).unwrap_or_default();
-    let serial = h.primary().serial_num().get();
-    let reply_serial = h.reply_serial().map(|s| s.get());
-    let error = h.error_name().map(|s| s.to_string());
-
-    let mut s = String::new();
-    s.push_str(ty);
-    if !sender.is_empty() {
-        s.push_str(&format!("  sender={sender}"));
-    }
-    if !dest.is_empty() {
-        s.push_str(&format!("  →  {dest}"));
-    }
-    if !path.is_empty() {
-        s.push_str(&format!("  path={path}"));
-    }
-    s.push('\n');
-    s.push_str(&format!("  interface={iface}  member={member}  serial={serial}"));
-    if let Some(rs) = reply_serial {
-        s.push_str(&format!("  reply_serial={rs}"));
-    }
-    if let Some(e) = &error {
-        s.push_str(&format!("  error={e}"));
-    }
-    s.push('\n');
-
-    // Body args via the same Structure trick as the JSON path, then pretty.
-    if let Ok(structure) = m.body().deserialize::<Structure>() {
-        for f in structure.fields() {
-            s.push_str(&format!("  {}\n", crate::value::pretty::pretty(f)));
-        }
-    }
-    s
 }
