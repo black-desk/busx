@@ -14,16 +14,17 @@ use zbus::message::Type;
 use zbus::MatchRule;
 use zvariant::Structure;
 
-/// Assemble the match rule from the convenience flags (+`type='signal'` when
-/// `signals`). `raw_match`, if given, is parsed directly and overrides the
-/// builder path so users get exactly what they typed.
+/// Assemble the match rule from the convenience fields. `msg_type`, if given,
+/// pins the rule's `type=` (e.g. `Signal` for a pure signal subscription,
+/// `MethodCall` for a TUI method listen). `raw_match`, if given, is parsed
+/// directly and overrides the builder path so users get exactly what they typed.
 pub fn build_match_rule(
     interface: Option<&str>,
     member: Option<&str>,
     path: Option<&str>,
     sender: Option<&str>,
     raw_match: Option<&str>,
-    signals: bool,
+    msg_type: Option<Type>,
 ) -> Result<MatchRule<'static>> {
     if let Some(raw) = raw_match {
         return MatchRule::try_from(raw)
@@ -32,8 +33,8 @@ pub fn build_match_rule(
     }
 
     let mut builder = MatchRule::builder();
-    if signals {
-        builder = builder.msg_type(Type::Signal);
+    if let Some(ty) = msg_type {
+        builder = builder.msg_type(ty);
     }
     // `sender` matches the origin of the message; for a well-known service that
     // is its unique name, but the bus also accepts the well-known name here.

@@ -695,8 +695,9 @@ fn push_detail(
 /// - Signal → the signal's own rule on `(iface, member, object)`.
 /// - Property → subscribe `org.freedesktop.DBus.Properties.PropertiesChanged` on
 ///   `object`; the named property is filtered client-side in `app.rs`.
-/// - Method → the method-call rule (BecomeMonitor sees call/return/error); Task 3
-///   replaces the live stream, this only feeds the preview.
+/// - Method → a `type='method_call'` rule on `(iface, member, object)`; the TUI
+///   listens via BecomeMonitor on a dedicated connection, which delivers only
+///   matching calls (Task 3).
 pub(crate) fn listen_rule(
     iface: &str,
     object: &str,
@@ -709,7 +710,7 @@ pub(crate) fn listen_rule(
             Some(object),
             None,
             None,
-            true,
+            Some(zbus::message::Type::Signal),
         ),
         ListenTarget::Property { .. } => crate::dbus::monitor::build_match_rule(
             Some("org.freedesktop.DBus.Properties"),
@@ -717,7 +718,7 @@ pub(crate) fn listen_rule(
             Some(object),
             None,
             None,
-            true,
+            Some(zbus::message::Type::Signal),
         ),
         ListenTarget::Method { member } => crate::dbus::monitor::build_match_rule(
             Some(iface),
@@ -725,7 +726,7 @@ pub(crate) fn listen_rule(
             Some(object),
             None,
             None,
-            false,
+            Some(zbus::message::Type::MethodCall),
         ),
     }
 }

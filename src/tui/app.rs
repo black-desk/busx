@@ -76,7 +76,9 @@ impl App {
 pub fn run(user: bool, system: bool, address: Option<&str>, verbose: bool) -> Result<()> {
     let conn = async_global_executor::block_on(dbus::conn::connect(user, system, address, verbose))?;
     let (tx, rx) = flume::unbounded::<Msg>();
-    let on_effect = |effect: Effect| run_effect(effect, conn.clone(), tx.clone());
+    let (user_arg, system_arg, address_arg) = (user, system, address.map(String::from));
+    let on_effect =
+        move |effect: Effect| run_effect(effect, conn.clone(), tx.clone(), user_arg, system_arg, address_arg.as_deref());
     on_effect(Effect::FetchServices); // initial service-list fetch
 
     let mut app = App { state: State::loading_service() };
@@ -91,7 +93,18 @@ pub fn run(user: bool, system: bool, address: Option<&str>, verbose: bool) -> Re
 }
 
 /// Perform a requested `Effect` against the bus; deliver the result as a `Msg`.
-fn run_effect(effect: Effect, conn: Connection, tx: flume::Sender<Msg>) {
+///
+/// `user`/`system`/`address` are only used by the Method-listen branch, which
+/// builds its own dedicated connection (BecomeMonitor makes a connection
+/// recv-only, so it cannot reuse the main one).
+fn run_effect(
+    effect: Effect,
+    conn: Connection,
+    tx: flume::Sender<Msg>,
+    user: bool,
+    system: bool,
+    address: Option<&str>,
+) {
     match effect {
         Effect::FetchServices => {
             async_global_executor::spawn(async move {
@@ -156,20 +169,67 @@ fn run_effect(effect: Effect, conn: Connection, tx: flume::Sender<Msg>) {
             .detach();
         }
         Effect::Listen { service: _, object, iface, target } => {
+            // `address: Option<&str>` is not `'static`; own it for the spawned task.
+            let address_owned = address.map(String::from);
             async_global_executor::spawn(async move {
                 use futures::{FutureExt, StreamExt};
                 let (cancel_tx, cancel_rx) = futures::channel::oneshot::channel::<()>();
                 let _ = tx.send(Msg::ListenStarted(cancel_tx));
                 let mut cancel_rx = cancel_rx.fuse();
 
-                // Method listen is Task 3 (dedicated connection + BecomeMonitor).
-                if matches!(target, ListenTarget::Method { .. }) {
-                    let _ = tx.send(Msg::ActionResult(
-                        Err("method listen: not yet implemented (Phase 4 Task 3)".into()),
-                    ));
+                // Method listen (Task 3): BecomeMonitor makes a connection
+                // recv-only, so build a dedicated one and let the bus filter the
+                // method's calls. `ListenStarted` is already sent above so the
+                // cancel is wired for this branch too.
+                if let ListenTarget::Method { .. } = &target {
+                    // BecomeMonitor makes a connection recv-only — build a dedicated one.
+                    let dedicated =
+                        match dbus::conn::connect(user, system, address_owned.as_deref(), false)
+                            .await
+                        {
+                            Ok(c) => c,
+                            Err(e) => {
+                                let _ = tx
+                                    .send(Msg::ActionResult(Err(format!("listen: connect failed: {e}"))));
+                                return;
+                            }
+                        };
+                    let rule = match update::listen_rule(&iface, &object, &target) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let _ = tx.send(Msg::ActionResult(Err(e.to_string())));
+                            return;
+                        }
+                    };
+                    if let Err(e) =
+                        crate::dbus::monitor::become_monitor(&dedicated, Some(&rule)).await
+                    {
+                        // Privileged op — some buses refuse it.
+                        let _ = tx.send(Msg::ActionResult(Err(format!("BecomeMonitor refused: {e}"))));
+                        return;
+                    }
+                    // The BecomeMonitor rule filters at the bus, so this stream
+                    // yields only matching method_call messages — no client-side
+                    // filtering or serial tracking needed.
+                    let mut stream = zbus::MessageStream::from(&dedicated).fuse();
+                    loop {
+                        futures::select! {
+                            msg = stream.next() => match msg {
+                                Some(Ok(m)) => {
+                                    let _ = tx.send(Msg::ListenMessage(
+                                        crate::dbus::monitor::format_message(&m)));
+                                }
+                                Some(Err(_)) => {}   // drop a single malformed message
+                                None => break,        // stream ended
+                            },
+                            _ = cancel_rx => break,   // Esc left the Result → stop
+                        }
+                    }
                     return;
                 }
 
+                // Signal / Property listen: subscribe via the match rule on the
+                // main connection; PropertiesChanged is filtered client-side.
                 let rule = match update::listen_rule(&iface, &object, &target) {
                     Ok(r) => r,
                     Err(e) => {

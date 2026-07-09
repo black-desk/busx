@@ -171,7 +171,7 @@ pub fn run(
         path.as_deref(),
         sender.as_deref(),
         raw_match.as_deref(),
-        signals,
+        if signals { Some(Type::Signal) } else { None },
     )?;
 
     // In signal-only mode we subscribe via the match rule. In all-messages
