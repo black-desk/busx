@@ -266,9 +266,10 @@ fn render_detail(frame: &mut Frame, area: Rect, d: &DetailScreen) {
     );
 }
 
-/// The outcome of a one-shot action. Loading → "calling…"; error → the message;
-/// `Call(lines)` → one reply value per line (offset by `scroll` — clamped in
-/// Task 4). `Get`/`Set` render their payload too (Task 3 owns their detail forms).
+/// The outcome of a one-shot action. Loading → "…" (the title carries the
+/// context); error → the message; `Call(lines)` → one reply value per line
+/// (offset by `scroll` — clamped in Task 4). `Get`/`Set` render their payload
+/// too (Task 3 owns their detail forms).
 fn render_result(frame: &mut Frame, area: Rect, r: &ResultScreen) {
     let title = if r.loading {
         format!("{} (loading…)", r.title)
@@ -280,7 +281,7 @@ fn render_result(frame: &mut Frame, area: Rect, r: &ResultScreen) {
     let body = if let Some(err) = &r.error {
         format!("error: {err}")
     } else if r.loading {
-        "calling…".to_string()
+        "…".to_string()
     } else {
         match &r.result {
             Some(ActionResult::Call(lines)) => {
