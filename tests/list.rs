@@ -49,6 +49,25 @@ fn list_human_shows_table_with_test_service() {
     );
 }
 
+/// Well-known names are listed before unique (`:1.x`) names.
+#[test]
+fn list_orders_well_known_before_unique() {
+    let addr = common::bus().address.clone();
+    let out = Command::cargo_bin("busx")
+        .unwrap()
+        .args(["--json", "--address", &addr, "list"])
+        .ok()
+        .unwrap();
+    let v: Value = serde_json::from_slice(&out.stdout).expect("valid json");
+    let arr = v.as_array().expect("array of {name,pid,process}");
+    let is_unique = |e: &Value| e["name"].as_str().unwrap_or("").starts_with(':');
+    let first_unique = arr.iter().position(is_unique);
+    let last_well_known = arr.iter().rposition(|e| !is_unique(e));
+    if let (Some(first_unique), Some(last_well_known)) = (first_unique, last_well_known) {
+        assert!(last_well_known < first_unique, "well-known must precede unique:\n{v}");
+    }
+}
+
 /// Overlong service names are truncated (`…`) and every line stays ≤ 80 cols.
 #[test]
 fn list_human_truncates_overlong_names() {
