@@ -1,0 +1,14 @@
+---
+source: tests/tui.rs
+expression: "format!(\"{}\", term.backend())"
+---
+"s:/o:org.busx.Test > s:/o:org.busx.Test "
+"┌listen org.busx.Test.Changed──────────┐"
+"│signal  sender=:1.1                   │"
+"│  …block1                             │"
+"│                                      │"
+"│signal  sender=:1.2                   │"
+"│  …block2                             │"
+"│                                      │"
+"└──────────────────────────────────────┘"
+"↑↓ scroll · Esc back/stop · q quit      "
