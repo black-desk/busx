@@ -25,6 +25,7 @@ pub enum Msg {
 }
 
 /// A side effect `update` requests; the loop performs the IO. Keeps `update` pure.
+#[derive(Debug)]
 pub enum Effect {
     FetchServices,
     FetchObjects(String),

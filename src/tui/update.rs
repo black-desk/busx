@@ -13,8 +13,9 @@ use crate::dbus::types::{ObjectNode, ServiceInfo};
 use crate::tui::msg::{Effect, Msg};
 use crate::tui::state::{
     flatten_paths, ActionKind, DetailFocus, DetailScreen, InterfaceFocus, InterfaceScreen,
-    InterfacesScreen, MethodMember, ObjectsScreen, Screen, ServiceScreen, State,
+    InterfacesScreen, MethodMember, ObjectsScreen, ResultScreen, Screen, ServiceScreen, State,
 };
+use tui_input::backend::crossterm::EventHandler;
 
 pub fn update(state: &mut State, msg: Msg) -> Option<Effect> {
     match msg {
@@ -66,7 +67,7 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
         Screen::Objects(o) => update_objects_key(o, k.code),
         Screen::Interfaces(i) => update_interfaces_key(i, k.code),
         Screen::Interface(i) => return update_interface_key(i, k),
-        Screen::Detail(d) => update_detail_key(d, k.code),
+        Screen::Detail(d) => return update_detail_key(d, k),
         Screen::Result(_) => {} // Task 4 wires scroll; Esc handled above.
     }
     None
@@ -128,10 +129,45 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                 }
                 _ => return None,
             };
-            push_detail(state, svc, obj, iface, kind);
+            // For a Call, build one input field per IN-arg (labeled "name  sig"
+            // or just the signature when the arg is anonymous). Get/Set keep
+            // their fields empty (Task 3 fills them).
+            let (inputs, field_labels) = match (&kind, i.methods.get(i.selected[0])) {
+                (ActionKind::Call { .. }, Some(m)) => call_fields(&m.args),
+                _ => (vec![], vec![]),
+            };
+            push_detail(state, svc, obj, iface, kind, inputs, field_labels);
             None
         }
-        Screen::Detail(_) => None, // Task 2/3: `[触发]` returns the action Effect.
+        Screen::Detail(d) => {
+            // `[触发]` Enter: only fires when the trigger button is focused.
+            // Reads `d` for the Effect payload + Result title, pushes the Result
+            // screen, returns the Effect. (Get/Set have no effect yet — Task 3.)
+            if d.focus != DetailFocus::Trigger {
+                return None;
+            }
+            let ActionKind::Call { method, signature } = &d.kind else {
+                return None; // Get/Set — Task 3
+            };
+            let title = format!("{}.{}", d.interface, method);
+            let args: Vec<String> = d.inputs.iter().map(|i| i.value().to_string()).collect();
+            let effect = Effect::CallMethod {
+                service: d.service.clone(),
+                object: d.object.clone(),
+                iface: d.interface.clone(),
+                method: method.clone(),
+                signature: signature.clone(),
+                args,
+            };
+            state.screens.push(Screen::Result(ResultScreen {
+                title,
+                result: None,
+                error: None,
+                loading: true,
+                scroll: 0,
+            }));
+            Some(effect)
+        }
         Screen::Result(_) => None,
     }
 }
@@ -267,8 +303,45 @@ fn buttons_for(column: InterfaceFocus) -> &'static [&'static str] {
     }
 }
 
-fn update_detail_key(_d: &mut DetailScreen, _code: KeyCode) {
-    // Task 2/3: field editing, Field↔Trigger focus, `[触发]` returning the Effect.
+/// Detail key handling: `Tab` cycles Field0→Field1→…→Trigger→Field0, `↑↓`/`jk`
+/// move the focused field, and any other key edits the focused input via tui-input.
+/// `Esc` (pop) and `Enter` (trigger) are handled globally / in `handle_enter`.
+fn update_detail_key(d: &mut DetailScreen, k: KeyEvent) -> Option<Effect> {
+    let n = d.inputs.len();
+    match k.code {
+        KeyCode::Tab => {
+            // Cycle the focus. With 0 inputs the field row is empty, so a single
+            // Tab lands on the trigger; otherwise Field0→Field1→…→last→Trigger→Field0.
+            match d.focus {
+                DetailFocus::Field => {
+                    if n == 0 {
+                        d.focus = DetailFocus::Trigger;
+                    } else if d.field_selected + 1 < n {
+                        d.field_selected += 1;
+                    } else {
+                        d.focus = DetailFocus::Trigger;
+                    }
+                }
+                DetailFocus::Trigger => {
+                    d.focus = DetailFocus::Field;
+                    d.field_selected = 0;
+                }
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') if d.focus == DetailFocus::Field && n > 0 => {
+            d.field_selected = (d.field_selected + 1).min(n - 1);
+        }
+        KeyCode::Up | KeyCode::Char('k') if d.focus == DetailFocus::Field && n > 0 => {
+            d.field_selected = d.field_selected.saturating_sub(1);
+        }
+        _ if d.focus == DetailFocus::Field && n > 0 => {
+            // Any other key edits the focused input (tui-input mutates in place;
+            // ignore its changed-state return value).
+            d.inputs[d.field_selected].handle_event(&crossterm::event::Event::Key(k));
+        }
+        _ => {}
+    }
+    None
 }
 
 fn load_services(s: &mut ServiceScreen, res: Result<Vec<ServiceInfo>, String>) {
@@ -457,21 +530,36 @@ fn push_interface(state: &mut State, service: String, object: String, interface:
     }));
 }
 
-/// Push a stub Detail screen for an action (Task 2/3 fills `inputs`/`field_labels`).
+/// Build the form fields for a method call: one `tui-input` per IN-arg, labeled
+/// "name  sig" (or just `sig` when the arg name is empty). Zero-arg methods yield
+/// zero fields — the Detail is just the `[触发]` button.
+fn call_fields(args: &[(String, String)]) -> (Vec<tui_input::Input>, Vec<String>) {
+    let labels = args
+        .iter()
+        .map(|(name, sig)| if name.is_empty() { sig.clone() } else { format!("{name}  {sig}") })
+        .collect();
+    let inputs = args.iter().map(|_| tui_input::Input::default()).collect();
+    (inputs, labels)
+}
+
+/// Push a Detail form for an action. `inputs`/`field_labels` are non-empty only
+/// for calls (one per IN-arg); Task 3 fills them for Set.
 fn push_detail(
     state: &mut State,
     service: String,
     object: String,
     interface: String,
     kind: ActionKind,
+    inputs: Vec<tui_input::Input>,
+    field_labels: Vec<String>,
 ) {
     state.screens.push(Screen::Detail(DetailScreen {
         service,
         object,
         interface,
         kind,
-        inputs: vec![],
-        field_labels: vec![],
+        inputs,
+        field_labels,
         field_selected: 0,
         focus: DetailFocus::default(),
         loading: false,

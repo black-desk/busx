@@ -456,6 +456,18 @@ fn method(name: &str, signature: &str) -> busx::tui::state::MethodMember {
     busx::tui::state::MethodMember { name: name.into(), signature: signature.into(), args: vec![] }
 }
 
+/// A `MethodMember` whose `args` carry per-IN-arg (name, signature) pairs — the
+/// source of the call Detail form's input fields. The concatenated `signature`
+/// is derived from the args.
+fn method_with_args(name: &str, args: &[(&str, &str)]) -> busx::tui::state::MethodMember {
+    let signature = args.iter().map(|(_, s)| *s).collect::<String>();
+    busx::tui::state::MethodMember {
+        name: name.into(),
+        signature,
+        args: args.iter().map(|(n, s)| (n.to_string(), s.to_string())).collect(),
+    }
+}
+
 #[test]
 fn interface_tab_toggles_column_and_buttons() {
     let mut state = busx::tui::State { screens: vec![Screen::Interface(interface_screen())], quit: false };
@@ -649,4 +661,265 @@ fn interface_renders_action_button_bar() {
         quit: false,
     };
     insta::assert_snapshot!(render_to_string(&state, 64, 16));
+}
+
+// --- Phase 3 Task 2: method-call Detail form + Result ---
+
+use busx::tui::state::{ActionKind, ActionResult, DetailFocus, DetailScreen, ResultScreen};
+
+/// An Interface screen focused on the button bar, with `button_selected` on the
+/// given button index; `selected[0]` points at `methods[idx]`.
+fn interface_on_button(methods: Vec<busx::tui::state::MethodMember>, button: usize) -> busx::tui::State {
+    let screen = busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
+        service: "s".into(),
+        object: "/o".into(),
+        interface: "i".into(),
+        methods,
+        properties: vec![],
+        signals: vec![],
+        prop_values: vec![],
+        focus: InterfaceFocus::Buttons,
+        active_column: InterfaceFocus::Methods,
+        button_selected: button,
+        selected: [0, 0, 0],
+        loading: false,
+        error: None,
+    });
+    busx::tui::State { screens: vec![screen], quit: false }
+}
+
+#[test]
+fn call_button_pushes_detail_with_one_input_per_arg() {
+    // One IN-arg `n: u` → the call Detail has one input, labeled "n  u".
+    let state = interface_on_button(vec![method_with_args("Add", &[("n", "u")])], 0);
+    let mut state = state;
+    update(&mut state, key(KeyCode::Enter));
+    match state.top() {
+        Screen::Detail(d) => {
+            assert_eq!(d.inputs.len(), 1, "one input per IN-arg");
+            assert_eq!(d.field_labels, vec!["n  u".to_string()]);
+            match &d.kind {
+                ActionKind::Call { method, signature } => {
+                    assert_eq!(method, "Add");
+                    assert_eq!(signature, "u", "concatenated IN-signature");
+                }
+                other => panic!("expected Call, got {other:?}"),
+            }
+            assert_eq!(d.focus, DetailFocus::Field, "starts focused on the field");
+        }
+        _ => panic!("Enter should push a Detail screen"),
+    }
+}
+
+#[test]
+fn call_detail_anonymous_arg_labeled_with_signature_only() {
+    // An anonymous IN-arg (empty name) → the label is just the signature.
+    let state = interface_on_button(vec![method_with_args("Echo", &[("", "s")])], 0);
+    let mut state = state;
+    update(&mut state, key(KeyCode::Enter));
+    match state.top() {
+        Screen::Detail(d) => assert_eq!(d.field_labels, vec!["s".to_string()]),
+        _ => panic!("Detail screen expected"),
+    }
+}
+
+#[test]
+fn zero_arg_method_pushes_detail_with_no_inputs() {
+    // A method with no IN-args → the Detail is just the trigger button.
+    let state = interface_on_button(vec![method_with_args("Ping", &[])], 0);
+    let mut state = state;
+    update(&mut state, key(KeyCode::Enter));
+    match state.top() {
+        Screen::Detail(d) => {
+            assert!(d.inputs.is_empty(), "zero-arg call → no inputs");
+            assert!(d.field_labels.is_empty());
+        }
+        _ => panic!("Detail screen expected"),
+    }
+}
+
+#[test]
+fn detail_typing_edits_focused_input() {
+    let mut state = interface_on_button(vec![method_with_args("Add", &[("n", "u")])], 0);
+    update(&mut state, key(KeyCode::Enter)); // push the Detail
+    update(&mut state, key(KeyCode::Char('4')));
+    update(&mut state, key(KeyCode::Char('2')));
+    match state.top() {
+        Screen::Detail(d) => {
+            assert_eq!(d.inputs[0].value(), "42", "keystrokes flow into the field");
+            assert_eq!(d.focus, DetailFocus::Field, "still field-focused while typing");
+        }
+        _ => panic!("still on Detail"),
+    }
+}
+
+#[test]
+fn detail_tab_cycles_field_to_trigger_then_back() {
+    let mut state = interface_on_button(vec![method_with_args("Add", &[("n", "u")])], 0);
+    update(&mut state, key(KeyCode::Enter)); // push the Detail (1 input)
+    // Field0 → (only one field) → Trigger.
+    update(&mut state, key(KeyCode::Tab));
+    match state.top() {
+        Screen::Detail(d) => assert_eq!(d.focus, DetailFocus::Trigger),
+        _ => panic!(),
+    }
+    // Trigger → Field0.
+    update(&mut state, key(KeyCode::Tab));
+    match state.top() {
+        Screen::Detail(d) => {
+            assert_eq!(d.focus, DetailFocus::Field);
+            assert_eq!(d.field_selected, 0);
+        }
+        _ => panic!(),
+    }
+}
+
+#[test]
+fn detail_tab_cycles_across_multiple_fields() {
+    let mut state = interface_on_button(vec![method_with_args("Add", &[("a", "u"), ("b", "u")])], 0);
+    update(&mut state, key(KeyCode::Enter)); // push the Detail (2 inputs)
+    // Field0 → Field1 → Trigger → Field0.
+    let foci = [
+        (DetailFocus::Field, 1),
+        (DetailFocus::Trigger, 1),
+        (DetailFocus::Field, 0),
+    ];
+    for (want_focus, want_field) in foci {
+        update(&mut state, key(KeyCode::Tab));
+        match state.top() {
+            Screen::Detail(d) => {
+                assert_eq!(d.focus, want_focus, "tab cycle");
+                assert_eq!(d.field_selected, want_field);
+            }
+            _ => panic!(),
+        }
+    }
+}
+
+#[test]
+fn detail_arrows_move_field_selection() {
+    let mut state = interface_on_button(vec![method_with_args("Add", &[("a", "u"), ("b", "u")])], 0);
+    update(&mut state, key(KeyCode::Enter)); // 2 inputs, field_selected 0
+    update(&mut state, key(KeyCode::Down));
+    match state.top() {
+        Screen::Detail(d) => assert_eq!(d.field_selected, 1, "Down moves to field 1"),
+        _ => panic!(),
+    }
+    update(&mut state, key(KeyCode::Up));
+    match state.top() {
+        Screen::Detail(d) => assert_eq!(d.field_selected, 0, "Up moves back to field 0"),
+        _ => panic!(),
+    }
+}
+
+#[test]
+fn detail_trigger_enter_pushes_result_and_requests_call() {
+    let mut state = interface_on_button(vec![method_with_args("Add", &[("n", "u")])], 0);
+    update(&mut state, key(KeyCode::Enter)); // push the Detail
+    update(&mut state, key(KeyCode::Char('4')));
+    update(&mut state, key(KeyCode::Char('2')));
+    // Tab to the trigger, then Enter → Result (loading) + CallMethod effect.
+    update(&mut state, key(KeyCode::Tab));
+    let effect = update(&mut state, key(KeyCode::Enter));
+    match effect {
+        Some(Effect::CallMethod { service, object, iface, method, signature, args }) => {
+            assert_eq!(service, "s");
+            assert_eq!(object, "/o");
+            assert_eq!(iface, "i");
+            assert_eq!(method, "Add");
+            assert_eq!(signature, "u");
+            assert_eq!(args, vec!["42".to_string()], "field values flow as call args");
+        }
+        other => panic!("trigger Enter should request CallMethod, got {other:?}"),
+    }
+    match state.top() {
+        Screen::Result(r) => {
+            assert!(r.loading, "Result starts loading");
+            assert_eq!(r.title, "i.Add");
+            assert!(r.result.is_none());
+        }
+        _ => panic!("trigger pushed a Result screen"),
+    }
+}
+
+#[test]
+fn zero_arg_call_trigger_requests_call_with_empty_args() {
+    let mut state = interface_on_button(vec![method_with_args("Ping", &[])], 0);
+    update(&mut state, key(KeyCode::Enter)); // push the 0-input Detail
+    // 0 inputs → Field collapses; one Tab lands on Trigger.
+    update(&mut state, key(KeyCode::Tab));
+    let effect = update(&mut state, key(KeyCode::Enter));
+    match effect {
+        Some(Effect::CallMethod { method, signature, args, .. }) => {
+            assert_eq!(method, "Ping");
+            assert_eq!(signature, "", "zero-arg method has empty signature");
+            assert!(args.is_empty(), "zero-arg call sends no args");
+        }
+        other => panic!("expected CallMethod, got {other:?}"),
+    }
+    assert!(matches!(state.top(), Screen::Result(_)));
+}
+
+#[test]
+fn action_result_populates_result_screen() {
+    // A Result screen mid-flight (loading) receiving a Call result shows the value.
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Result(ResultScreen {
+            title: "i.Add".into(),
+            result: None,
+            error: None,
+            loading: true,
+            scroll: 0,
+        })],
+        quit: false,
+    };
+    let effect = update(&mut state, Msg::ActionResult(Ok(ActionResult::Call(vec!["7".into()]))));
+    assert!(effect.is_none(), "ActionResult requests no fetch");
+    match state.top() {
+        Screen::Result(r) => {
+            assert!(!r.loading);
+            match &r.result {
+                Some(ActionResult::Call(lines)) => assert_eq!(lines, &vec!["7".to_string()]),
+                other => panic!("expected Call, got {other:?}"),
+            }
+        }
+        _ => panic!("still on Result"),
+    }
+}
+
+#[test]
+fn call_detail_form_renders_field_and_trigger() {
+    // The 1-arg call Detail, with the field focused: the field row + `[触发]`.
+    let state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Detail(DetailScreen {
+            service: "s".into(),
+            object: "/o".into(),
+            interface: "i".into(),
+            kind: ActionKind::Call { method: "Add".into(), signature: "u".into() },
+            inputs: vec!["42".into()],
+            field_labels: vec!["n  u".into()],
+            field_selected: 0,
+            focus: DetailFocus::Field,
+            loading: false,
+            error: None,
+        })],
+        quit: false,
+    };
+    insta::assert_snapshot!(render_to_string(&state, 40, 8));
+}
+
+#[test]
+fn call_result_renders_reply_value() {
+    // A completed call Result shows one line per reply value.
+    let state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Result(ResultScreen {
+            title: "i.Add".into(),
+            result: Some(ActionResult::Call(vec!["49".into()])),
+            error: None,
+            loading: false,
+            scroll: 0,
+        })],
+        quit: false,
+    };
+    insta::assert_snapshot!(render_to_string(&state, 40, 8));
 }
