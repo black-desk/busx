@@ -106,6 +106,9 @@ fn loop_loads_services_then_navigates() {
     let backend = TestBackend::new(44, 8);
     let mut term = Terminal::new(backend).unwrap();
     app.run_loop(&mut term, events.into_iter()).unwrap();
-    // Final frame: populated list, selection on row 1 (org.busx.B).
+    // The scripted Down moved selection to row 1 (REVERSED highlight is the only
+    // selection cue in the real UI; the text snapshot can't show styling, so
+    // assert the selection explicitly).
+    assert_eq!(selected_of(&app.state), 1, "Down moved selection to row 1");
     insta::assert_snapshot!(format!("{}", term.backend()));
 }

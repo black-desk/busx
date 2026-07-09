@@ -46,7 +46,6 @@ fn render_service(frame: &mut Frame, area: Rect, s: &ServiceScreen) {
         .collect();
     let list = List::new(items)
         .block(block)
-        .highlight_symbol("▶ ")
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
     let mut list_state = ListState::default();
     if !s.services.is_empty() {
