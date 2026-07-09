@@ -2,14 +2,21 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Messages fed to `update` (spec §6). Keys arrive from crossterm; data results
-//! arrive from the async `dbus::` workers over the flume channel.
+//! Messages fed to `update` (spec §6).
 
-use crate::dbus::types::ServiceInfo;
+use crate::dbus::types::{ObjectNode, ServiceInfo};
 use crossterm::event::KeyEvent;
+use zbus_xml::Node;
+use zvariant::OwnedValue;
 
 pub enum Msg {
     Key(KeyEvent),
     Resize(u16, u16),
+
     ServicesLoaded(Result<Vec<ServiceInfo>, String>),
+    ObjectsLoaded(Result<ObjectNode, String>),
+    /// (service, object, the introspection node)
+    InterfacesLoaded(String, String, Result<Node<'static>, String>),
+    /// (interface name) PropertiesChanged-style refresh result
+    PropertiesLoaded(Result<Vec<(String, OwnedValue)>, String>),
 }
