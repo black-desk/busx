@@ -5,6 +5,7 @@
 //! Messages fed to `update` (spec §6).
 
 use crate::dbus::types::{ObjectNode, ServiceInfo};
+use crate::tui::state::ActionResult;
 use crossterm::event::KeyEvent;
 use zbus_xml::Node;
 use zvariant::OwnedValue;
@@ -19,6 +20,8 @@ pub enum Msg {
     InterfacesLoaded(String, String, Result<Node<'static>, String>),
     /// (interface name) PropertiesChanged-style refresh result
     PropertiesLoaded(Result<Vec<(String, OwnedValue)>, String>),
+    /// A one-shot action (call/get/set) completed.
+    ActionResult(Result<ActionResult, String>),
 }
 
 /// A side effect `update` requests; the loop performs the IO. Keeps `update` pure.
@@ -27,4 +30,26 @@ pub enum Effect {
     FetchObjects(String),
     FetchInterfaces(String, String),
     FetchProperties(String, String, String),
+    CallMethod {
+        service: String,
+        object: String,
+        iface: String,
+        method: String,
+        signature: String,
+        args: Vec<String>,
+    },
+    GetProperty {
+        service: String,
+        object: String,
+        iface: String,
+        property: String,
+    },
+    SetProperty {
+        service: String,
+        object: String,
+        iface: String,
+        property: String,
+        signature: String,
+        value: String,
+    },
 }

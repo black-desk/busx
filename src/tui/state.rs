@@ -20,6 +20,8 @@ pub enum Screen {
     Objects(ObjectsScreen),
     Interfaces(InterfacesScreen),
     Interface(InterfaceScreen),
+    Detail(DetailScreen),
+    Result(ResultScreen),
 }
 
 #[derive(Default)]
@@ -54,13 +56,22 @@ pub struct InterfacesScreen {
     pub error: Option<String>,
 }
 
-/// One interface: methods / properties (with values) / signals, three columns.
+/// One method: `name` + concatenated IN-signature (display) + per-IN-arg
+/// (name, signature) for the call Detail form's input fields.
+#[derive(Clone, Debug)]
+pub struct MethodMember {
+    pub name: String,
+    pub signature: String,
+    pub args: Vec<(String, String)>,
+}
+
+/// One interface: methods / properties (with values) / signals, three columns,
+/// plus a right-side action-button bar for the active column's selected member.
 pub struct InterfaceScreen {
     pub service: String,
     pub object: String,
     pub interface: String,
-    /// (name, signature) per method.
-    pub methods: Vec<(String, String)>,
+    pub methods: Vec<MethodMember>,
     /// (name, signature, access) per property.
     pub properties: Vec<(String, String, String)>,
     /// (name, signature) per signal.
@@ -68,6 +79,12 @@ pub struct InterfaceScreen {
     /// GetAll snapshot: property name → pretty value. Refreshed on load / `r`.
     pub prop_values: Vec<(String, String)>,
     pub focus: InterfaceFocus,
+    /// The member column the action buttons act on. Always one of
+    /// {Methods, Properties, Signals}; updated whenever `focus` becomes one of
+    /// those and left untouched when focus moves to `Buttons`.
+    pub active_column: InterfaceFocus,
+    /// Which action button is highlighted in the right panel.
+    pub button_selected: usize,
     pub selected: [usize; 3],
     pub loading: bool,
     pub error: Option<String>,
@@ -79,6 +96,55 @@ pub enum InterfaceFocus {
     Methods,
     Properties,
     Signals,
+    /// The right-side action-button bar.
+    Buttons,
+}
+
+/// An action form. Call = one input per IN-arg; Set = one input; Get = no inputs.
+pub struct DetailScreen {
+    pub service: String,
+    pub object: String,
+    pub interface: String,
+    pub kind: ActionKind,
+    /// One `tui-input` per form field (call args / set value). Empty for get /
+    /// zero-arg calls.
+    pub inputs: Vec<tui_input::Input>,
+    /// "name  sig" per input (display label). Empty for get / zero-arg calls.
+    pub field_labels: Vec<String>,
+    pub field_selected: usize,
+    pub focus: DetailFocus,
+    pub loading: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub enum ActionKind {
+    Call { method: String, signature: String },
+    Get { property: String },
+    Set { property: String, signature: String },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum DetailFocus {
+    #[default]
+    Field,
+    Trigger,
+}
+
+/// The outcome of a one-shot action (call/get/set).
+pub struct ResultScreen {
+    pub title: String,
+    pub result: Option<ActionResult>,
+    pub error: Option<String>,
+    pub loading: bool,
+    pub scroll: usize,
+}
+
+#[derive(Clone, Debug)]
+pub enum ActionResult {
+    Call(Vec<String>), // each reply value, pretty-printed
+    Get(String), // the property value, pretty-printed
+    Set, // success
 }
 
 impl State {

@@ -5,15 +5,15 @@
 //! Pure state machine (spec §6, §7). Returns an `Option<Effect>` so it stays
 //! IO-free: pushing/loading a screen requests a fetch the loop performs.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use zbus_xml::{ArgDirection, Node, PropertyAccess, Signature};
 use zvariant::OwnedValue;
 
 use crate::dbus::types::{ObjectNode, ServiceInfo};
 use crate::tui::msg::{Effect, Msg};
 use crate::tui::state::{
-    flatten_paths, InterfaceFocus, InterfaceScreen, InterfacesScreen, ObjectsScreen, Screen,
-    ServiceScreen, State,
+    flatten_paths, ActionKind, DetailFocus, DetailScreen, InterfaceFocus, InterfaceScreen,
+    InterfacesScreen, MethodMember, ObjectsScreen, Screen, ServiceScreen, State,
 };
 
 pub fn update(state: &mut State, msg: Msg) -> Option<Effect> {
@@ -29,6 +29,16 @@ pub fn update(state: &mut State, msg: Msg) -> Option<Effect> {
         Msg::ObjectsLoaded(res) => load_objects(state, res),
         Msg::InterfacesLoaded(svc, obj, res) => load_interfaces(state, svc, obj, res),
         Msg::PropertiesLoaded(res) => load_properties(state, res),
+        Msg::ActionResult(res) => {
+            if let Screen::Result(r) = state.top_mut() {
+                r.loading = false;
+                match res {
+                    Ok(ar) => r.result = Some(ar),
+                    Err(e) => r.error = Some(e),
+                }
+            }
+            None
+        }
     }
 }
 
@@ -55,7 +65,9 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
         Screen::Service(s) => update_service_key(s, k.code),
         Screen::Objects(o) => update_objects_key(o, k.code),
         Screen::Interfaces(i) => update_interfaces_key(i, k.code),
-        Screen::Interface(i) => return update_interface_key(i, k.code),
+        Screen::Interface(i) => return update_interface_key(i, k),
+        Screen::Detail(d) => update_detail_key(d, k.code),
+        Screen::Result(_) => {} // Task 4 wires scroll; Esc handled above.
     }
     None
 }
@@ -86,7 +98,41 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
             push_interface(state, svc.clone(), obj.clone(), iface.clone());
             Some(Effect::FetchProperties(svc, obj, iface))
         }
-        Screen::Interface(_) => None, // Phase 3 wires method/property actions
+        Screen::Interface(i) => {
+            // Gather owned identity data while holding the immutable borrow, then
+            // release it before the mutable `push_detail`.
+            if i.focus != InterfaceFocus::Buttons {
+                return None;
+            }
+            let buttons = buttons_for(i.active_column);
+            let action = *buttons.get(i.button_selected)?;
+            let (svc, obj, iface) = (i.service.clone(), i.object.clone(), i.interface.clone());
+            let kind = match i.active_column {
+                InterfaceFocus::Methods => {
+                    let m = i.methods.get(i.selected[0])?;
+                    match action {
+                        "调用" => ActionKind::Call {
+                            method: m.name.clone(),
+                            signature: m.signature.clone(),
+                        },
+                        _ => return None,
+                    }
+                }
+                InterfaceFocus::Properties => {
+                    let (name, sig, _access) = i.properties.get(i.selected[1])?;
+                    match action {
+                        "读取" => ActionKind::Get { property: name.clone() },
+                        "设置" => ActionKind::Set { property: name.clone(), signature: sig.clone() },
+                        _ => return None,
+                    }
+                }
+                _ => return None,
+            };
+            push_detail(state, svc, obj, iface, kind);
+            None
+        }
+        Screen::Detail(_) => None, // Task 2/3: `[触发]` returns the action Effect.
+        Screen::Result(_) => None,
     }
 }
 
@@ -127,28 +173,61 @@ fn update_interfaces_key(i: &mut InterfacesScreen, code: KeyCode) {
     }
 }
 
-fn update_interface_key(i: &mut InterfaceScreen, code: KeyCode) -> Option<Effect> {
-    match code {
-        KeyCode::Tab => {
+/// Interface focus scheme:
+/// - `Tab` toggles between the active member column and the button bar.
+///   Landing on a column sets `active_column`.
+/// - `Shift+Tab` (BackTab) cycles the active column
+///   Methods → Properties → Signals → Methods (skipping Buttons).
+/// - Column focus: `↑↓`/`jk` move that column's member selection.
+/// - `Buttons` focus: `↑↓`/`jk` move `button_selected` within the active column's
+///   action list; `Enter` pushes a stub `Detail` screen.
+fn update_interface_key(i: &mut InterfaceScreen, k: KeyEvent) -> Option<Effect> {
+    match (k.code, k.modifiers.contains(KeyModifiers::SHIFT)) {
+        (KeyCode::Tab, false) => {
             i.focus = match i.focus {
+                InterfaceFocus::Buttons => i.active_column,
+                // From any column, jump to the button bar.
+                InterfaceFocus::Methods | InterfaceFocus::Properties | InterfaceFocus::Signals => {
+                    InterfaceFocus::Buttons
+                }
+            };
+            // Clamp button selection into range when entering the bar.
+            if i.focus == InterfaceFocus::Buttons {
+                i.button_selected = i.button_selected.min(buttons_for(i.active_column).len().saturating_sub(1));
+            }
+        }
+        (KeyCode::BackTab, _) | (KeyCode::Tab, true) => {
+            // Cycle the active column among member columns, and focus it.
+            i.active_column = match i.active_column {
                 InterfaceFocus::Methods => InterfaceFocus::Properties,
                 InterfaceFocus::Properties => InterfaceFocus::Signals,
                 InterfaceFocus::Signals => InterfaceFocus::Methods,
+                InterfaceFocus::Buttons => InterfaceFocus::Methods, // unreachable, kept safe
             };
+            i.focus = i.active_column;
         }
-        KeyCode::Down | KeyCode::Char('j') => {
+        (KeyCode::Down, _) | (KeyCode::Char('j'), _) if i.focus == InterfaceFocus::Buttons => {
+            let len = buttons_for(i.active_column).len();
+            if len > 0 {
+                i.button_selected = (i.button_selected + 1).min(len - 1);
+            }
+        }
+        (KeyCode::Up, _) | (KeyCode::Char('k'), _) if i.focus == InterfaceFocus::Buttons => {
+            i.button_selected = i.button_selected.saturating_sub(1);
+        }
+        (KeyCode::Down, _) | (KeyCode::Char('j'), _) => {
             let idx = focus_index(i.focus);
             let len = column_len(i, idx);
             if len > 0 {
                 i.selected[idx] = (i.selected[idx] + 1).min(len - 1);
             }
         }
-        KeyCode::Up | KeyCode::Char('k') => {
+        (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {
             let idx = focus_index(i.focus);
             i.selected[idx] = i.selected[idx].saturating_sub(1);
         }
         // Refresh the property-value snapshot.
-        KeyCode::Char('r') => {
+        (KeyCode::Char('r'), _) => {
             i.loading = true;
             return Some(Effect::FetchProperties(
                 i.service.clone(),
@@ -166,6 +245,7 @@ fn focus_index(focus: InterfaceFocus) -> usize {
         InterfaceFocus::Methods => 0,
         InterfaceFocus::Properties => 1,
         InterfaceFocus::Signals => 2,
+        InterfaceFocus::Buttons => 0, // unreachable in the column branch
     }
 }
 
@@ -175,6 +255,20 @@ fn column_len(i: &InterfaceScreen, idx: usize) -> usize {
         1 => i.properties.len(),
         _ => i.signals.len(),
     }
+}
+
+/// The action buttons offered for a given active column (Signals → none this phase).
+fn buttons_for(column: InterfaceFocus) -> &'static [&'static str] {
+    match column {
+        InterfaceFocus::Methods => &["调用"],
+        InterfaceFocus::Properties => &["读取", "设置"],
+        InterfaceFocus::Signals => &[],
+        InterfaceFocus::Buttons => &[],
+    }
+}
+
+fn update_detail_key(_d: &mut DetailScreen, _code: KeyCode) {
+    // Task 2/3: field editing, Field↔Trigger focus, `[触发]` returning the Effect.
 }
 
 fn load_services(s: &mut ServiceScreen, res: Result<Vec<ServiceInfo>, String>) {
@@ -268,15 +362,17 @@ fn load_properties(state: &mut State, res: Result<Vec<(String, OwnedValue)>, Str
     None
 }
 
-/// (name, signature) per method/signal.
-type Members = Vec<(String, String)>;
+/// Methods extracted from an interface.
+type Methods = Vec<MethodMember>;
 /// (name, signature, access) per property.
 type Properties = Vec<(String, String, String)>;
+/// (name, signature) per signal.
+type Signals = Vec<(String, String)>;
 
 /// Extract (methods, properties, signals) for `iface_name` from an introspection
 /// node, mirroring `ops::introspect`'s formatting. Method signature = the
 /// concatenated IN-arg signatures; signal signature = all args; property = (name, type, access).
-fn members_of(node: &Node, iface_name: &str) -> (Members, Properties, Members) {
+fn members_of(node: &Node, iface_name: &str) -> (Methods, Properties, Signals) {
     let Some(iface) = node.interfaces().iter().find(|i| i.name().as_ref() == iface_name) else {
         return (vec![], vec![], vec![]);
     };
@@ -284,13 +380,14 @@ fn members_of(node: &Node, iface_name: &str) -> (Members, Properties, Members) {
         .methods()
         .iter()
         .map(|m| {
-            let in_sig: String = m
+            let in_args: Vec<(String, String)> = m
                 .args()
                 .iter()
                 .filter(|a| a.direction() == Some(ArgDirection::In))
-                .map(|a| sig_str(a.ty()))
+                .map(|a| (a.name().unwrap_or("").to_string(), sig_str(a.ty())))
                 .collect();
-            (m.name().to_string(), in_sig)
+            let in_sig: String = in_args.iter().map(|(_, s)| s.clone()).collect();
+            MethodMember { name: m.name().to_string(), signature: in_sig, args: in_args }
         })
         .collect();
     let properties = iface
@@ -352,8 +449,32 @@ fn push_interface(state: &mut State, service: String, object: String, interface:
         signals,
         prop_values: vec![],
         focus: Default::default(),
+        active_column: Default::default(),
+        button_selected: 0,
         selected: [0, 0, 0],
         loading: true,
+        error: None,
+    }));
+}
+
+/// Push a stub Detail screen for an action (Task 2/3 fills `inputs`/`field_labels`).
+fn push_detail(
+    state: &mut State,
+    service: String,
+    object: String,
+    interface: String,
+    kind: ActionKind,
+) {
+    state.screens.push(Screen::Detail(DetailScreen {
+        service,
+        object,
+        interface,
+        kind,
+        inputs: vec![],
+        field_labels: vec![],
+        field_selected: 0,
+        focus: DetailFocus::default(),
+        loading: false,
         error: None,
     }));
 }

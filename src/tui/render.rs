@@ -11,7 +11,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
-use crate::tui::state::{InterfaceFocus, Screen, ServiceScreen, State};
+use crate::tui::state::{ActionKind, DetailScreen, InterfaceFocus, ResultScreen, Screen, ServiceScreen, State};
 
 pub fn render(frame: &mut Frame, state: &State) {
     let area = frame.area();
@@ -27,6 +27,8 @@ pub fn render(frame: &mut Frame, state: &State) {
         Screen::Objects(o) => render_objects(frame, main, o),
         Screen::Interfaces(i) => render_interfaces(frame, main, i),
         Screen::Interface(i) => render_interface(frame, main, i),
+        Screen::Detail(d) => render_detail(frame, main, d),
+        Screen::Result(r) => render_result(frame, main, r),
     }
     render_keyhint(frame, footer, state.top());
 }
@@ -43,6 +45,17 @@ fn screen_crumb(s: &Screen) -> String {
         Screen::Objects(o) => o.service.clone(),
         Screen::Interfaces(i) => format!("{} {}", i.service, i.object),
         Screen::Interface(i) => format!("{}:{}:{}", i.service, i.object, i.interface),
+        Screen::Detail(d) => format!("{}:{}:{} › {}", d.service, d.object, d.interface, action_title(&d.kind)),
+        Screen::Result(r) => r.title.clone(),
+    }
+}
+
+/// Short label for an action kind (breadcrumb / Detail title).
+fn action_title(kind: &ActionKind) -> String {
+    match kind {
+        ActionKind::Call { method, .. } => format!("call {method}"),
+        ActionKind::Get { property } => format!("get {property}"),
+        ActionKind::Set { property, .. } => format!("set {property}"),
     }
 }
 
@@ -115,6 +128,14 @@ fn render_interface(frame: &mut Frame, area: Rect, i: &crate::tui::state::Interf
         frame.render_widget(Paragraph::new(format!("error: {err}")), area);
         return;
     }
+    // Left: the three stacked member lists. Right: the action-button bar for the
+    // active column's selected member.
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
+        .split(area);
+    let (left, right) = (cols[0], cols[1]);
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -122,12 +143,12 @@ fn render_interface(frame: &mut Frame, area: Rect, i: &crate::tui::state::Interf
             Constraint::Percentage(33),
             Constraint::Percentage(33),
         ])
-        .split(area);
+        .split(left);
 
     let methods: Vec<ListItem> = i
         .methods
         .iter()
-        .map(|(n, sig)| ListItem::new(Line::from(format!("{n}  {sig}"))))
+        .map(|m| ListItem::new(Line::from(format!("{}  {}", m.name, m.signature))))
         .collect();
     render_sub_list(frame, chunks[0], "methods", methods, i.selected[0], i.focus == InterfaceFocus::Methods);
 
@@ -154,6 +175,56 @@ fn render_interface(frame: &mut Frame, area: Rect, i: &crate::tui::state::Interf
         .map(|(n, sig)| ListItem::new(Line::from(format!("{n}  {sig}"))))
         .collect();
     render_sub_list(frame, chunks[2], "signals", signals, i.selected[2], i.focus == InterfaceFocus::Signals);
+
+    // Action-button bar: the buttons offered for the active column's selected member.
+    let buttons: Vec<ListItem> = action_buttons(i.active_column)
+        .iter()
+        .map(|b| ListItem::new(Line::from(*b)))
+        .collect();
+    let focused = i.focus == InterfaceFocus::Buttons;
+    render_sub_list(frame, right, "actions", buttons, i.button_selected, focused);
+}
+
+/// The action buttons offered for a given active column (mirrors `update`).
+fn action_buttons(column: InterfaceFocus) -> &'static [&'static str] {
+    match column {
+        InterfaceFocus::Methods => &["调用"],
+        InterfaceFocus::Properties => &["读取", "设置"],
+        InterfaceFocus::Signals => &[],
+        InterfaceFocus::Buttons => &[],
+    }
+}
+
+/// Placeholder Detail screen (Task 2/3 renders the real form + `[触发]` button).
+fn render_detail(frame: &mut Frame, area: Rect, d: &DetailScreen) {
+    let title = if d.loading {
+        format!("{} (loading…)", action_title(&d.kind))
+    } else {
+        action_title(&d.kind)
+    };
+    let block = Block::default().borders(Borders::ALL).title(title);
+    let body = if let Some(err) = &d.error {
+        format!("error: {err}")
+    } else {
+        "Detail".to_string()
+    };
+    frame.render_widget(Paragraph::new(body).block(block), area);
+}
+
+/// Placeholder Result screen (Task 3/4 renders the real body + scroll).
+fn render_result(frame: &mut Frame, area: Rect, r: &ResultScreen) {
+    let title = if r.loading {
+        format!("{} (loading…)", r.title)
+    } else {
+        r.title.clone()
+    };
+    let block = Block::default().borders(Borders::ALL).title(title);
+    let body = if let Some(err) = &r.error {
+        format!("error: {err}")
+    } else {
+        "Result".to_string()
+    };
+    frame.render_widget(Paragraph::new(body).block(block), area);
 }
 
 /// A titled list. The focused column gets a `▶` title prefix + bold border; the
@@ -186,7 +257,9 @@ fn render_keyhint(frame: &mut Frame, area: Rect, screen: &Screen) {
         Screen::Service(_) => "↑↓ select · Enter open · q quit · ? help",
         Screen::Objects(_) => "↑↓ select · Enter open · Esc back · q quit",
         Screen::Interfaces(_) => "↑↓ select · Enter open · Esc back · q quit",
-        Screen::Interface(_) => "Tab switch · ↑↓ select · r refresh · Esc back · q quit",
+        Screen::Interface(_) => "Tab buttons · Shift+Tab column · ↑↓ select · r refresh · Esc back · q quit",
+        Screen::Detail(_) => "Tab move · Enter trigger · Esc back · q quit",
+        Screen::Result(_) => "↑↓ scroll · Esc back · q quit",
     };
     frame.render_widget(Paragraph::new(hint), area);
 }
