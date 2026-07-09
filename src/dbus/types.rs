@@ -13,8 +13,11 @@ pub struct ServiceInfo {
 }
 
 /// A node in an object-path tree (the result of recursively introspecting a
-/// service). `path` is the absolute object path; `children` are sub-objects.
+/// service). `path` is the absolute object path; `children` are sub-objects;
+/// `interfaces` is how many interfaces this object exposes (0 ⇒ a pure container
+/// path with no object of its own — filtered from the flat TUI view).
 pub struct ObjectNode {
     pub path: String,
+    pub interfaces: usize,
     pub children: Vec<ObjectNode>,
 }

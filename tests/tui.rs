@@ -116,15 +116,18 @@ fn loop_loads_services_then_navigates() {
 
 use busx::dbus::types::ObjectNode;
 
-fn obj(path: &str, children: Vec<ObjectNode>) -> ObjectNode {
-    ObjectNode { path: path.to_string(), children }
+fn obj(path: &str, interfaces: usize, children: Vec<ObjectNode>) -> ObjectNode {
+    ObjectNode { path: path.to_string(), interfaces, children }
 }
 
 #[test]
 fn objects_screen_renders_flat_paths() {
+    // `/` and `/org` are pure containers (no interfaces); only the leaves that
+    // actually expose an object survive the flat view.
     let tree = obj(
         "/",
-        vec![obj("/org", vec![obj("/org/busx", vec![])]), obj("/foo", vec![])],
+        0,
+        vec![obj("/org", 0, vec![obj("/org/foo", 2, vec![])]), obj("/bar", 1, vec![])],
     );
     let paths = busx::tui::flatten_paths(&tree);
     let state = busx::tui::State {
@@ -138,6 +141,22 @@ fn objects_screen_renders_flat_paths() {
         quit: false,
     };
     insta::assert_snapshot!(render_to_string(&state, 48, 9));
+}
+
+#[test]
+fn flatten_paths_skips_empty_objects() {
+    // Pure container paths (0 interfaces) are filtered; only paths that expose
+    // at least one interface survive, depth-first.
+    let tree = obj(
+        "/",
+        0,
+        vec![
+            obj("/org", 0, vec![obj("/org/foo", 2, vec![])]),
+            obj("/bar", 1, vec![]),
+            obj("/empty", 0, vec![obj("/empty/x", 1, vec![])]),
+        ],
+    );
+    assert_eq!(busx::tui::flatten_paths(&tree), vec!["/org/foo", "/bar", "/empty/x"]);
 }
 
 // --- Objects screen behavior: Enter / load / auto-skip / error (pure `update`) ---
@@ -177,13 +196,13 @@ fn service_enter_pushes_objects_and_requests_fetch() {
 #[test]
 fn objects_loaded_populates_paths_without_skip() {
     let mut state = State { screens: vec![Screen::Objects(objects_screen("org.busx.A"))], quit: false };
-    let tree = obj("/", vec![obj("/a", vec![]), obj("/b", vec![])]);
+    let tree = obj("/", 1, vec![obj("/a", 1, vec![]), obj("/b", 1, vec![])]);
     let effect = update(&mut state, Msg::ObjectsLoaded(Ok(tree)));
     assert!(effect.is_none(), "multiple paths ⇒ no auto-skip, no fetch");
     match state.top() {
         Screen::Objects(o) => {
             assert!(!o.loading);
-            // flattened depth-first: "/", "/a", "/b"
+            // all three expose an object ⇒ all three in the flat list
             assert_eq!(o.paths, vec!["/", "/a", "/b"]);
         }
         _ => panic!("still on Objects"),
@@ -193,8 +212,8 @@ fn objects_loaded_populates_paths_without_skip() {
 #[test]
 fn objects_loaded_single_path_auto_skips_to_interfaces() {
     let mut state = State { screens: vec![Screen::Objects(objects_screen("org.busx.A"))], quit: false };
-    // Only the root "/" ⇒ one path ⇒ auto-skip straight into its interfaces.
-    let tree = obj("/", vec![]);
+    // Only the root "/" exposes an object ⇒ one path ⇒ auto-skip into its interfaces.
+    let tree = obj("/", 1, vec![]);
     let effect = update(&mut state, Msg::ObjectsLoaded(Ok(tree)));
     match effect {
         Some(Effect::FetchInterfaces(s, p)) => {
@@ -481,7 +500,7 @@ fn drill_down_auto_skips_service_to_interface() {
          </interface>\
          </node>",
     );
-    let tree = obj("/", vec![]);
+    let tree = obj("/", 1, vec![]);
     let events = vec![
         Msg::ServicesLoaded(Ok(vec![svc("org.busx.Test", None, None)])),
         key(KeyCode::Enter),
