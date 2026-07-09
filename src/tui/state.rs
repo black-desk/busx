@@ -122,6 +122,16 @@ pub enum ActionKind {
     Call { method: String, signature: String },
     Get { property: String },
     Set { property: String, signature: String },
+    Listen { target: ListenTarget },
+}
+
+/// What a listen targets — a signal member, a property's `PropertiesChanged`
+/// notifications, or (Task 3) a method-call stream via BecomeMonitor.
+#[derive(Clone, Debug)]
+pub enum ListenTarget {
+    Signal { member: String },
+    Property { property: String },
+    Method { member: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -131,13 +141,18 @@ pub enum DetailFocus {
     Trigger,
 }
 
-/// The outcome of a one-shot action (call/get/set).
+/// The outcome of a one-shot action (call/get/set), or a streaming listen.
 pub struct ResultScreen {
     pub title: String,
     pub result: Option<ActionResult>,
     pub error: Option<String>,
     pub loading: bool,
     pub scroll: usize,
+    /// Streaming-listen mode: appended message blocks (`format_message` output).
+    pub messages: Vec<String>,
+    /// Cancel sender for an active listen. Stored when `Msg::ListenStarted`
+    /// arrives; dropped when this screen is popped (Esc) → the listen task exits.
+    pub cancel: Option<futures::channel::oneshot::Sender<()>>,
 }
 
 #[derive(Clone, Debug)]

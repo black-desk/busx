@@ -19,7 +19,7 @@ use zbus::Connection;
 use crate::dbus;
 use crate::error::Result;
 use crate::tui::msg::{Effect, Msg};
-use crate::tui::state::{ActionResult, State};
+use crate::tui::state::{ActionResult, ListenTarget, State};
 use crate::tui::{render, update};
 
 /// Pretty-print an owned value (the common tail of call/get result rendering).
@@ -155,7 +155,74 @@ fn run_effect(effect: Effect, conn: Connection, tx: flume::Sender<Msg>) {
             })
             .detach();
         }
+        Effect::Listen { service: _, object, iface, target } => {
+            async_global_executor::spawn(async move {
+                use futures::{FutureExt, StreamExt};
+                let (cancel_tx, cancel_rx) = futures::channel::oneshot::channel::<()>();
+                let _ = tx.send(Msg::ListenStarted(cancel_tx));
+                let mut cancel_rx = cancel_rx.fuse();
+
+                // Method listen is Task 3 (dedicated connection + BecomeMonitor).
+                if matches!(target, ListenTarget::Method { .. }) {
+                    let _ = tx.send(Msg::ActionResult(
+                        Err("method listen: not yet implemented (Phase 4 Task 3)".into()),
+                    ));
+                    return;
+                }
+
+                let rule = match update::listen_rule(&iface, &object, &target) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        let _ = tx.send(Msg::ActionResult(Err(e.to_string())));
+                        return;
+                    }
+                };
+                let stream =
+                    match zbus::MessageStream::for_match_rule(rule, &conn, None).await {
+                        Ok(s) => s.fuse(),
+                        Err(e) => {
+                            let _ = tx.send(Msg::ActionResult(Err(e.to_string())));
+                            return;
+                        }
+                    };
+                let mut stream = stream;
+                loop {
+                    futures::select! {
+                        msg = stream.next() => match msg {
+                            Some(Ok(m)) => {
+                                if listen_message_matches(&m, &target) {
+                                    let _ = tx.send(Msg::ListenMessage(
+                                        crate::dbus::monitor::format_message(&m)));
+                                }
+                            }
+                            Some(Err(_)) => {}   // drop a single malformed message
+                            None => break,        // stream ended
+                        },
+                        _ = cancel_rx => break,   // Esc left the Result → stop
+                    }
+                }
+            })
+            .detach();
+        }
     }
+}
+
+/// Client-side filter for a received listen message. Signals always pass; a
+/// Property listen forwards only `PropertiesChanged` messages whose changed- or
+/// invalidated-keys mention the watched property. Best-effort: on parse failure
+/// the message passes through (don't kill the stream for one odd message).
+fn listen_message_matches(m: &zbus::Message, target: &ListenTarget) -> bool {
+    let ListenTarget::Property { property } = target else {
+        return true; // Signal (Method never reaches here — returns early in the task)
+    };
+    let Ok((_, changed, invalidated)) = m.body().deserialize::<(
+        String,
+        std::collections::HashMap<String, zvariant::OwnedValue>,
+        Vec<String>,
+    )>() else {
+        return true; // best-effort: can't parse → show it
+    };
+    changed.contains_key(property) || invalidated.iter().any(|k| k == property)
 }
 
 /// Production event source: drains the worker channel, and between messages

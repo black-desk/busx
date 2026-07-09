@@ -1,0 +1,15 @@
+---
+source: tests/tui.rs
+assertion_line: 1350
+expression: "render_to_string(&state, 52, 10)"
+---
+"listen i.Changed                                    "
+"┌listen i.Changed──────────────────────────────────┐"
+"│signal  sender=:1.1                               │"
+"│  interface=i  member=Changed  serial=7           │"
+"│  3                                               │"
+"│signal  sender=:1.1                               │"
+"│  interface=i  member=Changed  serial=9           │"
+"│  4                                               │"
+"└──────────────────────────────────────────────────┘"
+"↑↓ scroll · Esc back · q quit                       "
