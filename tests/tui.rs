@@ -38,8 +38,9 @@ fn key(code: KeyCode) -> Msg {
 }
 
 fn selected_of(state: &State) -> usize {
-    match &state.screen {
+    match state.top() {
         Screen::Service(s) => s.selected,
+        _ => 0,
     }
 }
 
@@ -79,12 +80,12 @@ fn service_screen_loading_state() {
 #[test]
 fn service_screen_error_state() {
     let state = State {
-        screen: busx::tui::Screen::Service(busx::tui::ServiceScreen {
+        screens: vec![busx::tui::Screen::Service(busx::tui::ServiceScreen {
             services: vec![],
             selected: 0,
             loading: false,
             error: Some("org.freedesktop.DBus.Error.ServiceUnknown: no owner".into()),
-        }),
+        })],
         quit: false,
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 6));
