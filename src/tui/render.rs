@@ -174,10 +174,6 @@ fn render_interfaces(frame: &mut Frame, area: Rect, i: &crate::tui::state::Inter
 }
 
 fn render_interface(frame: &mut Frame, area: Rect, i: &crate::tui::state::InterfaceScreen) {
-    if let Some(err) = &i.error {
-        frame.render_widget(Paragraph::new(format!("error: {err}")), area);
-        return;
-    }
     // Left: the three stacked member lists. Right: the action-button bar for the
     // active column's selected member.
     let cols = Layout::default()
@@ -202,22 +198,33 @@ fn render_interface(frame: &mut Frame, area: Rect, i: &crate::tui::state::Interf
         .collect();
     render_sub_list(frame, chunks[0], "methods", methods, i.selected[0], i.focus == InterfaceFocus::Methods);
 
-    // Properties show the GetAll value alongside name + signature.
-    let properties: Vec<ListItem> = i
-        .properties
-        .iter()
-        .map(|(n, sig, _access)| {
-            let val = i
-                .prop_values
-                .iter()
-                .find(|(k, _)| k == n)
-                .map(|(_, v)| v.as_str())
-                .unwrap_or("");
-            ListItem::new(Line::from(format!("{n}  {sig}  {val}")))
-        })
-        .collect();
-    let p_title = if i.loading { "properties (loading…)" } else { "properties" };
-    render_sub_list(frame, chunks[1], p_title, properties, i.selected[1], i.focus == InterfaceFocus::Properties);
+    // Properties show the GetAll value alongside name + signature. If GetAll
+    // failed for this object/interface, show that scoped to this column (some
+    // objects' GetAll rejects interfaces they don't track — e.g. the standard
+    // org.freedesktop.DBus.* ones) instead of blanking the whole screen: the
+    // methods and signals columns stay visible.
+    if let Some(err) = &i.error {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title("properties (unavailable)");
+        frame.render_widget(Paragraph::new(err.clone()).block(block), chunks[1]);
+    } else {
+        let properties: Vec<ListItem> = i
+            .properties
+            .iter()
+            .map(|(n, sig, _access)| {
+                let val = i
+                    .prop_values
+                    .iter()
+                    .find(|(k, _)| k == n)
+                    .map(|(_, v)| v.as_str())
+                    .unwrap_or("");
+                ListItem::new(Line::from(format!("{n}  {sig}  {val}")))
+            })
+            .collect();
+        let p_title = if i.loading { "properties (loading…)" } else { "properties" };
+        render_sub_list(frame, chunks[1], p_title, properties, i.selected[1], i.focus == InterfaceFocus::Properties);
+    }
 
     let signals: Vec<ListItem> = i
         .signals

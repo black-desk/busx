@@ -459,6 +459,30 @@ fn interface_screen() -> busx::tui::state::InterfaceScreen {
     }
 }
 
+#[test]
+fn interface_screen_shows_getall_error_scoped_to_properties() {
+    // GetAll failed for this interface (some objects' GetAll rejects interfaces
+    // they don't track — e.g. the standard org.freedesktop.DBus.* ones). The
+    // error must NOT blank the screen: methods + signals stay visible and the
+    // error shows only in the properties column.
+    let mut screen = interface_screen();
+    screen.error =
+        Some("org.freedesktop.DBus.Error.InvalidArgs: 无此接口\"i\"".into());
+    let state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Interface(screen)],
+        quit: false,
+        popup: None,
+    };
+    let rendered = render_to_string(&state, 64, 16);
+    assert!(rendered.contains("m1"), "methods still visible: {rendered}");
+    assert!(rendered.contains("sig1"), "signals still visible: {rendered}");
+    assert!(
+        rendered.contains("properties (unavailable)"),
+        "error scoped to the properties column: {rendered}"
+    );
+    insta::assert_snapshot!(rendered);
+}
+
 /// A `MethodMember` with no per-arg detail (Task 2 fills `args`).
 fn method(name: &str, signature: &str) -> busx::tui::state::MethodMember {
     busx::tui::state::MethodMember { name: name.into(), signature: signature.into(), args: vec![] }
