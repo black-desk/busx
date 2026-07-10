@@ -69,4 +69,9 @@ pub enum Effect {
         iface: String,
         target: ListenTarget,
     },
+    /// Copy a generated command line to the system clipboard. NOT a dbus op —
+    /// `run_effect` does not handle it; only the production `on_effect` closure
+    /// in `app::run` does (via `arboard`). The `Effect` seam keeps `arboard`
+    /// (which needs a display) out of `update`/`render`/tests.
+    CopyToClipboard(String),
 }

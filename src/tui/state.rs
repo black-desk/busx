@@ -6,6 +6,7 @@
 //! draws the top screen + a breadcrumb. `update`/`render` read only this.
 
 use crate::dbus::types::{ObjectNode, ServiceInfo};
+use crate::tui::copy::{CopyOp, Tool};
 
 #[derive(Default)]
 pub struct State {
@@ -13,6 +14,25 @@ pub struct State {
     /// Never empty (the initial Service screen is pushed at construction).
     pub screens: Vec<Screen>,
     pub quit: bool,
+    /// The copy-as popup overlay (`Some` while open; `c` opens, `Esc`/`Enter`
+    /// close). Rendered on top of the current screen by `render::render_popup`.
+    pub popup: Option<CopyAsPopup>,
+}
+
+/// The copy-as popup state: the operation being rendered, each tool's generated
+/// command (or `None` = unsupported → shown greyed), and the focused tool index.
+///
+/// `commands` is precomputed once when the popup opens so navigation and preview
+/// are pure reads (no `generate` calls on every keypress).
+#[derive(Clone, Debug)]
+pub struct CopyAsPopup {
+    /// The operation being rendered as another tool's command.
+    pub op: CopyOp,
+    /// Per-tool generated command (`None` = the tool can't express it). Indexed
+    /// in [`Tool::ALL`] order so `selected` indexes both this and the popup rows.
+    pub commands: [(Tool, Option<String>); 4],
+    /// The focused tool row (0..=3), in [`Tool::ALL`] order.
+    pub selected: usize,
 }
 
 pub enum Screen {
@@ -153,6 +173,9 @@ pub struct ResultScreen {
     /// Cancel sender for an active listen. Stored when `Msg::ListenStarted`
     /// arrives; dropped when this screen is popped (Esc) → the listen task exits.
     pub cancel: Option<futures::channel::oneshot::Sender<()>>,
+    /// The operation that produced this Result, so `c` can open a copy-as popup
+    /// for it. `None` for Results created without one (test literals, etc.).
+    pub op: Option<CopyOp>,
 }
 
 #[derive(Clone, Debug)]
@@ -168,6 +191,7 @@ impl State {
         State {
             screens: vec![Screen::Service(ServiceScreen { services: vec![], selected: 0, loading: true, error: None })],
             quit: false,
+            popup: None,
         }
     }
 
@@ -176,6 +200,7 @@ impl State {
         State {
             screens: vec![Screen::Service(ServiceScreen { services, selected: 0, loading: false, error: None })],
             quit: false,
+            popup: None,
         }
     }
 

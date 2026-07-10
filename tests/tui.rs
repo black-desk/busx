@@ -87,6 +87,7 @@ fn service_screen_error_state() {
             error: Some("org.freedesktop.DBus.Error.ServiceUnknown: no owner".into()),
         })],
         quit: false,
+        popup: None,
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 6));
 }
@@ -139,6 +140,7 @@ fn objects_screen_renders_flat_paths() {
             error: None,
         })],
         quit: false,
+        popup: None,
     };
     insta::assert_snapshot!(render_to_string(&state, 48, 9));
 }
@@ -195,7 +197,7 @@ fn service_enter_pushes_objects_and_requests_fetch() {
 
 #[test]
 fn objects_loaded_populates_paths_without_skip() {
-    let mut state = State { screens: vec![Screen::Objects(objects_screen("org.busx.A"))], quit: false };
+    let mut state = State { screens: vec![Screen::Objects(objects_screen("org.busx.A"))], quit: false, popup: None };
     let tree = obj("/", 1, vec![obj("/a", 1, vec![]), obj("/b", 1, vec![])]);
     let effect = update(&mut state, Msg::ObjectsLoaded(Ok(tree)));
     assert!(effect.is_none(), "multiple paths ⇒ no auto-skip, no fetch");
@@ -211,7 +213,7 @@ fn objects_loaded_populates_paths_without_skip() {
 
 #[test]
 fn objects_loaded_single_path_auto_skips_to_interfaces() {
-    let mut state = State { screens: vec![Screen::Objects(objects_screen("org.busx.A"))], quit: false };
+    let mut state = State { screens: vec![Screen::Objects(objects_screen("org.busx.A"))], quit: false, popup: None };
     // Only the root "/" exposes an object ⇒ one path ⇒ auto-skip into its interfaces.
     let tree = obj("/", 1, vec![]);
     let effect = update(&mut state, Msg::ObjectsLoaded(Ok(tree)));
@@ -244,6 +246,7 @@ fn objects_enter_drills_selected_path() {
             error: None,
         })],
         quit: false,
+        popup: None,
     };
     let effect = update(&mut state, key(KeyCode::Enter));
     match effect {
@@ -261,7 +264,7 @@ fn objects_enter_drills_selected_path() {
 
 #[test]
 fn objects_loaded_error_sets_error_without_skip() {
-    let mut state = State { screens: vec![Screen::Objects(objects_screen("org.busx.A"))], quit: false };
+    let mut state = State { screens: vec![Screen::Objects(objects_screen("org.busx.A"))], quit: false, popup: None };
     let effect = update(&mut state, Msg::ObjectsLoaded(Err("boom".into())));
     assert!(effect.is_none(), "error path requests no fetch");
     match state.top() {
@@ -286,6 +289,7 @@ fn interfaces_screen_lists_interfaces() {
             error: None,
         })],
         quit: false,
+        popup: None,
     };
     insta::assert_snapshot!(render_to_string(&state, 44, 7));
 }
@@ -316,6 +320,7 @@ fn interfaces_loaded_lists_all() {
             error: None,
         })],
         quit: false,
+        popup: None,
     };
     let effect = update(
         &mut state,
@@ -354,6 +359,7 @@ fn interfaces_loaded_single_interface_auto_skips() {
             error: None,
         })],
         quit: false,
+        popup: None,
     };
     let effect = update(
         &mut state,
@@ -396,6 +402,7 @@ fn interface_screen_renders_three_columns() {
             error: None,
         })],
         quit: false,
+        popup: None,
     };
     insta::assert_snapshot!(render_to_string(&state, 60, 16));
 }
@@ -420,6 +427,7 @@ fn properties_loaded_fills_pretty_values() {
             error: None,
         })],
         quit: false,
+        popup: None,
     };
     let vals = vec![("volume".into(), Value::F64(0.5).try_to_owned().unwrap())];
     let effect = update(&mut state, Msg::PropertiesLoaded(Ok(vals)));
@@ -470,7 +478,7 @@ fn method_with_args(name: &str, args: &[(&str, &str)]) -> busx::tui::state::Meth
 
 #[test]
 fn interface_tab_toggles_column_and_buttons() {
-    let mut state = busx::tui::State { screens: vec![Screen::Interface(interface_screen())], quit: false };
+    let mut state = busx::tui::State { screens: vec![Screen::Interface(interface_screen())], quit: false, popup: None };
     // Start on the Methods column (focus == active_column == Methods).
     assert_eq!(state.top_focus(), InterfaceFocus::Methods);
     // Tab jumps to the button bar.
@@ -483,7 +491,7 @@ fn interface_tab_toggles_column_and_buttons() {
 
 #[test]
 fn interface_backtab_cycles_active_column() {
-    let mut state = busx::tui::State { screens: vec![Screen::Interface(interface_screen())], quit: false };
+    let mut state = busx::tui::State { screens: vec![Screen::Interface(interface_screen())], quit: false, popup: None };
     // Shift+Tab (BackTab) cycles the active column Methods→Properties→Signals→Methods.
     update(&mut state, key(KeyCode::BackTab));
     assert_eq!(state.top_focus(), InterfaceFocus::Properties);
@@ -495,7 +503,7 @@ fn interface_backtab_cycles_active_column() {
 
 #[test]
 fn interface_arrows_move_within_focused_column() {
-    let mut state = busx::tui::State { screens: vec![Screen::Interface(interface_screen())], quit: false };
+    let mut state = busx::tui::State { screens: vec![Screen::Interface(interface_screen())], quit: false, popup: None };
     // Methods focus, two methods, starts at 0.
     update(&mut state, key(KeyCode::Down));
     assert_eq!(state.top_selected(), [1, 0, 0]);
@@ -513,7 +521,7 @@ fn interface_arrows_move_within_focused_column() {
 
 #[test]
 fn interface_r_requests_property_refresh() {
-    let mut state = busx::tui::State { screens: vec![Screen::Interface(interface_screen())], quit: false };
+    let mut state = busx::tui::State { screens: vec![Screen::Interface(interface_screen())], quit: false, popup: None };
     let effect = update(&mut state, key(KeyCode::Char('r')));
     match effect {
         Some(Effect::FetchProperties(s, o, i)) => {
@@ -575,7 +583,7 @@ fn interface_button_enter_pushes_call_detail() {
     screen.focus = InterfaceFocus::Buttons;
     screen.button_selected = 0;
     screen.selected = [0, 0, 0]; // m1 (signature "u")
-    let mut state = busx::tui::State { screens: vec![Screen::Interface(screen)], quit: false };
+    let mut state = busx::tui::State { screens: vec![Screen::Interface(screen)], quit: false, popup: None };
     let effect = update(&mut state, key(KeyCode::Enter));
     assert!(effect.is_none(), "button Enter pushes a stub (no Effect this task)");
     match state.top() {
@@ -605,7 +613,7 @@ fn interface_button_enter_pushes_get_detail() {
     screen.focus = InterfaceFocus::Buttons;
     screen.button_selected = 0;
     screen.selected = [0, 0, 0]; // p1
-    let mut state = busx::tui::State { screens: vec![Screen::Interface(screen)], quit: false };
+    let mut state = busx::tui::State { screens: vec![Screen::Interface(screen)], quit: false, popup: None };
     update(&mut state, key(KeyCode::Enter));
     match state.top() {
         Screen::Detail(d) => match &d.kind {
@@ -624,7 +632,7 @@ fn interface_button_enter_pushes_set_detail() {
     screen.focus = InterfaceFocus::Buttons;
     screen.button_selected = 1; // 设置
     screen.selected = [0, 0, 0];
-    let mut state = busx::tui::State { screens: vec![Screen::Interface(screen)], quit: false };
+    let mut state = busx::tui::State { screens: vec![Screen::Interface(screen)], quit: false, popup: None };
     update(&mut state, key(KeyCode::Enter));
     match state.top() {
         Screen::Detail(d) => match &d.kind {
@@ -659,6 +667,7 @@ fn interface_renders_action_button_bar() {
             error: None,
         })],
         quit: false,
+        popup: None,
     };
     insta::assert_snapshot!(render_to_string(&state, 64, 16));
 }
@@ -685,7 +694,7 @@ fn interface_on_button(methods: Vec<busx::tui::state::MethodMember>, button: usi
         loading: false,
         error: None,
     });
-    busx::tui::State { screens: vec![screen], quit: false }
+    busx::tui::State { screens: vec![screen], quit: false, popup: None }
 }
 
 #[test]
@@ -872,8 +881,10 @@ fn action_result_populates_result_screen() {
             scroll: 0,
             messages: vec![],
             cancel: None,
+            op: None,
         })],
         quit: false,
+        popup: None,
     };
     let effect = update(&mut state, Msg::ActionResult(Ok(ActionResult::Call(vec!["7".into()]))));
     assert!(effect.is_none(), "ActionResult requests no fetch");
@@ -906,6 +917,7 @@ fn call_detail_form_renders_field_and_trigger() {
             error: None,
         })],
         quit: false,
+        popup: None,
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 8));
 }
@@ -922,8 +934,10 @@ fn call_result_renders_reply_value() {
             scroll: 0,
             messages: vec![],
             cancel: None,
+            op: None,
         })],
         quit: false,
+        popup: None,
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 8));
 }
@@ -949,7 +963,7 @@ fn interface_on_prop_button(button: usize, sig: &str) -> busx::tui::State {
         loading: false,
         error: None,
     });
-    busx::tui::State { screens: vec![screen], quit: false }
+    busx::tui::State { screens: vec![screen], quit: false, popup: None }
 }
 
 #[test]
@@ -1085,6 +1099,7 @@ fn set_detail_form_renders_one_field() {
             error: None,
         })],
         quit: false,
+        popup: None,
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 8));
 }
@@ -1101,8 +1116,10 @@ fn get_result_renders_value() {
             scroll: 0,
             messages: vec![],
             cancel: None,
+            op: None,
         })],
         quit: false,
+        popup: None,
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 8));
 }
@@ -1134,6 +1151,7 @@ fn call_action_flows_interface_to_result() {
             error: None,
         })],
         quit: false,
+        popup: None,
     };
     let events = vec![
         key(KeyCode::Tab),           // Methods column → Buttons
@@ -1183,7 +1201,7 @@ fn interface_on_signal_button() -> busx::tui::State {
         loading: false,
         error: None,
     });
-    busx::tui::State { screens: vec![screen], quit: false }
+    busx::tui::State { screens: vec![screen], quit: false, popup: None }
 }
 
 #[test]
@@ -1234,7 +1252,7 @@ fn property_listen_button_targets_propertieschanged_rule() {
         loading: false,
         error: None,
     };
-    let mut state = busx::tui::State { screens: vec![busx::tui::Screen::Interface(screen)], quit: false };
+    let mut state = busx::tui::State { screens: vec![busx::tui::Screen::Interface(screen)], quit: false, popup: None };
     update(&mut state, key(KeyCode::Enter));
     match state.top() {
         Screen::Detail(d) => {
@@ -1344,8 +1362,10 @@ fn listen_result_renders_streaming_messages() {
                 "signal  sender=:1.1\n  interface=i  member=Changed  serial=9\n  4".into(),
             ],
             cancel: None,
+            op: None,
         })],
         quit: false,
+        popup: None,
     };
     insta::assert_snapshot!(render_to_string(&state, 52, 10));
 }
@@ -1371,7 +1391,7 @@ fn method_listen_button_and_trigger_target_method() {
         loading: false,
         error: None,
     });
-    let mut state = busx::tui::State { screens: vec![screen], quit: false };
+    let mut state = busx::tui::State { screens: vec![screen], quit: false, popup: None };
     update(&mut state, key(KeyCode::Enter)); // push the Method Listen Detail
     // The Detail's single label is the method_call match-rule preview.
     match state.top() {
@@ -1438,7 +1458,7 @@ fn listen_action_flows_interface_to_streaming_result() {
         loading: false,
         error: None,
     });
-    let state = busx::tui::State { screens: vec![screen], quit: false };
+    let state = busx::tui::State { screens: vec![screen], quit: false, popup: None };
 
     // Arm a real cancel pair we keep the receiver of, so the Esc-drop assertion
     // can observe the sender going away. The ListenStarted message carries the
@@ -1505,8 +1525,10 @@ fn listen_refused_renders_error_on_result() {
             scroll: 0,
             messages: vec![],
             cancel: Some(cancel_tx),
+            op: None,
         })],
         quit: false,
+        popup: None,
     };
     update(&mut state, Msg::ActionResult(Err("BecomeMonitor refused: ...".into())));
     match state.top() {
@@ -1519,3 +1541,204 @@ fn listen_refused_renders_error_on_result() {
     }
     insta::assert_snapshot!(render_to_string(&state, 44, 6));
 }
+
+// --- Phase 5 Task 2: copy-as popup + clipboard ---
+
+use busx::tui::copy::{generate, CopyOp, Tool};
+
+/// A call Detail for `Add(n: u)` with "42" typed, so `c` reflects the typed value.
+fn call_detail_with_input() -> busx::tui::State {
+    busx::tui::State {
+        screens: vec![busx::tui::Screen::Detail(DetailScreen {
+            service: "s".into(),
+            object: "/o".into(),
+            interface: "i".into(),
+            kind: ActionKind::Call { method: "Add".into(), signature: "u".into() },
+            inputs: vec!["42".into()],
+            field_labels: vec!["n  u".into()],
+            field_selected: 0,
+            focus: DetailFocus::Field,
+            loading: false,
+            error: None,
+        })],
+        quit: false,
+        popup: None,
+    }
+}
+
+#[test]
+fn c_opens_copy_as_popup_with_four_tool_commands() {
+    // On a call Detail, `c` opens the popup carrying the Call CopyOp (with the
+    // typed "42" arg) and a precomputed command per tool. busctl is Some (1:1);
+    // every tool can express a basic-type call here.
+    let mut state = call_detail_with_input();
+    update(&mut state, key(KeyCode::Char('c')));
+    let popup = state.popup.as_ref().expect("c opened the popup");
+    match &popup.op {
+        CopyOp::Call { service, object, iface, method, signature, args } => {
+            assert_eq!(service, "s");
+            assert_eq!(object, "/o");
+            assert_eq!(iface, "i");
+            assert_eq!(method, "Add");
+            assert_eq!(signature, "u");
+            assert_eq!(args, &vec!["42".to_string()], "popup op carries the typed value");
+        }
+        other => panic!("expected Call op, got {other:?}"),
+    }
+    assert_eq!(popup.commands.len(), 4, "one entry per tool (Tool::ALL order)");
+    assert_eq!(popup.commands[0].0, Tool::DbusSend);
+    assert_eq!(popup.commands[1].0, Tool::Busctl);
+    assert_eq!(popup.commands[2].0, Tool::Qdbus);
+    assert_eq!(popup.commands[3].0, Tool::Gdbus);
+    assert_eq!(popup.selected, 0, "popup opens focused on row 0");
+    // busctl is 1:1 and must contain the typed arg "42".
+    let busctl_cmd = popup.commands[1].1.as_ref().expect("busctl supports a basic call");
+    assert!(busctl_cmd.starts_with("busctl call"));
+    assert!(busctl_cmd.contains(" 42"), "busctl command reflects the typed arg: {busctl_cmd}");
+}
+
+#[test]
+fn popup_down_then_enter_copies_selected_command() {
+    // From the popup, Down moves to row 1 (busctl); Enter copies that tool's
+    // command (Effect::CopyToClipboard) and closes the popup.
+    let mut state = call_detail_with_input();
+    update(&mut state, key(KeyCode::Char('c')));
+    update(&mut state, key(KeyCode::Down));
+    assert_eq!(state.popup.as_ref().unwrap().selected, 1, "Down moved to busctl (row 1)");
+    let expected = generate(&state.popup.as_ref().unwrap().op, Tool::Busctl).unwrap();
+    let effect = update(&mut state, key(KeyCode::Enter));
+    match effect {
+        Some(Effect::CopyToClipboard(cmd)) => assert_eq!(cmd, expected, "copied the busctl command"),
+        other => panic!("Enter should copy via CopyToClipboard, got {other:?}"),
+    }
+    assert!(state.popup.is_none(), "Enter closed the popup after copying");
+}
+
+#[test]
+fn popup_up_clamps_at_top() {
+    let mut state = call_detail_with_input();
+    update(&mut state, key(KeyCode::Char('c')));
+    update(&mut state, key(KeyCode::Up));
+    assert_eq!(state.popup.as_ref().unwrap().selected, 0, "Up at row 0 stays at 0");
+}
+
+#[test]
+fn popup_down_clamps_at_bottom() {
+    let mut state = call_detail_with_input();
+    update(&mut state, key(KeyCode::Char('c')));
+    for _ in 0..10 {
+        update(&mut state, key(KeyCode::Down));
+    }
+    assert_eq!(state.popup.as_ref().unwrap().selected, 3, "Down clamps at the last tool (row 3)");
+}
+
+#[test]
+fn popup_esc_closes_without_popping_the_screen() {
+    // Esc on the popup closes it but must NOT pop the underlying screen — the
+    // popup routing runs before the global Esc handler. The Detail stays on top.
+    let mut state = call_detail_with_input();
+    let depth_before = state.screens.len();
+    update(&mut state, key(KeyCode::Char('c')));
+    assert!(state.popup.is_some());
+    update(&mut state, key(KeyCode::Esc));
+    assert!(state.popup.is_none(), "Esc closed the popup");
+    assert_eq!(state.screens.len(), depth_before, "Esc did not pop the screen");
+    assert!(matches!(state.top(), Screen::Detail(_)), "still on the Detail screen");
+}
+
+#[test]
+fn q_quits_even_with_popup_open() {
+    // `q` is checked before popup routing, so it quits regardless of the popup.
+    let mut state = call_detail_with_input();
+    update(&mut state, key(KeyCode::Char('c')));
+    update(&mut state, key(KeyCode::Char('q')));
+    assert!(state.quit, "q quits even with the popup open");
+}
+
+#[test]
+fn popup_enter_on_unsupported_tool_is_noop() {
+    // A Listen op: qdbus can't express it (returns None). Selecting qdbus and
+    // pressing Enter is a no-op — the popup stays open and no Effect is emitted.
+    let screen = busx::tui::Screen::Detail(DetailScreen {
+        service: "s".into(),
+        object: "/o".into(),
+        interface: "org.busx.Test".into(),
+        kind: ActionKind::Listen { target: ListenTarget::Signal { member: "Changed".into() } },
+        inputs: vec![],
+        field_labels: vec!["type='signal',...".into()],
+        field_selected: 0,
+        focus: DetailFocus::Field,
+        loading: false,
+        error: None,
+    });
+    let mut state = busx::tui::State { screens: vec![screen], quit: false, popup: None };
+    update(&mut state, key(KeyCode::Char('c')));
+    // Move to qdbus (row 2).
+    update(&mut state, key(KeyCode::Down));
+    update(&mut state, key(KeyCode::Down));
+    assert_eq!(state.popup.as_ref().unwrap().selected, 2);
+    assert!(state.popup.as_ref().unwrap().commands[2].1.is_none(), "qdbus can't monitor");
+    let effect = update(&mut state, key(KeyCode::Enter));
+    assert!(effect.is_none(), "Enter on unsupported tool emits no Effect");
+    assert!(state.popup.is_some(), "popup stays open on an unsupported Enter");
+}
+
+#[test]
+fn c_on_result_opens_popup_from_stored_op() {
+    // A Result whose trigger attached a CopyOp: `c` opens the popup from that op.
+    let mut state = interface_on_button(vec![method_with_args("Add", &[("n", "u")])], 0);
+    update(&mut state, key(KeyCode::Enter)); // push the call Detail
+    update(&mut state, key(KeyCode::Char('4')));
+    update(&mut state, key(KeyCode::Tab)); // → trigger
+    update(&mut state, key(KeyCode::Enter)); // push Result + attach CopyOp
+    match state.top() {
+        Screen::Result(r) => assert!(r.op.is_some(), "the trigger attached a CopyOp"),
+        _ => panic!("on the Result"),
+    }
+    update(&mut state, key(KeyCode::Char('c')));
+    let popup = state.popup.as_ref().expect("c opened the popup from the Result's op");
+    assert!(matches!(popup.op, CopyOp::Call { .. }));
+    // The CopyOp reflects the value typed before the trigger ("4", not "42" — only
+    // one digit was typed in this fixture). The busctl command carries it.
+    let busctl = popup.commands[1].1.as_ref().unwrap();
+    assert!(busctl.contains(" 4"), "popup op mirrors the value at trigger time: {busctl}");
+}
+
+#[test]
+fn c_on_result_without_op_is_noop() {
+    // A Result created with op: None (a bare literal) → `c` does nothing.
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Result(ResultScreen {
+            title: "bare".into(),
+            result: None,
+            error: None,
+            loading: false,
+            scroll: 0,
+            messages: vec![],
+            cancel: None,
+            op: None,
+        })],
+        quit: false,
+        popup: None,
+    };
+    update(&mut state, key(KeyCode::Char('c')));
+    assert!(state.popup.is_none(), "no op → no popup");
+}
+
+#[test]
+fn c_on_other_screen_is_noop() {
+    // `c` only opens the popup on Detail/Result; on other screens it's inert.
+    let mut state = State::service(vec![svc("a", None, None)]);
+    update(&mut state, key(KeyCode::Char('c')));
+    assert!(state.popup.is_none(), "c on the Service screen does nothing");
+}
+
+#[test]
+fn copy_as_popup_renders_over_detail() {
+    // The popup open over a call Detail: the four tools, row 0 selected, and a
+    // preview area. Snapshot the overlay.
+    let mut state = call_detail_with_input();
+    update(&mut state, key(KeyCode::Char('c')));
+    insta::assert_snapshot!(render_to_string(&state, 56, 14));
+}
+

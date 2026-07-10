@@ -1,5 +1,6 @@
 ---
 source: tests/tui.rs
+assertion_line: 1104
 expression: "render_to_string(&state, 40, 8)"
 ---
 "s:/o:i › set p1                         "
@@ -9,4 +10,4 @@ expression: "render_to_string(&state, 40, 8)"
 "│                                      │"
 "│                [触发]                │" Hidden by multi-width symbols: [(19, " "), (21, " ")]
 "└──────────────────────────────────────┘"
-"Tab move · Enter trigger · Esc back · q "
+"Tab move · Enter trigger · c copy-as · E"

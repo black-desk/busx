@@ -6,14 +6,15 @@
 //! + key-hint. Nothing else.
 
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
+use crate::tui::copy::Tool;
 use crate::tui::state::{
-    ActionKind, ActionResult, DetailFocus, DetailScreen, InterfaceFocus, ResultScreen, Screen,
-    ServiceScreen, State,
+    ActionKind, ActionResult, CopyAsPopup, DetailFocus, DetailScreen, InterfaceFocus, ResultScreen,
+    Screen, ServiceScreen, State,
 };
 
 pub fn render(frame: &mut Frame, state: &State) {
@@ -34,6 +35,12 @@ pub fn render(frame: &mut Frame, state: &State) {
         Screen::Result(r) => render_result(frame, main, r),
     }
     render_keyhint(frame, footer, state.top());
+
+    // The copy-as popup overlays the whole frame when open. Drawn last so it sits
+    // on top of the screen + keyhint; Clear wipes the underlying area first.
+    if let Some(popup) = &state.popup {
+        render_popup(frame, area, popup);
+    }
 }
 
 fn render_breadcrumb(frame: &mut Frame, area: Rect, state: &State) {
@@ -337,14 +344,96 @@ fn render_keyhint(frame: &mut Frame, area: Rect, screen: &Screen) {
         Screen::Objects(_) => "↑↓ select · Enter open · Esc back · q quit",
         Screen::Interfaces(_) => "↑↓ select · Enter open · Esc back · q quit",
         Screen::Interface(_) => "Tab buttons · Shift+Tab column · ↑↓ select · r refresh · Esc back · q quit",
-        Screen::Detail(_) => "Tab move · Enter trigger · Esc back · q quit",
+        Screen::Detail(_) => "Tab move · Enter trigger · c copy-as · Esc back · q quit",
         // A streaming-listen Result is armed when it has streamed messages or a
         // live cancel sender; on those, Esc both pops the screen and stops the
         // listen (the cancel sender drops). One-shot Results keep "Esc back".
         Screen::Result(r) if !r.messages.is_empty() || r.cancel.is_some() => {
-            "↑↓ scroll · Esc back/stop · q quit"
+            "↑↓ scroll · c copy-as · Esc back/stop · q quit"
         }
-        Screen::Result(_) => "↑↓ scroll · Esc back · q quit",
+        Screen::Result(_) => "↑↓ scroll · c copy-as · Esc back · q quit",
     };
     frame.render_widget(Paragraph::new(hint), area);
+}
+
+/// Render the copy-as popup overlay: a centered, bordered block listing the four
+/// tools (each with its command or "(unsupported)"), the selected row REVERSED,
+/// and a preview area below showing the selected tool's full command (or the
+/// unsupported reason). `Clear` wipes the underlying screen so the popup reads
+/// cleanly on top of it.
+fn render_popup(frame: &mut Frame, area: Rect, popup: &CopyAsPopup) {
+    let popup_area = centered_rect(80, 50, area);
+    frame.render_widget(Clear, popup_area);
+
+    // Two regions: a fixed-height tool list (4 rows) and a preview area below.
+    let inner = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(4), Constraint::Min(1)])
+        .split(popup_area);
+    let (list_area, preview_area) = (inner[0], inner[1]);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("copy as — ↑↓ choose · Enter copy · Esc");
+    frame.render_widget(block, popup_area);
+
+    // One row per tool: "{name}: {command | (unsupported)}". The selected row is
+    // REVERSED; unsupported commands are dimmed grey to signal they can't copy.
+    for (i, (tool, cmd)) in popup.commands.iter().enumerate() {
+        let row_area = Rect {
+            x: list_area.x,
+            y: list_area.y + i as u16,
+            width: list_area.width,
+            height: 1,
+        };
+        let body = match cmd {
+            Some(c) => format!("{}: {}", tool.name(), first_line(c)),
+            None => format!("{}: (unsupported)", tool.name()),
+        };
+        let mut style = Style::default();
+        if i == popup.selected {
+            style = style.add_modifier(Modifier::REVERSED);
+        } else if cmd.is_none() {
+            style = style.fg(Color::DarkGray);
+        }
+        frame.render_widget(Paragraph::new(body).style(style), row_area);
+    }
+
+    // Preview: the selected tool's full command (commands may be multi-line for
+    // `# note` annotations); or why it's unsupported / a degenerate rule.
+    let preview = match popup.commands.get(popup.selected) {
+        Some((_tool, Some(c))) => c.clone(),
+        Some((tool, None)) => {
+            if matches!(*tool, Tool::Qdbus) {
+                "qdbus has no monitor facility — pick another tool.".to_string()
+            } else {
+                format!("{} cannot express this operation.", tool.name())
+            }
+        }
+        None => String::new(),
+    };
+    frame.render_widget(
+        Paragraph::new(preview).style(Style::default().fg(Color::Yellow)),
+        preview_area,
+    );
+}
+
+/// First line of a (possibly multi-line) command, for the compact tool list. The
+/// preview area below shows the full multi-line text.
+fn first_line(s: &str) -> &str {
+    s.split('\n').next().unwrap_or(s)
+}
+
+/// The standard ratatui centered-rect helper: a rect of `pct_x`% × `pct_y`% of
+/// `r`, centered within it. Used to place the copy-as popup.
+fn centered_rect(pct_x: u16, pct_y: u16, r: Rect) -> Rect {
+    fn split_rect(len: u16, pct: u16) -> (u16, u16) {
+        // (margin, size): two equal margins flank a `pct`% central region.
+        let size = len.saturating_mul(pct) / 100;
+        let margin = len.saturating_sub(size) / 2;
+        (margin, size)
+    }
+    let (mx, w) = split_rect(r.width, pct_x);
+    let (my, h) = split_rect(r.height, pct_y);
+    Rect { x: r.x + mx, y: r.y + my, width: w, height: h }
 }
