@@ -1,6 +1,5 @@
 ---
 source: tests/tui.rs
-assertion_line: 1494
 expression: "format!(\"{}\", term.backend())"
 ---
 "s:/o:org.busx.Test > s:/o:org.busx.Test "
@@ -12,4 +11,4 @@ expression: "format!(\"{}\", term.backend())"
 "│  …block2                             │"
 "│                                      │"
 "└──────────────────────────────────────┘"
-"↑↓ scroll · c copy-as · Esc back/stop · "
+"↑↓ scroll · c copy-as · y copy · Esc bac"

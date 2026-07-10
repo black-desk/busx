@@ -84,6 +84,19 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
         }
         return None;
     }
+    // `y` copies the Result's output as plain text (distinct from `c`, which
+    // copies a CLI *command*). Scoped to the Result screen only — on other
+    // screens `y` falls through to the normal dispatch (a Detail's printable
+    // chars go to its input fields, so `y` must reach that handler, not this one).
+    // No-op (returns None) when the Result has nothing to copy.
+    if matches!(k.code, KeyCode::Char('y')) {
+        if let Screen::Result(r) = state.top() {
+            if let Some(text) = copy_result_text(r) {
+                return Some(Effect::CopyToClipboard(text));
+            }
+            return None;
+        }
+    }
     if matches!(k.code, KeyCode::Esc) {
         if state.screens.len() > 1 {
             state.screens.pop();
@@ -113,6 +126,26 @@ fn copy_op_for_screen(screen: &Screen) -> Option<CopyOp> {
         Screen::Detail(d) => Some(copy_op_from_detail(d)),
         Screen::Result(r) => r.op.clone(),
         _ => None,
+    }
+}
+
+/// The plain-text rendering of a Result's output for `y` (copy-result-text).
+/// Streaming-listen Results (with messages) take precedence: the message blocks
+/// joined by `\n`. One-shot results: `Call(lines)` → lines joined by `\n`,
+/// `Get(v)` → `v`, `Set` → `"ok"`. `None` when there's no result yet (nothing
+/// to copy) or an error is showing (don't copy error text).
+fn copy_result_text(r: &ResultScreen) -> Option<String> {
+    if !r.messages.is_empty() {
+        return Some(r.messages.join("\n"));
+    }
+    if r.error.is_some() {
+        return None;
+    }
+    match &r.result {
+        Some(ActionResult::Call(lines)) => Some(lines.join("\n")),
+        Some(ActionResult::Get(v)) => Some(v.clone()),
+        Some(ActionResult::Set) => Some("ok".to_string()),
+        None => None,
     }
 }
 
