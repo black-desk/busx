@@ -70,6 +70,17 @@ fn action_title(kind: &ActionKind) -> String {
     }
 }
 
+/// Truncate `s` to `cap` display columns, appending `…` when longer — so a long
+/// service name doesn't blow past its column and misalign the row.
+fn truncate(s: &str, cap: usize) -> String {
+    if s.chars().count() <= cap {
+        s.to_string()
+    } else {
+        let head: String = s.chars().take(cap.saturating_sub(1)).collect();
+        format!("{head}…")
+    }
+}
+
 fn render_service(frame: &mut Frame, area: Rect, s: &ServiceScreen) {
     let title = if s.loading { "Services (loading…)" } else { "Services" };
     let block = Block::default().borders(Borders::ALL).title(title);
@@ -79,13 +90,41 @@ fn render_service(frame: &mut Frame, area: Rect, s: &ServiceScreen) {
         return;
     }
 
+    // Dynamic column widths so a long service name doesn't push PID/PROCESS out
+    // of alignment (the old fixed `{:<32}` shifted the columns past 32 chars).
+    // NAME is left-aligned; PID and PROCESS are right-aligned, each sized to the
+    // widest value in its column; NAME takes the remainder, truncated with `…`.
+    let inner_w = area.width.saturating_sub(2) as usize; // inside the borders
+    let pid_w = s
+        .services
+        .iter()
+        .map(|sv| sv.pid.map(|p| p.to_string().chars().count()).unwrap_or(0))
+        .max()
+        .unwrap_or(0);
+    let proc_w = s
+        .services
+        .iter()
+        .map(|sv| sv.process.as_ref().map(|p| p.chars().count()).unwrap_or(0))
+        .max()
+        .unwrap_or(0);
+    // NAME gets what's left (two 2-space separators = 4 cols).
+    let name_w = inner_w.saturating_sub(pid_w + proc_w + 4);
+
     let items: Vec<ListItem> = s
         .services
         .iter()
         .map(|sv| {
             let pid = sv.pid.map(|p| p.to_string()).unwrap_or_default();
             let proc = sv.process.clone().unwrap_or_default();
-            ListItem::new(Line::from(format!("{:<32} {:>7} {}", sv.name, pid, proc)))
+            ListItem::new(Line::from(format!(
+                "{name:<name_w$}  {pid:>pid_w$}  {proc:>proc_w$}",
+                name = truncate(&sv.name, name_w),
+                pid = pid,
+                proc = proc,
+                name_w = name_w,
+                pid_w = pid_w,
+                proc_w = proc_w,
+            )))
         })
         .collect();
     let list = List::new(items)
