@@ -277,8 +277,7 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
         Screen::Interfaces(i) => {
             let iface = i.names.get(i.selected).cloned()?;
             let (svc, obj) = (i.service.clone(), i.object.clone());
-            push_interface(state, svc.clone(), obj.clone(), iface.clone());
-            Some(Effect::FetchProperties(svc, obj, iface))
+            push_interface(state, svc, obj, iface)
         }
         Screen::Interface(i) => {
             // Gather owned identity data while holding the immutable borrow, then
@@ -699,8 +698,7 @@ fn load_interfaces(
         }
     }
     if let Some(iface) = drill {
-        push_interface(state, service.clone(), object.clone(), iface.clone());
-        return Some(Effect::FetchProperties(service, object, iface));
+        return push_interface(state, service, object, iface);
     }
     None
 }
@@ -794,16 +792,27 @@ fn push_interfaces(state: &mut State, service: String, object: String) {
 
 /// Push an Interface screen for (service, object, interface). Members are parsed
 /// from the parent Interfaces screen's cached introspection node (no extra fetch).
-fn push_interface(state: &mut State, service: String, object: String, interface: String) {
+fn push_interface(
+    state: &mut State,
+    service: String,
+    object: String,
+    interface: String,
+) -> Option<Effect> {
     let members = match state.top() {
         Screen::Interfaces(i) => i.node.as_ref().map(|n| members_of(n, &interface)),
         _ => None,
     };
     let (methods, properties, signals) = members.unwrap_or_default();
+    // Only fetch property VALUES (GetAll) when the interface actually has
+    // properties — calling GetAll on a property-less interface is pointless, and
+    // some objects error on it (their GetAll rejects interfaces they don't
+    // track, e.g. the standard org.freedesktop.DBus.* ones). `loading` is true
+    // only while such a fetch is in flight.
+    let has_props = !properties.is_empty();
     state.screens.push(Screen::Interface(InterfaceScreen {
-        service,
-        object,
-        interface,
+        service: service.clone(),
+        object: object.clone(),
+        interface: interface.clone(),
         methods,
         properties,
         signals,
@@ -812,9 +821,14 @@ fn push_interface(state: &mut State, service: String, object: String, interface:
         active_column: Default::default(),
         button_selected: 0,
         selected: [0, 0, 0],
-        loading: true,
+        loading: has_props,
         error: None,
     }));
+    if has_props {
+        Some(Effect::FetchProperties(service, object, interface))
+    } else {
+        None
+    }
 }
 
 /// Build the form fields for a method call: one `tui-input` per IN-arg, labeled
