@@ -5,12 +5,14 @@
 //! Interactive TUI (spec §5–§8). Built on the async `dbus::` core.
 
 pub mod app;
+pub mod copy;
 pub mod msg;
 pub mod render;
 pub mod state;
 pub mod update;
 
 pub use app::run;
+pub use copy::{generate, CopyOp, Tool};
 pub use msg::{Effect, Msg};
 pub use render::render;
 pub use state::{flatten_paths, Screen, ServiceScreen, State};
