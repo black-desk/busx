@@ -77,20 +77,16 @@ pub fn run(user: bool, system: bool, address: Option<&str>, verbose: bool) -> Re
     let conn = async_global_executor::block_on(dbus::conn::connect(user, system, address, verbose))?;
     let (tx, rx) = flume::unbounded::<Msg>();
     let (user_arg, system_arg, address_arg) = (user, system, address.map(String::from));
-    // `CopyToClipboard` is NOT a dbus op — intercept it before `run_effect` and
-    // write via `arboard`. Best-effort: a clipboard failure (no display, locked)
-    // is logged to stderr but never crashes the TUI. `arboard` lives ONLY here
-    // (never in `update`/`render`/tests) — it needs a display headless tests lack.
+    // `CopyToClipboard` is NOT a dbus op — intercept it before `run_effect`,
+    // write via the most reliable available method, and send the result back as
+    // `Msg::ClipboardResult` so it surfaces in the popup. NEVER prints to the
+    // TTY (the TUI runs in raw mode + the alternate screen — any stray stdout
+    // /stderr write corrupts the display). The clipboard tooling lives ONLY here
+    // (never in `update`/`render`/tests).
     let on_effect = move |effect: Effect| match effect {
         Effect::CopyToClipboard(s) => {
-            match arboard::Clipboard::new() {
-                Ok(mut cb) => {
-                    if let Err(e) = cb.set_text(&s) {
-                        eprintln!("busx: warning: clipboard write failed: {e}");
-                    }
-                }
-                Err(e) => eprintln!("busx: warning: clipboard unavailable: {e}"),
-            }
+            let res = write_to_clipboard(&s);
+            let _ = tx.send(Msg::ClipboardResult(res));
         }
         other => run_effect(other, conn.clone(), tx.clone(), user_arg, system_arg, address_arg.as_deref()),
     };
@@ -105,6 +101,45 @@ pub fn run(user: bool, system: bool, address: Option<&str>, verbose: bool) -> Re
         eprintln!("busx: warning: failed to restore terminal: {e}");
     }
     result
+}
+
+/// Copy `text` to the system clipboard. Tries the standard CLI clipboard tools
+/// first (reliable across Wayland/X compositors — `wl-copy` for Wayland,
+/// `xclip`/`xsel` for X), then `arboard` as a last-resort fallback. Returns
+/// `Ok(())` on the first method that accepts the text, or an `Err` describing
+/// why every method failed. NEVER prints — the TUI runs in raw mode + the
+/// alternate screen, and any stdout/stderr write corrupts the display; the
+/// caller surfaces the `Err` inside the popup via `Msg::ClipboardResult`.
+///
+/// We do not `.wait()` on the spawned tool: `wl-copy`/`xclip`/`xsel` may
+/// daemonize themselves to hold the selection after their parent exits, so
+/// writing `text` to stdin and dropping it (which closes the pipe) is correct.
+fn write_to_clipboard(text: &str) -> std::result::Result<(), String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    // Each entry: (program, args). Pipe `text` to stdin; success = the program
+    // spawned and accepted it.
+    let tools: &[(&str, &[&str])] = &[
+        ("wl-copy", &[]),
+        ("xclip", &["-selection", "clipboard"]),
+        ("xsel", &["--clipboard", "--input"]),
+    ];
+    for (prog, args) in tools {
+        if let Ok(mut child) = Command::new(prog).args(*args).stdin(Stdio::piped()).spawn() {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            // Don't .wait() — the tool may daemonize to hold the clipboard.
+            return Ok(());
+        }
+        // spawn failed (tool not installed / not on PATH) → try the next.
+    }
+    // Last resort: arboard (pure-Rust, but compositor-quirky on some Wayland).
+    match arboard::Clipboard::new() {
+        Ok(mut cb) => cb.set_text(text).map_err(|e| format!("arboard: {e}")),
+        Err(e) => Err(format!("no wl-copy/xclip/xsel on PATH and arboard unavailable: {e}")),
+    }
 }
 
 /// Perform a requested `Effect` against the bus; deliver the result as a `Msg`.

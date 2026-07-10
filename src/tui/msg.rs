@@ -28,6 +28,9 @@ pub enum Msg {
     /// One received message from an active streaming listen (a `format_message`
     /// block) — appended to the Result screen's `messages`.
     ListenMessage(String),
+    /// A clipboard copy completed (`Ok` = copied, `Err` = why it failed). Surfaced
+    /// in the copy-as popup's status line, never printed to the TTY.
+    ClipboardResult(std::result::Result<(), String>),
 }
 
 /// A side effect `update` requests; the loop performs the IO. Keeps `update` pure.

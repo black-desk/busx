@@ -33,6 +33,11 @@ pub struct CopyAsPopup {
     pub commands: [(Tool, Option<String>); 4],
     /// The focused tool row (0..=3), in [`Tool::ALL`] order.
     pub selected: usize,
+    /// Status shown after a copy attempt: `None` = no copy yet;
+    /// `Some("copying…")` / `Some("copied")` / `Some("error: …")`. Rendered as a
+    /// status line at the bottom of the popup. Set by the `Msg::ClipboardResult`
+    /// handler (and the transient "copying…" placeholder on Enter).
+    pub status: Option<String>,
 }
 
 pub enum Screen {
