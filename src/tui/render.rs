@@ -349,9 +349,9 @@ fn render_keyhint(frame: &mut Frame, area: Rect, screen: &Screen) {
         // live cancel sender; on those, Esc both pops the screen and stops the
         // listen (the cancel sender drops). One-shot Results keep "Esc back".
         Screen::Result(r) if !r.messages.is_empty() || r.cancel.is_some() => {
-            "↑↓ scroll · c copy-as · Esc back/stop · q quit"
+            "↑↓ scroll · c copy-as · y copy · Esc back/stop · q quit"
         }
-        Screen::Result(_) => "↑↓ scroll · c copy-as · Esc back · q quit",
+        Screen::Result(_) => "↑↓ scroll · c copy-as · y copy · Esc back · q quit",
     };
     frame.render_widget(Paragraph::new(hint), area);
 }

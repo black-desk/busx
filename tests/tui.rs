@@ -1742,3 +1742,260 @@ fn copy_as_popup_renders_over_detail() {
     insta::assert_snapshot!(render_to_string(&state, 56, 14));
 }
 
+// --- Phase 5 Task 3: copy-as capstone loop + copy-result-text (`y`) ---
+
+/// Drive a method call through `run_loop` to a completed Result, then open the
+/// copy-as popup, move to busctl, and Enter to copy. The `run_loop`'s `|_| {}`
+/// swallows the `Effect::CopyToClipboard`, so this test asserts the popup closes
+/// and the top stays Result; the copied-command content is asserted in the
+/// sibling `copy_as_capstone_copies_busctl_command` direct-update test.
+#[test]
+fn copy_as_capstone_loop_closes_popup_over_result() {
+    let state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
+            service: "s".into(),
+            object: "/o".into(),
+            interface: "i".into(),
+            methods: vec![method_with_args("Add", &[("n", "u")])],
+            properties: vec![],
+            signals: vec![],
+            prop_values: vec![],
+            focus: InterfaceFocus::Methods,
+            active_column: InterfaceFocus::Methods,
+            button_selected: 0, // 调用
+            selected: [0, 0, 0],
+            loading: false,
+            error: None,
+        })],
+        quit: false,
+        popup: None,
+    };
+    let events = vec![
+        key(KeyCode::Tab),           // Methods column → Buttons
+        key(KeyCode::Enter),         // 调用 → push Call Detail (1 input)
+        key(KeyCode::Char('4')),     // type "4" then "2"
+        key(KeyCode::Char('2')),
+        key(KeyCode::Tab),           // Field → Trigger
+        key(KeyCode::Enter),         // push Result (loading) + CallMethod (no-op'd)
+        Msg::ActionResult(Ok(ActionResult::Call(vec!["42".into()]))), // scripted reply
+        key(KeyCode::Char('c')),     // open the copy-as popup over the Result
+        key(KeyCode::Down),          // dbus-send (row 0) → busctl (row 1)
+        key(KeyCode::Enter),         // copy busctl cmd (CopyToClipboard no-op'd) + close
+    ];
+    let mut app = App { state };
+    let backend = TestBackend::new(56, 14);
+    let mut term = Terminal::new(backend).unwrap();
+    app.run_loop(&mut term, events.into_iter(), |_| {}).unwrap();
+    // The popup closed after the Enter copy; the top is still the Result.
+    assert!(app.state.popup.is_none(), "Enter closed the popup after copying");
+    assert!(matches!(app.state.top(), Screen::Result(_)), "still on the Result screen");
+    // Snapshot the Result frame after the popup closed (the completed call).
+    insta::assert_snapshot!(format!("{}", term.backend()));
+}
+
+/// The copy-as capstone's content assertion: build the popup over a Result, then
+/// a direct `update` of Enter returns `Effect::CopyToClipboard(s)` where `s` is
+/// exactly the busctl command `generate` produces for the stored Call CopyOp.
+/// (The `run_loop` test above can't observe the swallowed effect, so this
+/// sibling test pins the copied string.)
+#[test]
+fn copy_as_capstone_copies_busctl_command() {
+    // Drive a call to a completed Result carrying a Call CopyOp (Add(n:u) = 42).
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
+            service: "s".into(),
+            object: "/o".into(),
+            interface: "i".into(),
+            methods: vec![method_with_args("Add", &[("n", "u")])],
+            properties: vec![],
+            signals: vec![],
+            prop_values: vec![],
+            focus: InterfaceFocus::Methods,
+            active_column: InterfaceFocus::Methods,
+            button_selected: 0,
+            selected: [0, 0, 0],
+            loading: false,
+            error: None,
+        })],
+        quit: false,
+        popup: None,
+    };
+    update(&mut state, key(KeyCode::Tab));
+    update(&mut state, key(KeyCode::Enter)); // push the Call Detail
+    update(&mut state, key(KeyCode::Char('4')));
+    update(&mut state, key(KeyCode::Char('2')));
+    update(&mut state, key(KeyCode::Tab)); // → trigger
+    update(&mut state, key(KeyCode::Enter)); // push Result + attach CopyOp
+    // Open the popup and move to busctl (row 1).
+    update(&mut state, key(KeyCode::Char('c')));
+    update(&mut state, key(KeyCode::Down));
+    assert_eq!(state.popup.as_ref().unwrap().selected, 1, "on busctl (row 1)");
+    // The expected busctl command, computed from the same CopyOp the popup holds.
+    let expected = generate(&state.popup.as_ref().unwrap().op, Tool::Busctl).unwrap();
+    assert_eq!(expected, "busctl call s /o i Add u 42");
+    // Enter copies it via CopyToClipboard and closes the popup.
+    let effect = update(&mut state, key(KeyCode::Enter));
+    match effect {
+        Some(Effect::CopyToClipboard(cmd)) => {
+            assert_eq!(cmd, expected, "copied the busctl command string");
+            assert_eq!(cmd, "busctl call s /o i Add u 42");
+        }
+        other => panic!("Enter should copy via CopyToClipboard, got {other:?}"),
+    }
+    assert!(state.popup.is_none(), "popup closed after copying");
+}
+
+/// `y` on a one-shot call Result copies the reply values joined by `\n`.
+#[test]
+fn y_copies_call_result_text_joined() {
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Result(ResultScreen {
+            title: "i.Add".into(),
+            result: Some(ActionResult::Call(vec!["7".into(), "8".into()])),
+            error: None,
+            loading: false,
+            scroll: 0,
+            messages: vec![],
+            cancel: None,
+            op: None,
+        })],
+        quit: false,
+        popup: None,
+    };
+    let effect = update(&mut state, key(KeyCode::Char('y')));
+    match effect {
+        Some(Effect::CopyToClipboard(text)) => assert_eq!(text, "7\n8", "values joined by newline"),
+        other => panic!("y should copy the result text, got {other:?}"),
+    }
+}
+
+/// `y` on a Get Result copies the single value; `y` on a Set Result copies "ok".
+#[test]
+fn y_copies_get_and_set_result_text() {
+    let mut get_state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Result(ResultScreen {
+            title: "p1".into(),
+            result: Some(ActionResult::Get("0.5".into())),
+            error: None,
+            loading: false,
+            scroll: 0,
+            messages: vec![],
+            cancel: None,
+            op: None,
+        })],
+        quit: false,
+        popup: None,
+    };
+    match update(&mut get_state, key(KeyCode::Char('y'))) {
+        Some(Effect::CopyToClipboard(text)) => assert_eq!(text, "0.5"),
+        other => panic!("y on Get should copy the value, got {other:?}"),
+    }
+
+    let mut set_state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Result(ResultScreen {
+            title: "p1".into(),
+            result: Some(ActionResult::Set),
+            error: None,
+            loading: false,
+            scroll: 0,
+            messages: vec![],
+            cancel: None,
+            op: None,
+        })],
+        quit: false,
+        popup: None,
+    };
+    match update(&mut set_state, key(KeyCode::Char('y'))) {
+        Some(Effect::CopyToClipboard(text)) => assert_eq!(text, "ok"),
+        other => panic!("y on Set should copy \"ok\", got {other:?}"),
+    }
+}
+
+/// `y` on a streaming Result copies the message blocks joined by `\n`.
+#[test]
+fn y_copies_streaming_result_text_joined() {
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Result(ResultScreen {
+            title: "listen i.Changed".into(),
+            result: None,
+            error: None,
+            loading: false,
+            scroll: 0,
+            messages: vec![
+                "signal  sender=:1.1\n  interface=i  member=Changed  serial=7\n  3".into(),
+                "signal  sender=:1.1\n  interface=i  member=Changed  serial=9\n  4".into(),
+            ],
+            cancel: None,
+            op: None,
+        })],
+        quit: false,
+        popup: None,
+    };
+    let effect = update(&mut state, key(KeyCode::Char('y')));
+    match effect {
+        Some(Effect::CopyToClipboard(text)) => {
+            let joined = "signal  sender=:1.1\n  interface=i  member=Changed  serial=7\n  3\n\
+                          signal  sender=:1.1\n  interface=i  member=Changed  serial=9\n  4";
+            assert_eq!(text, joined, "message blocks joined by newline");
+        }
+        other => panic!("y should copy the streaming text, got {other:?}"),
+    }
+}
+
+/// `y` on a Result with no result yet (still loading, no messages) is a no-op.
+#[test]
+fn y_on_result_without_result_is_noop() {
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Result(ResultScreen {
+            title: "i.Add".into(),
+            result: None,
+            error: None,
+            loading: true,
+            scroll: 0,
+            messages: vec![],
+            cancel: None,
+            op: None,
+        })],
+        quit: false,
+        popup: None,
+    };
+    let effect = update(&mut state, key(KeyCode::Char('y')));
+    assert!(effect.is_none(), "no result yet → nothing to copy");
+}
+
+/// `y` on a Result showing an error is a no-op (don't copy the error text).
+#[test]
+fn y_on_result_with_error_is_noop() {
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Result(ResultScreen {
+            title: "i.Add".into(),
+            result: None,
+            error: Some("org.freedesktop.DBus.Error.NoReply".into()),
+            loading: false,
+            scroll: 0,
+            messages: vec![],
+            cancel: None,
+            op: None,
+        })],
+        quit: false,
+        popup: None,
+    };
+    let effect = update(&mut state, key(KeyCode::Char('y')));
+    assert!(effect.is_none(), "error showing → don't copy error text");
+}
+
+/// `y` does not leak into the Detail input: on a Detail, `y` types into the
+/// focused field rather than triggering a copy (Detail has no Result text).
+#[test]
+fn y_on_detail_edits_input_not_copy() {
+    let mut state = call_detail_with_input();
+    update(&mut state, key(KeyCode::Char('y')));
+    match state.top() {
+        Screen::Detail(d) => {
+            // tui-input appended 'y' to the existing "42".
+            assert_eq!(d.inputs[0].value(), "42y", "y typed into the field, not a copy");
+        }
+        _ => panic!("still on Detail"),
+    }
+}
+

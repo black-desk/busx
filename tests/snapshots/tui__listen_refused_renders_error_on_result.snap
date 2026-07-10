@@ -1,6 +1,5 @@
 ---
 source: tests/tui.rs
-assertion_line: 1542
 expression: "render_to_string(&state, 44, 6)"
 ---
 "listen org.busx.Test.Ping                   "
@@ -8,4 +7,4 @@ expression: "render_to_string(&state, 44, 6)"
 "│error: BecomeMonitor refused: ...         │"
 "│                                          │"
 "└──────────────────────────────────────────┘"
-"↑↓ scroll · c copy-as · Esc back/stop · q qu"
+"↑↓ scroll · c copy-as · y copy · Esc back/st"
