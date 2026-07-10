@@ -77,8 +77,23 @@ pub fn run(user: bool, system: bool, address: Option<&str>, verbose: bool) -> Re
     let conn = async_global_executor::block_on(dbus::conn::connect(user, system, address, verbose))?;
     let (tx, rx) = flume::unbounded::<Msg>();
     let (user_arg, system_arg, address_arg) = (user, system, address.map(String::from));
-    let on_effect =
-        move |effect: Effect| run_effect(effect, conn.clone(), tx.clone(), user_arg, system_arg, address_arg.as_deref());
+    // `CopyToClipboard` is NOT a dbus op — intercept it before `run_effect` and
+    // write via `arboard`. Best-effort: a clipboard failure (no display, locked)
+    // is logged to stderr but never crashes the TUI. `arboard` lives ONLY here
+    // (never in `update`/`render`/tests) — it needs a display headless tests lack.
+    let on_effect = move |effect: Effect| match effect {
+        Effect::CopyToClipboard(s) => {
+            match arboard::Clipboard::new() {
+                Ok(mut cb) => {
+                    if let Err(e) = cb.set_text(&s) {
+                        eprintln!("busx: warning: clipboard write failed: {e}");
+                    }
+                }
+                Err(e) => eprintln!("busx: warning: clipboard unavailable: {e}"),
+            }
+        }
+        other => run_effect(other, conn.clone(), tx.clone(), user_arg, system_arg, address_arg.as_deref()),
+    };
     on_effect(Effect::FetchServices); // initial service-list fetch
 
     let mut app = App { state: State::loading_service() };
@@ -264,6 +279,11 @@ fn run_effect(
             })
             .detach();
         }
+        // `CopyToClipboard` is intercepted by the `on_effect` closure in `run`
+        // before it reaches here — `run_effect` never sees it (it has no bus
+        // work). This arm exists only for match exhaustiveness; reaching it
+        // would be a bug in the closure's routing, so it's a quiet no-op.
+        Effect::CopyToClipboard(_) => {}
     }
 }
 

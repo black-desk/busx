@@ -1,5 +1,6 @@
 ---
 source: tests/tui.rs
+assertion_line: 1180
 expression: "format!(\"{}\", term.backend())"
 ---
 "s:/o:i > s:/o:i › call Add > i.Add      "
@@ -9,4 +10,4 @@ expression: "format!(\"{}\", term.backend())"
 "│                                      │"
 "│                                      │"
 "└──────────────────────────────────────┘"
-"↑↓ scroll · Esc back · q quit           "
+"↑↓ scroll · c copy-as · Esc back · q qui"

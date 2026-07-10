@@ -1,5 +1,6 @@
 ---
 source: tests/tui.rs
+assertion_line: 1370
 expression: "render_to_string(&state, 52, 10)"
 ---
 "listen i.Changed                                    "
@@ -11,4 +12,4 @@ expression: "render_to_string(&state, 52, 10)"
 "│  interface=i  member=Changed  serial=9           │"
 "│  4                                               │"
 "└──────────────────────────────────────────────────┘"
-"↑↓ scroll · Esc back/stop · q quit                  "
+"↑↓ scroll · c copy-as · Esc back/stop · q quit      "

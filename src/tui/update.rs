@@ -10,9 +10,10 @@ use zbus_xml::{ArgDirection, Node, PropertyAccess, Signature};
 use zvariant::OwnedValue;
 
 use crate::dbus::types::{ObjectNode, ServiceInfo};
+use crate::tui::copy::{generate, CopyOp, Tool};
 use crate::tui::msg::{Effect, Msg};
 use crate::tui::state::{
-    flatten_paths, ActionKind, ActionResult, DetailFocus, DetailScreen, InterfaceFocus,
+    flatten_paths, ActionKind, ActionResult, CopyAsPopup, DetailFocus, DetailScreen, InterfaceFocus,
     InterfaceScreen, InterfacesScreen, ListenTarget, MethodMember, ObjectsScreen, ResultScreen,
     Screen, ServiceScreen, State,
 };
@@ -68,6 +69,21 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
         state.quit = true;
         return None;
     }
+    // The copy-as popup, when open, captures all keys except `q` (handled above):
+    // Esc closes it without popping the screen, ↑↓/jk move the tool selection,
+    // Enter copies the focused tool's command. Route there before the ordinary
+    // Esc/Enter/screen-dispatch so those keys don't leak through to the screen.
+    if state.popup.is_some() {
+        return update_popup_key(state, k.code);
+    }
+    // `c` opens the copy-as popup on a Detail or Result (the screens that carry
+    // a copyable operation). No popup is open here, so `c` is unambiguous.
+    if matches!(k.code, KeyCode::Char('c')) {
+        if let Some(op) = copy_op_for_screen(state.top()) {
+            open_copy_as_popup(state, op);
+        }
+        return None;
+    }
     if matches!(k.code, KeyCode::Esc) {
         if state.screens.len() > 1 {
             state.screens.pop();
@@ -88,6 +104,93 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
         Screen::Result(r) => update_result_key(r, k.code),
     }
     None
+}
+
+/// Build the `CopyOp` for the top screen: a Detail from its current inputs, or a
+/// Result from its stored `op`. `None` for any other screen (nothing to copy).
+fn copy_op_for_screen(screen: &Screen) -> Option<CopyOp> {
+    match screen {
+        Screen::Detail(d) => Some(copy_op_from_detail(d)),
+        Screen::Result(r) => r.op.clone(),
+        _ => None,
+    }
+}
+
+/// Build the `CopyOp` a Detail's current input values would produce — mirrors the
+/// `Effect` the trigger builds, so copy-as reflects what's typed (not just what
+/// was last invoked).
+fn copy_op_from_detail(d: &DetailScreen) -> CopyOp {
+    match &d.kind {
+        ActionKind::Call { method, signature } => CopyOp::Call {
+            service: d.service.clone(),
+            object: d.object.clone(),
+            iface: d.interface.clone(),
+            method: method.clone(),
+            signature: signature.clone(),
+            args: d.inputs.iter().map(|i| i.value().to_string()).collect(),
+        },
+        ActionKind::Get { property } => CopyOp::Get {
+            service: d.service.clone(),
+            object: d.object.clone(),
+            iface: d.interface.clone(),
+            property: property.clone(),
+        },
+        ActionKind::Set { property, signature } => CopyOp::Set {
+            service: d.service.clone(),
+            object: d.object.clone(),
+            iface: d.interface.clone(),
+            property: property.clone(),
+            signature: signature.clone(),
+            value: vec![d.inputs.first().map(|i| i.value().to_string()).unwrap_or_default()],
+        },
+        ActionKind::Listen { target } => {
+            // Reuse the same match-rule helper the live listen uses; on a rule
+            // that can't be built (rare: malformed name) fall back to an empty
+            // rule — the popup just shows a degenerate command for each tool.
+            let rule = listen_rule(&d.interface, &d.object, target)
+                .map(|r| r.to_string())
+                .unwrap_or_default();
+            CopyOp::Listen { rule }
+        }
+    }
+}
+
+/// Precompute each tool's command for `op` and open the popup focused on row 0.
+fn open_copy_as_popup(state: &mut State, op: CopyOp) {
+    let commands = Tool::ALL.map(|t| (t, generate(&op, t)));
+    state.popup = Some(CopyAsPopup { op, commands, selected: 0 });
+}
+
+/// Key handling for the open copy-as popup. Esc closes (no screen pop); ↑↓/jk
+/// move the tool selection (clamped 0..=3); Enter copies the focused tool's
+/// command (closing the popup) — a no-op if that tool can't express the op.
+fn update_popup_key(state: &mut State, code: KeyCode) -> Option<Effect> {
+    let popup = state.popup.as_mut()?;
+    match code {
+        KeyCode::Esc => {
+            state.popup = None;
+            None
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            popup.selected = popup.selected.saturating_sub(1);
+            None
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            popup.selected = (popup.selected + 1).min(3);
+            None
+        }
+        KeyCode::Enter => {
+            let cmd = popup.commands.get(popup.selected).and_then(|(_, c)| c.clone());
+            match cmd {
+                Some(cmd) => {
+                    state.popup = None;
+                    Some(Effect::CopyToClipboard(cmd))
+                }
+                None => None, // unsupported tool: stay open, no copy
+            }
+        }
+        _ => None,
+    }
 }
 
 /// `Enter` drills one level deeper, pushing the next screen + requesting its fetch.
@@ -186,11 +289,13 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
         }
         Screen::Detail(d) => {
             // `[触发]` Enter: only fires when the trigger button is focused.
-            // Extract owned (title, Effect) data for Call/Get/Set while holding
-            // the immutable borrow, then push one Result screen and return it.
+            // Extract owned (title, Effect, CopyOp) data for Call/Get/Set while
+            // holding the immutable borrow, then push one Result screen carrying
+            // the CopyOp (so `c` on the Result can copy-as it) and return it.
             if d.focus != DetailFocus::Trigger {
                 return None;
             }
+            let copy_op = copy_op_from_detail(d);
             let (title, effect) = match &d.kind {
                 ActionKind::Call { method, signature } => {
                     let args: Vec<String> =
@@ -257,6 +362,7 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                 scroll: 0,
                 messages: vec![],
                 cancel: None,
+                op: Some(copy_op),
             }));
             Some(effect)
         }
