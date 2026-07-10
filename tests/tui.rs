@@ -347,7 +347,11 @@ fn interfaces_loaded_lists_all() {
 
 #[test]
 fn interfaces_loaded_single_interface_auto_skips() {
-    let node = introspect_node("<node><interface name=\"org.busx.Test\"/></node>");
+    let node = introspect_node(
+        "<node><interface name=\"org.busx.Test\">\
+         <property name=\"X\" type=\"s\" access=\"read\"/>\
+         </interface></node>",
+    );
     let mut state = busx::tui::State {
         screens: vec![busx::tui::Screen::Interfaces(busx::tui::state::InterfacesScreen {
             service: "org.busx.Test".into(),
@@ -372,6 +376,43 @@ fn interfaces_loaded_single_interface_auto_skips() {
     match state.top() {
         Screen::Interface(i) => assert_eq!(i.interface, "org.busx.Test"),
         _ => panic!("auto-skip pushed an Interface screen"),
+    }
+}
+
+#[test]
+fn interfaces_loaded_propertyless_interface_skips_getall() {
+    // A single interface with NO properties still auto-skips to the Interface
+    // screen, but does NOT request GetAll — pointless for a property-less
+    // interface, and some objects' GetAll rejects such interfaces. So no Effect.
+    let node = introspect_node("<node><interface name=\"org.busx.Test\"/></node>");
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Interfaces(busx::tui::state::InterfacesScreen {
+            service: "org.busx.Test".into(),
+            object: "/o".into(),
+            names: vec![],
+            node: None,
+            selected: 0,
+            loading: true,
+            error: None,
+        })],
+        quit: false,
+        popup: None,
+    };
+    let effect = update(
+        &mut state,
+        Msg::InterfacesLoaded("org.busx.Test".into(), "/o".into(), Ok(node)),
+    );
+    assert!(
+        effect.is_none(),
+        "property-less interface ⇒ no GetAll (no FetchProperties): {effect:?}"
+    );
+    match state.top() {
+        Screen::Interface(i) => {
+            assert_eq!(i.interface, "org.busx.Test");
+            assert!(!i.loading, "no fetch in flight ⇒ not loading");
+            assert!(i.properties.is_empty());
+        }
+        _ => panic!("auto-skip still lands on Interface"),
     }
 }
 
