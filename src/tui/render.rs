@@ -358,28 +358,40 @@ fn render_keyhint(frame: &mut Frame, area: Rect, screen: &Screen) {
 
 /// Render the copy-as popup overlay: a centered, bordered block listing the four
 /// tools (each with its command or "(unsupported)"), the selected row REVERSED,
-/// and a preview area below showing the selected tool's full command (or the
-/// unsupported reason). `Clear` wipes the underlying screen so the popup reads
-/// cleanly on top of it.
+/// a preview area below showing the selected tool's full command (or the
+/// unsupported reason), and a status line at the bottom showing the result of the
+/// last copy attempt ("copying…" / "copied" / "error: …"). `Clear` wipes the
+/// underlying screen so the popup reads cleanly on top of it.
+///
+/// All content (tool rows, preview, status) is laid out from `block.inner(...)`
+/// — the area INSIDE the border — so it never paints over the border. (Drawing
+/// from the full `popup_area` is what previously let the first row overwrite the
+/// top border.)
 fn render_popup(frame: &mut Frame, area: Rect, popup: &CopyAsPopup) {
     let popup_area = centered_rect(80, 50, area);
     frame.render_widget(Clear, popup_area);
 
-    // Two regions: a fixed-height tool list (4 rows) and a preview area below.
-    let inner = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(4), Constraint::Min(1)])
-        .split(popup_area);
-    let (list_area, preview_area) = (inner[0], inner[1]);
-
     let block = Block::default()
         .borders(Borders::ALL)
         .title("copy as — ↑↓ choose · Enter copy · Esc");
-    frame.render_widget(block, popup_area);
+    frame.render_widget(&block, popup_area);
+
+    // Content sits INSIDE the border. Three regions: the 4-row tool list, a
+    // preview area (selected tool's full command / unsupported reason), and a
+    // 1-line status line for the last copy attempt.
+    let inner = block.inner(popup_area);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(4), Constraint::Min(1), Constraint::Length(1)])
+        .split(inner);
+    let (list_area, preview_area, status_area) = (chunks[0], chunks[1], chunks[2]);
 
     // One row per tool: "{name}: {command | (unsupported)}". The selected row is
     // REVERSED; unsupported commands are dimmed grey to signal they can't copy.
     for (i, (tool, cmd)) in popup.commands.iter().enumerate() {
+        if i as u16 >= list_area.height {
+            break;
+        }
         let row_area = Rect {
             x: list_area.x,
             y: list_area.y + i as u16,
@@ -416,6 +428,20 @@ fn render_popup(frame: &mut Frame, area: Rect, popup: &CopyAsPopup) {
         Paragraph::new(preview).style(Style::default().fg(Color::Yellow)),
         preview_area,
     );
+
+    // Status line: the result of the last copy attempt, shown inside the popup
+    // (never printed to the TTY). Green for success, red for an error; the
+    // "copying…" placeholder stays default-colored while the copy is in flight.
+    if let Some(status) = &popup.status {
+        let style = if status == "copied" {
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        } else if status.starts_with("error") {
+            Style::default().fg(Color::Red)
+        } else {
+            Style::default()
+        };
+        frame.render_widget(Paragraph::new(status.as_str()).style(style), status_area);
+    }
 }
 
 /// First line of a (possibly multi-line) command, for the compact tool list. The

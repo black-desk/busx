@@ -1600,7 +1600,8 @@ fn c_opens_copy_as_popup_with_four_tool_commands() {
 #[test]
 fn popup_down_then_enter_copies_selected_command() {
     // From the popup, Down moves to row 1 (busctl); Enter copies that tool's
-    // command (Effect::CopyToClipboard) and closes the popup.
+    // command (Effect::CopyToClipboard) but KEEPS THE POPUP OPEN showing a
+    // "copying…" status (the copy result arrives later via ClipboardResult).
     let mut state = call_detail_with_input();
     update(&mut state, key(KeyCode::Char('c')));
     update(&mut state, key(KeyCode::Down));
@@ -1611,7 +1612,20 @@ fn popup_down_then_enter_copies_selected_command() {
         Some(Effect::CopyToClipboard(cmd)) => assert_eq!(cmd, expected, "copied the busctl command"),
         other => panic!("Enter should copy via CopyToClipboard, got {other:?}"),
     }
-    assert!(state.popup.is_none(), "Enter closed the popup after copying");
+    let popup = state.popup.as_ref().expect("Enter keeps the popup open to show the status");
+    assert_eq!(popup.status.as_deref(), Some("copying…"), "Enter set the transient status");
+
+    // The copy result arrives → status flips to "copied".
+    update(&mut state, Msg::ClipboardResult(Ok(())));
+    assert_eq!(
+        state.popup.as_ref().unwrap().status.as_deref(),
+        Some("copied"),
+        "ClipboardResult(Ok) sets the copied status",
+    );
+
+    // A second Enter now dismisses the popup.
+    update(&mut state, key(KeyCode::Enter));
+    assert!(state.popup.is_none(), "a second Enter (status shown) dismisses the popup");
 }
 
 #[test]
@@ -1630,6 +1644,52 @@ fn popup_down_clamps_at_bottom() {
         update(&mut state, key(KeyCode::Down));
     }
     assert_eq!(state.popup.as_ref().unwrap().selected, 3, "Down clamps at the last tool (row 3)");
+}
+
+#[test]
+fn popup_enter_then_clipboard_result_error_shows_error_status() {
+    // Enter copies (popup stays, "copying…"); a failed ClipboardResult flips the
+    // status to "error: …" (surfaced in the popup, never the TTY).
+    let mut state = call_detail_with_input();
+    update(&mut state, key(KeyCode::Char('c')));
+    let effect = update(&mut state, key(KeyCode::Enter));
+    assert!(matches!(effect, Some(Effect::CopyToClipboard(_))));
+    assert_eq!(state.popup.as_ref().unwrap().status.as_deref(), Some("copying…"));
+
+    update(&mut state, Msg::ClipboardResult(Err("no tool".into())));
+    assert_eq!(
+        state.popup.as_ref().unwrap().status.as_deref(),
+        Some("error: no tool"),
+        "ClipboardResult(Err) sets an error status",
+    );
+    // The popup is still open; a second Enter dismisses it.
+    assert!(state.popup.is_some());
+    update(&mut state, key(KeyCode::Enter));
+    assert!(state.popup.is_none(), "Enter dismisses the popup after an error status");
+}
+
+#[test]
+fn popup_navigation_locked_after_copy() {
+    // Once a copy has happened (status is set), ↑↓ no longer move the selection
+    // — the user is reading the result; navigation is locked until dismiss.
+    let mut state = call_detail_with_input();
+    update(&mut state, key(KeyCode::Char('c')));
+    update(&mut state, key(KeyCode::Enter)); // copy row 0 → status "copying…"
+    assert_eq!(state.popup.as_ref().unwrap().selected, 0);
+    update(&mut state, key(KeyCode::Down)); // locked: should NOT move
+    assert_eq!(state.popup.as_ref().unwrap().selected, 0, "Down is locked after a copy");
+    update(&mut state, key(KeyCode::Up)); // locked: should NOT move
+    assert_eq!(state.popup.as_ref().unwrap().selected, 0, "Up is locked after a copy");
+}
+
+#[test]
+fn clipboard_result_without_popup_is_ignored() {
+    // A ClipboardResult arriving with no popup open (shouldn't normally happen —
+    // e.g. the popup was Esc'd before the result arrived) is a harmless no-op.
+    let mut state = call_detail_with_input();
+    assert!(state.popup.is_none());
+    update(&mut state, Msg::ClipboardResult(Ok(())));
+    assert!(state.popup.is_none(), "no popup → ClipboardResult is ignored");
 }
 
 #[test]
@@ -1746,9 +1806,11 @@ fn copy_as_popup_renders_over_detail() {
 
 /// Drive a method call through `run_loop` to a completed Result, then open the
 /// copy-as popup, move to busctl, and Enter to copy. The `run_loop`'s `|_| {}`
-/// swallows the `Effect::CopyToClipboard`, so this test asserts the popup closes
-/// and the top stays Result; the copied-command content is asserted in the
-/// sibling `copy_as_capstone_copies_busctl_command` direct-update test.
+/// swallows the `Effect::CopyToClipboard` (so no `ClipboardResult` ever arrives),
+/// which means the popup stays open with the transient "copying…" status — a
+/// second Enter then dismisses it. This test asserts that dismiss flow and that
+/// the top stays Result; the copied-command content is asserted in the sibling
+/// `copy_as_capstone_copies_busctl_command` direct-update test.
 #[test]
 fn copy_as_capstone_loop_closes_popup_over_result() {
     let state = busx::tui::State {
@@ -1780,14 +1842,15 @@ fn copy_as_capstone_loop_closes_popup_over_result() {
         Msg::ActionResult(Ok(ActionResult::Call(vec!["42".into()]))), // scripted reply
         key(KeyCode::Char('c')),     // open the copy-as popup over the Result
         key(KeyCode::Down),          // dbus-send (row 0) → busctl (row 1)
-        key(KeyCode::Enter),         // copy busctl cmd (CopyToClipboard no-op'd) + close
+        key(KeyCode::Enter),         // copy busctl cmd (no-op'd) → popup stays, "copying…"
+        key(KeyCode::Enter),         // status is set → second Enter dismisses the popup
     ];
     let mut app = App { state };
     let backend = TestBackend::new(56, 14);
     let mut term = Terminal::new(backend).unwrap();
     app.run_loop(&mut term, events.into_iter(), |_| {}).unwrap();
-    // The popup closed after the Enter copy; the top is still the Result.
-    assert!(app.state.popup.is_none(), "Enter closed the popup after copying");
+    // The popup closed after the second Enter; the top is still the Result.
+    assert!(app.state.popup.is_none(), "second Enter dismissed the popup");
     assert!(matches!(app.state.top(), Screen::Result(_)), "still on the Result screen");
     // Snapshot the Result frame after the popup closed (the completed call).
     insta::assert_snapshot!(format!("{}", term.backend()));
@@ -1833,7 +1896,8 @@ fn copy_as_capstone_copies_busctl_command() {
     // The expected busctl command, computed from the same CopyOp the popup holds.
     let expected = generate(&state.popup.as_ref().unwrap().op, Tool::Busctl).unwrap();
     assert_eq!(expected, "busctl call s /o i Add u 42");
-    // Enter copies it via CopyToClipboard and closes the popup.
+    // Enter copies it via CopyToClipboard and KEEPS the popup open (so the
+    // eventual ClipboardResult can show its status).
     let effect = update(&mut state, key(KeyCode::Enter));
     match effect {
         Some(Effect::CopyToClipboard(cmd)) => {
@@ -1842,7 +1906,8 @@ fn copy_as_capstone_copies_busctl_command() {
         }
         other => panic!("Enter should copy via CopyToClipboard, got {other:?}"),
     }
-    assert!(state.popup.is_none(), "popup closed after copying");
+    assert!(state.popup.is_some(), "popup stays open after copying (to show the status)");
+    assert_eq!(state.popup.as_ref().unwrap().status.as_deref(), Some("copying…"));
 }
 
 /// `y` on a one-shot call Result copies the reply values joined by `\n`.

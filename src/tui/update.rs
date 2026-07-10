@@ -58,6 +58,18 @@ pub fn update(state: &mut State, msg: Msg) -> Option<Effect> {
             }
             None
         }
+        Msg::ClipboardResult(res) => {
+            // The copy-as popup's status reflects the outcome: "copied" on
+            // success, "error: …" on failure. No popup (e.g. it was dismissed
+            // before the result arrived) → ignore. Never prints to the TTY.
+            if let Some(p) = state.popup.as_mut() {
+                p.status = Some(match res {
+                    Ok(()) => "copied".to_string(),
+                    Err(e) => format!("error: {e}"),
+                });
+            }
+            None
+        }
     }
 }
 
@@ -191,35 +203,51 @@ fn copy_op_from_detail(d: &DetailScreen) -> CopyOp {
 /// Precompute each tool's command for `op` and open the popup focused on row 0.
 fn open_copy_as_popup(state: &mut State, op: CopyOp) {
     let commands = Tool::ALL.map(|t| (t, generate(&op, t)));
-    state.popup = Some(CopyAsPopup { op, commands, selected: 0 });
+    state.popup = Some(CopyAsPopup { op, commands, selected: 0, status: None });
 }
 
-/// Key handling for the open copy-as popup. Esc closes (no screen pop); ↑↓/jk
-/// move the tool selection (clamped 0..=3); Enter copies the focused tool's
-/// command (closing the popup) — a no-op if that tool can't express the op.
+/// Key handling for the open copy-as popup. The flow keeps the popup open so the
+/// copy result can be shown:
+/// - No copy yet (`status.is_none()`): ↑↓/jk move the tool selection (clamped
+///   0..=3); Enter copies the focused tool's command — sets a transient
+///   "copying…" status and emits `Effect::CopyToClipboard` WITHOUT closing. A
+///   no-op if the tool can't express the op.
+/// - After a copy (`status.is_some()`): navigation is locked; Enter dismisses
+///   the popup.
+/// - Esc always closes (whether or not a copy happened).
 fn update_popup_key(state: &mut State, code: KeyCode) -> Option<Effect> {
     let popup = state.popup.as_mut()?;
+    let copy_done = popup.status.is_some();
     match code {
         KeyCode::Esc => {
             state.popup = None;
             None
         }
-        KeyCode::Up | KeyCode::Char('k') => {
+        KeyCode::Up | KeyCode::Char('k') if !copy_done => {
             popup.selected = popup.selected.saturating_sub(1);
             None
         }
-        KeyCode::Down | KeyCode::Char('j') => {
+        KeyCode::Down | KeyCode::Char('j') if !copy_done => {
             popup.selected = (popup.selected + 1).min(3);
             None
         }
+        KeyCode::Enter if copy_done => {
+            // A copy already happened (its result is showing) → Enter dismisses.
+            state.popup = None;
+            None
+        }
         KeyCode::Enter => {
+            // First Enter: trigger the copy. Set the transient "copying…" status
+            // and emit the effect; the popup STAYS OPEN so the eventual
+            // `Msg::ClipboardResult` can update the status. A no-op (popup stays
+            // open, no status) if the selected tool can't express the op.
             let cmd = popup.commands.get(popup.selected).and_then(|(_, c)| c.clone());
             match cmd {
                 Some(cmd) => {
-                    state.popup = None;
+                    popup.status = Some("copying…".to_string());
                     Some(Effect::CopyToClipboard(cmd))
                 }
-                None => None, // unsupported tool: stay open, no copy
+                None => None,
             }
         }
         _ => None,

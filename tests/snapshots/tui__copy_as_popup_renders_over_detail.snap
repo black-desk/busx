@@ -1,16 +1,15 @@
 ---
 source: tests/tui.rs
-assertion_line: 1743
 expression: "render_to_string(&state, 56, 14)"
 ---
 "s:/o:i › call Add                                       "
 "┌call Add──────────────────────────────────────────────┐"
 "│n  u  42                                              │"
-"│     dbus-send: dbus-send --print-reply --dest=s      │"
-"│     busctl: busctl call s /o i Add u 42        │     │"
-"│     qdbus: qdbus s /o i.Add 42                 │     │"
-"│     gdbus: gdbus call --session --dest s --objec     │"
-"│     dbus-send --print-reply --dest=s /o i.Add ui     │"
+"│     ┌copy as — ↑↓ choose · Enter copy · Esc────┐     │"
+"│     │dbus-send: dbus-send --print-reply --dest=│     │"
+"│     │busctl: busctl call s /o i Add u 42       │     │"
+"│     │qdbus: qdbus s /o i.Add 42                │     │"
+"│     │dbus-send --print-reply --dest=s /o i.Add │     │"
 "│     │                                          │     │"
 "│     └──────────────────────────────────────────┘     │"
 "│                                                      │"
