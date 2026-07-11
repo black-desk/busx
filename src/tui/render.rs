@@ -13,11 +13,11 @@ use ratatui::Frame;
 
 use crate::tui::copy::Tool;
 use crate::tui::state::{
-    ActionKind, ActionResult, CopyAsPopup, DetailFocus, DetailScreen, InterfaceFocus, ResultScreen,
-    Screen, ServiceScreen, State,
+    ActionKind, ActionResult, ClickTarget, CopyAsPopup, DetailFocus, DetailScreen, InterfaceFocus,
+    ResultScreen, Screen, ServiceScreen, State,
 };
 
-pub fn render(frame: &mut Frame, state: &State) {
+pub fn render(frame: &mut Frame, state: &State, targets: &mut Vec<(Rect, ClickTarget)>) {
     let area = frame.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -27,11 +27,11 @@ pub fn render(frame: &mut Frame, state: &State) {
 
     render_breadcrumb(frame, crumb, state);
     match state.top() {
-        Screen::Service(s) => render_service(frame, main, s),
-        Screen::Objects(o) => render_objects(frame, main, o),
-        Screen::Interfaces(i) => render_interfaces(frame, main, i),
-        Screen::Interface(i) => render_interface(frame, main, i),
-        Screen::Detail(d) => render_detail(frame, main, d),
+        Screen::Service(s) => render_service(frame, main, s, targets),
+        Screen::Objects(o) => render_objects(frame, main, o, targets),
+        Screen::Interfaces(i) => render_interfaces(frame, main, i, targets),
+        Screen::Interface(i) => render_interface(frame, main, i, targets),
+        Screen::Detail(d) => render_detail(frame, main, d, targets),
         Screen::Result(r) => render_result(frame, main, r),
     }
     render_keyhint(frame, footer, state.top());
@@ -39,7 +39,7 @@ pub fn render(frame: &mut Frame, state: &State) {
     // The copy-as popup overlays the whole frame when open. Drawn last so it sits
     // on top of the screen + keyhint; Clear wipes the underlying area first.
     if let Some(popup) = &state.popup {
-        render_popup(frame, area, popup);
+        render_popup(frame, area, popup, targets);
     }
 }
 
@@ -81,7 +81,12 @@ fn truncate(s: &str, cap: usize) -> String {
     }
 }
 
-fn render_service(frame: &mut Frame, area: Rect, s: &ServiceScreen) {
+fn render_service(
+    frame: &mut Frame,
+    area: Rect,
+    s: &ServiceScreen,
+    targets: &mut Vec<(Rect, ClickTarget)>,
+) {
     let title = if s.loading { "Services (loading…)" } else { "Services" };
     let block = Block::default().borders(Borders::ALL).title(title);
 
@@ -128,16 +133,28 @@ fn render_service(frame: &mut Frame, area: Rect, s: &ServiceScreen) {
         })
         .collect();
     let list = List::new(items)
-        .block(block)
+        .block(block.clone())
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
     let mut list_state = ListState::default();
     if !s.services.is_empty() {
         list_state.select(Some(s.selected));
     }
     frame.render_stateful_widget(list, area, &mut list_state);
+
+    // Record one click target per row: the list renders inside `block.inner(area)`,
+    // so row `i` is at `y = inner.y + i`, full inner width, height 1.
+    let inner = block.inner(area);
+    for i in 0..s.services.len() {
+        targets.push((Rect::new(inner.x, inner.y + i as u16, inner.width, 1), ClickTarget::ServiceRow(i)));
+    }
 }
 
-fn render_objects(frame: &mut Frame, area: Rect, o: &crate::tui::state::ObjectsScreen) {
+fn render_objects(
+    frame: &mut Frame,
+    area: Rect,
+    o: &crate::tui::state::ObjectsScreen,
+    targets: &mut Vec<(Rect, ClickTarget)>,
+) {
     let title = if o.loading { "Objects (loading…)" } else { "Objects" };
     let block = Block::default().borders(Borders::ALL).title(title);
     if let Some(err) = &o.error {
@@ -146,16 +163,26 @@ fn render_objects(frame: &mut Frame, area: Rect, o: &crate::tui::state::ObjectsS
     }
     let items: Vec<ListItem> = o.paths.iter().map(|p| ListItem::new(Line::from(p.clone()))).collect();
     let list = List::new(items)
-        .block(block)
+        .block(block.clone())
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
     let mut ls = ListState::default();
     if !o.paths.is_empty() {
         ls.select(Some(o.selected));
     }
     frame.render_stateful_widget(list, area, &mut ls);
+
+    let inner = block.inner(area);
+    for i in 0..o.paths.len() {
+        targets.push((Rect::new(inner.x, inner.y + i as u16, inner.width, 1), ClickTarget::ObjectsRow(i)));
+    }
 }
 
-fn render_interfaces(frame: &mut Frame, area: Rect, i: &crate::tui::state::InterfacesScreen) {
+fn render_interfaces(
+    frame: &mut Frame,
+    area: Rect,
+    i: &crate::tui::state::InterfacesScreen,
+    targets: &mut Vec<(Rect, ClickTarget)>,
+) {
     let title = if i.loading { "Interfaces (loading…)" } else { "Interfaces" };
     let block = Block::default().borders(Borders::ALL).title(title);
     if let Some(err) = &i.error {
@@ -164,16 +191,29 @@ fn render_interfaces(frame: &mut Frame, area: Rect, i: &crate::tui::state::Inter
     }
     let items: Vec<ListItem> = i.names.iter().map(|n| ListItem::new(Line::from(n.clone()))).collect();
     let list = List::new(items)
-        .block(block)
+        .block(block.clone())
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
     let mut ls = ListState::default();
     if !i.names.is_empty() {
         ls.select(Some(i.selected));
     }
     frame.render_stateful_widget(list, area, &mut ls);
+
+    let inner = block.inner(area);
+    for row in 0..i.names.len() {
+        targets.push((
+            Rect::new(inner.x, inner.y + row as u16, inner.width, 1),
+            ClickTarget::InterfacesRow(row),
+        ));
+    }
 }
 
-fn render_interface(frame: &mut Frame, area: Rect, i: &crate::tui::state::InterfaceScreen) {
+fn render_interface(
+    frame: &mut Frame,
+    area: Rect,
+    i: &crate::tui::state::InterfaceScreen,
+    targets: &mut Vec<(Rect, ClickTarget)>,
+) {
     // Left: the three stacked member lists. Right: the action-button bar for the
     // focused column's selected member.
     let cols = Layout::default()
@@ -204,6 +244,7 @@ fn render_interface(frame: &mut Frame, area: Rect, i: &crate::tui::state::Interf
         i.selected[0],
         !i.in_buttons && i.focus == InterfaceFocus::Methods,
     );
+    push_list_rows(targets, chunks[0], i.methods.len(), ClickTarget::MethodRow);
 
     // Properties show the GetAll value alongside name + signature. If GetAll
     // failed for this object/interface, show that scoped to this column (some
@@ -238,6 +279,7 @@ fn render_interface(frame: &mut Frame, area: Rect, i: &crate::tui::state::Interf
             i.selected[1],
             !i.in_buttons && i.focus == InterfaceFocus::Properties,
         );
+        push_list_rows(targets, chunks[1], i.properties.len(), ClickTarget::PropertyRow);
     }
 
     let signals: Vec<ListItem> = i
@@ -253,6 +295,7 @@ fn render_interface(frame: &mut Frame, area: Rect, i: &crate::tui::state::Interf
         i.selected[2],
         !i.in_buttons && i.focus == InterfaceFocus::Signals,
     );
+    push_list_rows(targets, chunks[2], i.signals.len(), ClickTarget::SignalRow);
 
     // Action-button bar: the buttons offered for the focused column's selected
     // member. Highlighted (focused) when `in_buttons`.
@@ -260,7 +303,24 @@ fn render_interface(frame: &mut Frame, area: Rect, i: &crate::tui::state::Interf
         .iter()
         .map(|b| ListItem::new(Line::from(*b)))
         .collect();
+    let n_buttons = buttons.len();
     render_sub_list(frame, right, "actions", buttons, i.button_selected, i.in_buttons);
+    push_list_rows(targets, right, n_buttons, ClickTarget::ActionButton);
+}
+
+/// Push one click target per row of a bordered list rendered into `area`. The
+/// list renders inside its block's inner area (inside the border); row `i` is at
+/// `y = inner.y + i`, full inner width, height 1.
+fn push_list_rows(
+    targets: &mut Vec<(Rect, ClickTarget)>,
+    area: Rect,
+    n_rows: usize,
+    make: impl Fn(usize) -> ClickTarget,
+) {
+    let inner = Block::default().borders(Borders::ALL).inner(area);
+    for i in 0..n_rows {
+        targets.push((Rect::new(inner.x, inner.y + i as u16, inner.width, 1), make(i)));
+    }
 }
 
 /// The action buttons offered for a given column (mirrors `update`).
@@ -275,7 +335,12 @@ fn action_buttons(column: InterfaceFocus) -> &'static [&'static str] {
 /// The action form: one row per input field (label + value), then a `[触发]`
 /// trigger button. The focused field / trigger is REVERSED (trigger is BOLD too).
 /// Zero-arg calls render just the trigger row.
-fn render_detail(frame: &mut Frame, area: Rect, d: &DetailScreen) {
+fn render_detail(
+    frame: &mut Frame,
+    area: Rect,
+    d: &DetailScreen,
+    targets: &mut Vec<(Rect, ClickTarget)>,
+) {
     let title = if d.loading {
         format!("{} (loading…)", action_title(&d.kind))
     } else {
@@ -326,6 +391,7 @@ fn render_detail(frame: &mut Frame, area: Rect, d: &DetailScreen) {
             Paragraph::new(format!("{label}  {value}")).style(style),
             row_area,
         );
+        targets.push((row_area, ClickTarget::DetailField(i)));
     }
 
     // The trigger button, centered, BOLD + REVERSED when focused.
@@ -338,6 +404,7 @@ fn render_detail(frame: &mut Frame, area: Rect, d: &DetailScreen) {
         Paragraph::new("[触发]").style(style).alignment(Alignment::Center),
         trigger_area,
     );
+    targets.push((trigger_area, ClickTarget::DetailTrigger));
 }
 
 /// The outcome of a one-shot action. Loading → "…" (the title carries the
@@ -345,6 +412,7 @@ fn render_detail(frame: &mut Frame, area: Rect, d: &DetailScreen) {
 /// (offset by `scroll` — clamped in Task 4). `Get`/`Set` render their payload
 /// too (Task 3 owns their detail forms).
 fn render_result(frame: &mut Frame, area: Rect, r: &ResultScreen) {
+    // Result screens are read-only (scroll-only) — no click targets.
     let title = if r.loading {
         format!("{} (loading…)", r.title)
     } else {
@@ -433,7 +501,12 @@ fn render_keyhint(frame: &mut Frame, area: Rect, screen: &Screen) {
 /// — the area INSIDE the border — so it never paints over the border. (Drawing
 /// from the full `popup_area` is what previously let the first row overwrite the
 /// top border.)
-fn render_popup(frame: &mut Frame, area: Rect, popup: &CopyAsPopup) {
+fn render_popup(
+    frame: &mut Frame,
+    area: Rect,
+    popup: &CopyAsPopup,
+    targets: &mut Vec<(Rect, ClickTarget)>,
+) {
     let popup_area = centered_rect(80, 50, area);
     frame.render_widget(Clear, popup_area);
 
@@ -475,6 +548,7 @@ fn render_popup(frame: &mut Frame, area: Rect, popup: &CopyAsPopup) {
             style = style.fg(Color::DarkGray);
         }
         frame.render_widget(Paragraph::new(body).style(style), row_area);
+        targets.push((row_area, ClickTarget::PopupTool(i)));
     }
 
     // Preview: the selected tool's full command (commands may be multi-line for

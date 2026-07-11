@@ -57,8 +57,13 @@ impl App {
         crate::error::Error: From<<B as Backend>::Error>,
         F: FnMut(Effect),
     {
+        let mut targets: Vec<(ratatui::layout::Rect, crate::tui::ClickTarget)> = Vec::new();
         while !self.state.quit {
-            terminal.draw(|f| render(f, &self.state))?;
+            terminal.draw(|f| render(f, &self.state, &mut targets))?;
+            // The draw closure's `&self.state` borrow ends when `draw` returns,
+            // so storing into `click_targets` here is fine. `take` clears `targets`
+            // for reuse next frame (no clone).
+            self.state.click_targets = std::mem::take(&mut targets);
             match events.next() {
                 Some(msg) => {
                     if let Some(effect) = update(&mut self.state, msg) {
@@ -371,10 +376,13 @@ impl Iterator for CrosstermSource {
     }
 }
 
+/// Map a crossterm event to a `Msg`. Mouse events are forwarded raw so
+/// `update` can hit-test them against `state.click_targets`.
 fn non_mouse(ev: Event) -> Option<Msg> {
     match ev {
         Event::Key(k) => Some(Msg::Key(k)),
         Event::Resize(w, h) => Some(Msg::Resize(w, h)),
+        Event::Mouse(m) => Some(Msg::Mouse(m)),
         _ => None,
     }
 }
@@ -382,13 +390,13 @@ fn non_mouse(ev: Event) -> Option<Msg> {
 fn setup_terminal() -> Result<Tui> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, crossterm::event::EnableMouseCapture)?;
     Ok(Terminal::new(CrosstermBackend::new(stdout))?)
 }
 
 fn restore_terminal(terminal: &mut Tui) -> Result<()> {
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, crossterm::event::DisableMouseCapture)?;
     terminal.show_cursor()?;
     Ok(())
 }
