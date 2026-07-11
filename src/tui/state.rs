@@ -91,7 +91,7 @@ pub struct MethodMember {
 }
 
 /// One interface: methods / properties (with values) / signals, three columns,
-/// plus a right-side action-button bar for the active column's selected member.
+/// plus a right-side action-button bar for the focused column's selected member.
 pub struct InterfaceScreen {
     pub service: String,
     pub object: String,
@@ -104,10 +104,11 @@ pub struct InterfaceScreen {
     /// GetAll snapshot: property name → pretty value. Refreshed on load / `r`.
     pub prop_values: Vec<(String, String)>,
     pub focus: InterfaceFocus,
-    /// The member column the action buttons act on. Always one of
-    /// {Methods, Properties, Signals}; updated whenever `focus` becomes one of
-    /// those and left untouched when focus moves to `Buttons`.
-    pub active_column: InterfaceFocus,
+    /// Whether the focus is in the right-side action-button bar (rather than in
+    /// a member column). `focus` is always the current column (the one whose
+    /// selected member the buttons act on); `in_buttons` decides whether ↑↓
+    /// moves `button_selected` (true) or the column's `selected` (false).
+    pub in_buttons: bool,
     /// Which action button is highlighted in the right panel.
     pub button_selected: usize,
     pub selected: [usize; 3],
@@ -121,8 +122,6 @@ pub enum InterfaceFocus {
     Methods,
     Properties,
     Signals,
-    /// The right-side action-button bar.
-    Buttons,
 }
 
 /// An action form. Call = one input per IN-arg; Set = one input; Get = no inputs.

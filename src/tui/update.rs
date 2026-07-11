@@ -110,6 +110,14 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
         }
     }
     if matches!(k.code, KeyCode::Esc) {
+        // On the Interface screen, Esc first backs out of the action-button bar
+        // (back to the member column); only a second Esc pops the screen.
+        if let Screen::Interface(i) = state.top_mut() {
+            if i.in_buttons {
+                i.in_buttons = false;
+                return None;
+            }
+        }
         if state.screens.len() > 1 {
             state.screens.pop();
         } else {
@@ -279,16 +287,27 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
             let (svc, obj) = (i.service.clone(), i.object.clone());
             push_interface(state, svc, obj, iface)
         }
-        Screen::Interface(i) => {
+        Screen::Interface(_) => {
+            // If focus is still on a member column, Enter drills INTO the action
+            // button bar (does not fire anything yet). Once `in_buttons`, Enter
+            // fires the selected button (builds `ActionKind`, pushes a Detail).
+            if let Screen::Interface(i) = state.top_mut() {
+                if !i.in_buttons {
+                    i.in_buttons = true;
+                    i.button_selected = 0;
+                    return None;
+                }
+            }
             // Gather owned identity data while holding the immutable borrow, then
             // release it before the mutable `push_detail`.
-            if i.focus != InterfaceFocus::Buttons {
-                return None;
-            }
-            let buttons = buttons_for(i.active_column);
+            let i = match state.top() {
+                Screen::Interface(i) => i,
+                _ => return None,
+            };
+            let buttons = buttons_for(i.focus);
             let action = *buttons.get(i.button_selected)?;
             let (svc, obj, iface) = (i.service.clone(), i.object.clone(), i.interface.clone());
-            let kind = match i.active_column {
+            let kind = match i.focus {
                 InterfaceFocus::Methods => {
                     let m = i.methods.get(i.selected[0])?;
                     match action {
@@ -322,7 +341,6 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                         _ => return None,
                     }
                 }
-                _ => return None,
             };
             // Build the form fields: Call → one input per IN-arg; Set → one input
             // (the new value), labeled with the property's signature; Get/Listen →
@@ -494,58 +512,51 @@ fn update_interfaces_key(i: &mut InterfacesScreen, code: KeyCode) {
     }
 }
 
-/// Interface focus scheme:
-/// - `Tab` toggles between the active member column and the button bar.
-///   Landing on a column sets `active_column`.
-/// - `Shift+Tab` (BackTab) cycles the active column
-///   Methods → Properties → Signals → Methods (skipping Buttons).
-/// - Column focus: `↑↓`/`jk` move that column's member selection.
-/// - `Buttons` focus: `↑↓`/`jk` move `button_selected` within the active column's
-///   action list; `Enter` pushes a stub `Detail` screen.
+/// Interface focus scheme (spec §2):
+/// - `Tab` / `Shift+Tab` cycle the three columns (Methods→Properties→Signals→
+///   Methods, reverse for Shift+Tab). The button bar is NOT in this ring; Tab
+///   always leaves the button bar first (`in_buttons = false`) then cycles.
+/// - Column focus (`!in_buttons`): `↑↓`/`jk` move the focused column's member
+///   selection.
+/// - Button-bar focus (`in_buttons`): `↑↓`/`jk` move `button_selected` within the
+///   focused column's action list.
+/// - `Enter` (drill into buttons / fire a button) and `Esc` (back out of buttons
+///   before popping) are handled in `handle_enter` / the global Esc arm — NOT
+///   here, since they need `&mut State`.
+/// - `r` refreshes the property-value snapshot (GetAll) for this interface.
 fn update_interface_key(i: &mut InterfaceScreen, k: KeyEvent) -> Option<Effect> {
     match (k.code, k.modifiers.contains(KeyModifiers::SHIFT)) {
+        // Tab (no Shift): leave the button bar if in it, then cycle forward.
         (KeyCode::Tab, false) => {
-            i.focus = match i.focus {
-                InterfaceFocus::Buttons => i.active_column,
-                // From any column, jump to the button bar.
-                InterfaceFocus::Methods | InterfaceFocus::Properties | InterfaceFocus::Signals => {
-                    InterfaceFocus::Buttons
-                }
-            };
-            // Clamp button selection into range when entering the bar.
-            if i.focus == InterfaceFocus::Buttons {
-                i.button_selected = i.button_selected.min(buttons_for(i.active_column).len().saturating_sub(1));
-            }
+            i.in_buttons = false;
+            i.focus = cycle_focus(i.focus, 1);
         }
+        // Shift+Tab (BackTab or Tab+Shift): leave the button bar, cycle backward.
         (KeyCode::BackTab, _) | (KeyCode::Tab, true) => {
-            // Cycle the active column among member columns, and focus it.
-            i.active_column = match i.active_column {
-                InterfaceFocus::Methods => InterfaceFocus::Properties,
-                InterfaceFocus::Properties => InterfaceFocus::Signals,
-                InterfaceFocus::Signals => InterfaceFocus::Methods,
-                InterfaceFocus::Buttons => InterfaceFocus::Methods, // unreachable, kept safe
-            };
-            i.focus = i.active_column;
-        }
-        (KeyCode::Down, _) | (KeyCode::Char('j'), _) if i.focus == InterfaceFocus::Buttons => {
-            let len = buttons_for(i.active_column).len();
-            if len > 0 {
-                i.button_selected = (i.button_selected + 1).min(len - 1);
-            }
-        }
-        (KeyCode::Up, _) | (KeyCode::Char('k'), _) if i.focus == InterfaceFocus::Buttons => {
-            i.button_selected = i.button_selected.saturating_sub(1);
+            i.in_buttons = false;
+            i.focus = cycle_focus(i.focus, -1);
         }
         (KeyCode::Down, _) | (KeyCode::Char('j'), _) => {
-            let idx = focus_index(i.focus);
-            let len = column_len(i, idx);
-            if len > 0 {
-                i.selected[idx] = (i.selected[idx] + 1).min(len - 1);
+            if i.in_buttons {
+                let len = buttons_for(i.focus).len();
+                if len > 0 {
+                    i.button_selected = (i.button_selected + 1).min(len - 1);
+                }
+            } else {
+                let idx = focus_index(i.focus);
+                let len = column_len(i, idx);
+                if len > 0 {
+                    i.selected[idx] = (i.selected[idx] + 1).min(len - 1);
+                }
             }
         }
         (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {
-            let idx = focus_index(i.focus);
-            i.selected[idx] = i.selected[idx].saturating_sub(1);
+            if i.in_buttons {
+                i.button_selected = i.button_selected.saturating_sub(1);
+            } else {
+                let idx = focus_index(i.focus);
+                i.selected[idx] = i.selected[idx].saturating_sub(1);
+            }
         }
         // Refresh the property-value snapshot.
         (KeyCode::Char('r'), _) => {
@@ -561,12 +572,23 @@ fn update_interface_key(i: &mut InterfaceScreen, k: KeyEvent) -> Option<Effect> 
     None
 }
 
+/// Cycle `focus` among Methods/Properties/Signals by `dir` (+1 forward, -1 back).
+fn cycle_focus(focus: InterfaceFocus, dir: i32) -> InterfaceFocus {
+    let idx = focus_index(focus) as i32;
+    // Three columns: wrap with Euclidean remainder so -1 from Methods → Signals.
+    let next = ((idx + dir) % 3 + 3) % 3;
+    match next {
+        0 => InterfaceFocus::Methods,
+        1 => InterfaceFocus::Properties,
+        _ => InterfaceFocus::Signals,
+    }
+}
+
 fn focus_index(focus: InterfaceFocus) -> usize {
     match focus {
         InterfaceFocus::Methods => 0,
         InterfaceFocus::Properties => 1,
         InterfaceFocus::Signals => 2,
-        InterfaceFocus::Buttons => 0, // unreachable in the column branch
     }
 }
 
@@ -578,14 +600,13 @@ fn column_len(i: &InterfaceScreen, idx: usize) -> usize {
     }
 }
 
-/// The action buttons offered for a given active column. Each column carries a
+/// The action buttons offered for a given column. Each column carries a
 /// `监听` (listen) button; methods also `调用`, properties `读取`/`设置`.
 fn buttons_for(column: InterfaceFocus) -> &'static [&'static str] {
     match column {
         InterfaceFocus::Methods => &["调用", "监听"],
         InterfaceFocus::Properties => &["读取", "设置", "监听"],
         InterfaceFocus::Signals => &["监听"],
-        InterfaceFocus::Buttons => &[],
     }
 }
 
@@ -818,7 +839,7 @@ fn push_interface(
         signals,
         prop_values: vec![],
         focus: Default::default(),
-        active_column: Default::default(),
+        in_buttons: false,
         button_selected: 0,
         selected: [0, 0, 0],
         loading: has_props,

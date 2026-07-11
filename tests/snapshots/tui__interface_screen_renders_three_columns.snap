@@ -1,6 +1,5 @@
 ---
 source: tests/tui.rs
-assertion_line: 400
 expression: "render_to_string(&state, 60, 16)"
 ---
 "org.busx.Test:/org/busx/Test:org.busx.Test                  "
@@ -18,4 +17,4 @@ expression: "render_to_string(&state, 60, 16)"
 "│                                         ││               │"
 "│                                         ││               │"
 "└─────────────────────────────────────────┘└───────────────┘"
-"Tab buttons · Shift+Tab column · ↑↓ select · r refresh · Esc"
+"Tab column · ↑↓ select · Enter open · r refresh · Esc back ·"
