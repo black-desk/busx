@@ -23,6 +23,9 @@ pub fn update(state: &mut State, msg: Msg) -> Option<Effect> {
     match msg {
         Msg::Key(k) => update_key(state, k),
         Msg::Resize(_, _) => None,
+        // Mouse hit-testing is implemented in the next task; for now mouse
+        // events flow through and do nothing (keeps the app compiling).
+        Msg::Mouse(_) => None,
         Msg::ServicesLoaded(res) => {
             if let Screen::Service(s) = state.top_mut() {
                 load_services(s, res);

@@ -13,6 +13,8 @@ use zvariant::OwnedValue;
 pub enum Msg {
     Key(KeyEvent),
     Resize(u16, u16),
+    /// A crossterm mouse event (forwarded raw; hit-testing happens in `update`).
+    Mouse(crossterm::event::MouseEvent),
 
     ServicesLoaded(Result<Vec<ServiceInfo>, String>),
     ObjectsLoaded(Result<ObjectNode, String>),

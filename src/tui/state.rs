@@ -7,6 +7,7 @@
 
 use crate::dbus::types::{ObjectNode, ServiceInfo};
 use crate::tui::copy::{CopyOp, Tool};
+use ratatui::layout::Rect;
 
 #[derive(Default)]
 pub struct State {
@@ -17,6 +18,25 @@ pub struct State {
     /// The copy-as popup overlay (`Some` while open; `c` opens, `Esc`/`Enter`
     /// close). Rendered on top of the current screen by `render::render_popup`.
     pub popup: Option<CopyAsPopup>,
+    /// Interactive widget rects from the last render, for mouse hit-testing.
+    /// Populated by the loop after `render` (render writes them to an out-param).
+    pub click_targets: Vec<(Rect, ClickTarget)>,
+}
+
+/// A clickable region recorded by `render`, mapping a screen rect to what a
+/// left-click there should do (so the mouse handler can hit-test).
+#[derive(Clone, Debug)]
+pub enum ClickTarget {
+    ServiceRow(usize),
+    ObjectsRow(usize),
+    InterfacesRow(usize),
+    MethodRow(usize),
+    PropertyRow(usize),
+    SignalRow(usize),
+    ActionButton(usize),
+    DetailField(usize),
+    DetailTrigger,
+    PopupTool(usize),
 }
 
 /// The copy-as popup state: the operation being rendered, each tool's generated
@@ -196,6 +216,7 @@ impl State {
             screens: vec![Screen::Service(ServiceScreen { services: vec![], selected: 0, loading: true, error: None })],
             quit: false,
             popup: None,
+            click_targets: Vec::new(),
         }
     }
 
@@ -205,6 +226,7 @@ impl State {
             screens: vec![Screen::Service(ServiceScreen { services, selected: 0, loading: false, error: None })],
             quit: false,
             popup: None,
+            click_targets: Vec::new(),
         }
     }
 
