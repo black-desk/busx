@@ -5,7 +5,7 @@
 //! Pure state machine (spec §6, §7). Returns an `Option<Effect>` so it stays
 //! IO-free: pushing/loading a screen requests a fetch the loop performs.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use zbus_xml::{ArgDirection, Node, PropertyAccess, Signature};
 use zvariant::OwnedValue;
 
@@ -13,9 +13,9 @@ use crate::dbus::types::{ObjectNode, ServiceInfo};
 use crate::tui::copy::{generate, CopyOp, Tool};
 use crate::tui::msg::{Effect, Msg};
 use crate::tui::state::{
-    flatten_paths, ActionKind, ActionResult, CopyAsPopup, DetailFocus, DetailScreen, InterfaceFocus,
-    InterfaceScreen, InterfacesScreen, ListenTarget, MethodMember, ObjectsScreen, ResultScreen,
-    Screen, ServiceScreen, State,
+    flatten_paths, ActionKind, ActionResult, ClickTarget, CopyAsPopup, DetailFocus, DetailScreen,
+    InterfaceFocus, InterfaceScreen, InterfacesScreen, ListenTarget, MethodMember, ObjectsScreen,
+    ResultScreen, Screen, ServiceScreen, State,
 };
 use tui_input::backend::crossterm::EventHandler;
 
@@ -23,9 +23,7 @@ pub fn update(state: &mut State, msg: Msg) -> Option<Effect> {
     match msg {
         Msg::Key(k) => update_key(state, k),
         Msg::Resize(_, _) => None,
-        // Mouse hit-testing is implemented in the next task; for now mouse
-        // events flow through and do nothing (keeps the app compiling).
-        Msg::Mouse(_) => None,
+        Msg::Mouse(ev) => handle_mouse(state, ev),
         Msg::ServicesLoaded(res) => {
             if let Screen::Service(s) = state.top_mut() {
                 load_services(s, res);
@@ -140,6 +138,142 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
         Screen::Result(r) => update_result_key(r, k.code),
     }
     None
+}
+
+/// Mouse handling: a left-click hit-tests `click_targets` (render populated them
+/// last frame) and applies the matched target; scroll adjusts the Result screen's
+/// `scroll`. Other buttons/gestures are ignored. `click_targets` are populated by
+/// the loop after each render (render writes them to an out-param).
+fn handle_mouse(state: &mut State, ev: MouseEvent) -> Option<Effect> {
+    match ev.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if let Some(t) = hit_test(state, ev.column, ev.row) {
+                apply_click(state, t)
+            } else {
+                None
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            scroll(state, 1);
+            None
+        }
+        MouseEventKind::ScrollUp => {
+            scroll(state, -1);
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Find the topmost click_target whose Rect contains (col, row). Popup targets
+/// (PopupTool) are recorded last (drawn on top), so iterating in reverse already
+/// prefers them — a click on the popup hits the tool, not the screen beneath.
+fn hit_test(state: &State, col: u16, row: u16) -> Option<ClickTarget> {
+    state
+        .click_targets
+        .iter()
+        .rev()
+        .find(|(r, _)| col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height)
+        .map(|(_, t)| t.clone())
+}
+
+/// Apply a hit-tested click: a list/row target sets the selection (no side
+/// effects); an action button or the Detail trigger selects AND fires (reusing
+/// `handle_enter`, which already implements the Enter paths for those). A popup
+/// tool is selected for preview (the copy itself happens via Enter).
+fn apply_click(state: &mut State, t: ClickTarget) -> Option<Effect> {
+    match t {
+        ClickTarget::ServiceRow(i) => {
+            if let Screen::Service(s) = state.top_mut() {
+                s.selected = i;
+            }
+            None
+        }
+        ClickTarget::ObjectsRow(i) => {
+            if let Screen::Objects(o) = state.top_mut() {
+                o.selected = i;
+            }
+            None
+        }
+        ClickTarget::InterfacesRow(i) => {
+            if let Screen::Interfaces(it) = state.top_mut() {
+                it.selected = i;
+            }
+            None
+        }
+        ClickTarget::MethodRow(i) => {
+            if let Screen::Interface(it) = state.top_mut() {
+                it.focus = InterfaceFocus::Methods;
+                it.in_buttons = false;
+                it.selected[0] = i;
+            }
+            None
+        }
+        ClickTarget::PropertyRow(i) => {
+            if let Screen::Interface(it) = state.top_mut() {
+                it.focus = InterfaceFocus::Properties;
+                it.in_buttons = false;
+                it.selected[1] = i;
+            }
+            None
+        }
+        ClickTarget::SignalRow(i) => {
+            if let Screen::Interface(it) = state.top_mut() {
+                it.focus = InterfaceFocus::Signals;
+                it.in_buttons = false;
+                it.selected[2] = i;
+            }
+            None
+        }
+        ClickTarget::ActionButton(i) => {
+            // Select the button + fire it (== Enter when in_buttons). Reuses the
+            // Interface "fire button" path in `handle_enter`.
+            if let Screen::Interface(it) = state.top_mut() {
+                it.in_buttons = true;
+                it.button_selected = i;
+            }
+            handle_enter(state)
+        }
+        ClickTarget::DetailField(i) => {
+            if let Screen::Detail(d) = state.top_mut() {
+                d.field_selected = i;
+                d.focus = DetailFocus::Field;
+            }
+            None
+        }
+        ClickTarget::DetailTrigger => {
+            // Focus the trigger + fire it (== Enter on the trigger).
+            if let Screen::Detail(d) = state.top_mut() {
+                d.focus = DetailFocus::Trigger;
+            }
+            handle_enter(state)
+        }
+        ClickTarget::PopupTool(i) => {
+            if let Some(p) = state.popup.as_mut() {
+                p.selected = i;
+            }
+            None
+        }
+    }
+}
+
+/// Adjust the Result screen's `scroll` by `delta` (+1 down, -1 up), clamped to
+/// the content range. Only `Screen::Result` is scrollable; other screens ignore
+/// scroll events. Content line count mirrors `update_result_key` (streaming
+/// messages, else one-shot reply lines with a 1-line floor).
+fn scroll(state: &mut State, delta: i32) {
+    if let Screen::Result(r) = state.top_mut() {
+        let lines = if !r.messages.is_empty() {
+            r.messages.len()
+        } else {
+            match &r.result {
+                Some(ActionResult::Call(vs)) => vs.len(),
+                Some(ActionResult::Get(_)) | None | Some(ActionResult::Set) => 1,
+            }
+        };
+        let max = lines.saturating_sub(1) as i32;
+        r.scroll = ((r.scroll as i32) + delta).clamp(0, max) as usize;
+    }
 }
 
 /// Build the `CopyOp` for the top screen: a Detail from its current inputs, or a
