@@ -1,6 +1,5 @@
 ---
 source: tests/tui.rs
-assertion_line: 565
 expression: "format!(\"{}\", term.backend())"
 ---
 "services > org.busx.Test > org.busx.Test / > org.busx.Test:/"
@@ -18,4 +17,4 @@ expression: "format!(\"{}\", term.backend())"
 "│                                         ││               │"
 "│                                         ││               │"
 "└─────────────────────────────────────────┘└───────────────┘"
-"Tab buttons · Shift+Tab column · ↑↓ select · r refresh · Esc"
+"Tab column · ↑↓ select · Enter open · r refresh · Esc back ·"

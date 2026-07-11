@@ -175,7 +175,7 @@ fn render_interfaces(frame: &mut Frame, area: Rect, i: &crate::tui::state::Inter
 
 fn render_interface(frame: &mut Frame, area: Rect, i: &crate::tui::state::InterfaceScreen) {
     // Left: the three stacked member lists. Right: the action-button bar for the
-    // active column's selected member.
+    // focused column's selected member.
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
@@ -196,7 +196,14 @@ fn render_interface(frame: &mut Frame, area: Rect, i: &crate::tui::state::Interf
         .iter()
         .map(|m| ListItem::new(Line::from(format!("{}  {}", m.name, m.signature))))
         .collect();
-    render_sub_list(frame, chunks[0], "methods", methods, i.selected[0], i.focus == InterfaceFocus::Methods);
+    render_sub_list(
+        frame,
+        chunks[0],
+        "methods",
+        methods,
+        i.selected[0],
+        !i.in_buttons && i.focus == InterfaceFocus::Methods,
+    );
 
     // Properties show the GetAll value alongside name + signature. If GetAll
     // failed for this object/interface, show that scoped to this column (some
@@ -223,7 +230,14 @@ fn render_interface(frame: &mut Frame, area: Rect, i: &crate::tui::state::Interf
             })
             .collect();
         let p_title = if i.loading { "properties (loading…)" } else { "properties" };
-        render_sub_list(frame, chunks[1], p_title, properties, i.selected[1], i.focus == InterfaceFocus::Properties);
+        render_sub_list(
+            frame,
+            chunks[1],
+            p_title,
+            properties,
+            i.selected[1],
+            !i.in_buttons && i.focus == InterfaceFocus::Properties,
+        );
     }
 
     let signals: Vec<ListItem> = i
@@ -231,24 +245,30 @@ fn render_interface(frame: &mut Frame, area: Rect, i: &crate::tui::state::Interf
         .iter()
         .map(|(n, sig)| ListItem::new(Line::from(format!("{n}  {sig}"))))
         .collect();
-    render_sub_list(frame, chunks[2], "signals", signals, i.selected[2], i.focus == InterfaceFocus::Signals);
+    render_sub_list(
+        frame,
+        chunks[2],
+        "signals",
+        signals,
+        i.selected[2],
+        !i.in_buttons && i.focus == InterfaceFocus::Signals,
+    );
 
-    // Action-button bar: the buttons offered for the active column's selected member.
-    let buttons: Vec<ListItem> = action_buttons(i.active_column)
+    // Action-button bar: the buttons offered for the focused column's selected
+    // member. Highlighted (focused) when `in_buttons`.
+    let buttons: Vec<ListItem> = action_buttons(i.focus)
         .iter()
         .map(|b| ListItem::new(Line::from(*b)))
         .collect();
-    let focused = i.focus == InterfaceFocus::Buttons;
-    render_sub_list(frame, right, "actions", buttons, i.button_selected, focused);
+    render_sub_list(frame, right, "actions", buttons, i.button_selected, i.in_buttons);
 }
 
-/// The action buttons offered for a given active column (mirrors `update`).
+/// The action buttons offered for a given column (mirrors `update`).
 fn action_buttons(column: InterfaceFocus) -> &'static [&'static str] {
     match column {
         InterfaceFocus::Methods => &["调用", "监听"],
         InterfaceFocus::Properties => &["读取", "设置", "监听"],
         InterfaceFocus::Signals => &["监听"],
-        InterfaceFocus::Buttons => &[],
     }
 }
 
@@ -389,7 +409,7 @@ fn render_keyhint(frame: &mut Frame, area: Rect, screen: &Screen) {
         Screen::Service(_) => "↑↓ select · Enter open · q quit · ? help",
         Screen::Objects(_) => "↑↓ select · Enter open · Esc back · q quit",
         Screen::Interfaces(_) => "↑↓ select · Enter open · Esc back · q quit",
-        Screen::Interface(_) => "Tab buttons · Shift+Tab column · ↑↓ select · r refresh · Esc back · q quit",
+        Screen::Interface(_) => "Tab column · ↑↓ select · Enter open · r refresh · Esc back · q quit",
         Screen::Detail(_) => "Tab move · Enter trigger · c copy-as · Esc back · q quit",
         // A streaming-listen Result is armed when it has streamed messages or a
         // live cancel sender; on those, Esc both pops the screen and stops the

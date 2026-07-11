@@ -436,7 +436,7 @@ fn interface_screen_renders_three_columns() {
             signals: vec![],
             prop_values: vec![("volume".into(), "0.5".into()), ("name".into(), r#""busx-test""#.into())],
             focus: InterfaceFocus::Properties,
-            active_column: InterfaceFocus::Properties,
+            in_buttons: false,
             button_selected: 0,
             selected: [0, 1, 0],
             loading: false,
@@ -461,7 +461,7 @@ fn properties_loaded_fills_pretty_values() {
             signals: vec![],
             prop_values: vec![],
             focus: Default::default(),
-            active_column: Default::default(),
+            in_buttons: false,
             button_selected: 0,
             selected: [0, 0, 0],
             loading: true,
@@ -492,7 +492,7 @@ fn interface_screen() -> busx::tui::state::InterfaceScreen {
         signals: vec![("sig1".into(), "u".into())],
         prop_values: vec![],
         focus: InterfaceFocus::Methods,
-        active_column: InterfaceFocus::Methods,
+        in_buttons: false,
         button_selected: 0,
         selected: [0, 0, 0],
         loading: false,
@@ -541,27 +541,59 @@ fn method_with_args(name: &str, args: &[(&str, &str)]) -> busx::tui::state::Meth
     }
 }
 
+/// Tab cycles the three member columns (Methods→Properties→Signals→Methods)
+/// and leaves `in_buttons == false` throughout — the button bar is NOT part of
+/// Tab's ring (you drill into it with `Enter`, not `Tab`). Shift+Tab (BackTab)
+/// cycles the same ring in reverse.
 #[test]
-fn interface_tab_toggles_column_and_buttons() {
+fn interface_tab_cycles_columns() {
     let mut state = busx::tui::State { screens: vec![Screen::Interface(interface_screen())], quit: false, popup: None };
-    // Start on the Methods column (focus == active_column == Methods).
+    // Start on the Methods column, not in the button bar.
     assert_eq!(state.top_focus(), InterfaceFocus::Methods);
-    // Tab jumps to the button bar.
+    assert!(!top_in_buttons(&state));
+    // Tab cycles forward: Methods → Properties → Signals → Methods.
     update(&mut state, key(KeyCode::Tab));
-    assert_eq!(state.top_focus(), InterfaceFocus::Buttons);
-    // Tab again returns to the active column.
+    assert_eq!(state.top_focus(), InterfaceFocus::Properties);
+    assert!(!top_in_buttons(&state), "Tab never enters the button bar");
+    update(&mut state, key(KeyCode::Tab));
+    assert_eq!(state.top_focus(), InterfaceFocus::Signals);
+    assert!(!top_in_buttons(&state));
     update(&mut state, key(KeyCode::Tab));
     assert_eq!(state.top_focus(), InterfaceFocus::Methods);
-}
-
-#[test]
-fn interface_backtab_cycles_active_column() {
-    let mut state = busx::tui::State { screens: vec![Screen::Interface(interface_screen())], quit: false, popup: None };
-    // Shift+Tab (BackTab) cycles the active column Methods→Properties→Signals→Methods.
+    assert!(!top_in_buttons(&state), "Tab wraps Methods→Properties→Signals→Methods");
+    // Shift+Tab (BackTab) cycles backward: Methods → Signals → Properties → Methods.
+    update(&mut state, key(KeyCode::BackTab));
+    assert_eq!(state.top_focus(), InterfaceFocus::Signals);
+    assert!(!top_in_buttons(&state));
     update(&mut state, key(KeyCode::BackTab));
     assert_eq!(state.top_focus(), InterfaceFocus::Properties);
     update(&mut state, key(KeyCode::BackTab));
+    assert_eq!(state.top_focus(), InterfaceFocus::Methods);
+}
+
+/// Tab from inside the button bar leaves the button bar first (`in_buttons =
+/// false`) and THEN cycles the column — a single Tab never stays in the buttons.
+#[test]
+fn interface_tab_leaves_buttons_before_cycling() {
+    let mut screen = interface_screen();
+    screen.in_buttons = true;
+    screen.focus = InterfaceFocus::Methods;
+    let mut state = busx::tui::State { screens: vec![Screen::Interface(screen)], quit: false, popup: None };
+    assert!(top_in_buttons(&state));
+    update(&mut state, key(KeyCode::Tab));
+    assert!(!top_in_buttons(&state), "Tab leaves the button bar");
+    assert_eq!(state.top_focus(), InterfaceFocus::Properties, "and cycles the column forward");
+}
+
+#[test]
+fn interface_backtab_cycles_columns() {
+    let mut state = busx::tui::State { screens: vec![Screen::Interface(interface_screen())], quit: false, popup: None };
+    // Shift+Tab (BackTab) cycles the column Methods→Signals→Properties→Methods
+    // (reverse of Tab). Three presses return to Methods.
+    update(&mut state, key(KeyCode::BackTab));
     assert_eq!(state.top_focus(), InterfaceFocus::Signals);
+    update(&mut state, key(KeyCode::BackTab));
+    assert_eq!(state.top_focus(), InterfaceFocus::Properties);
     update(&mut state, key(KeyCode::BackTab));
     assert_eq!(state.top_focus(), InterfaceFocus::Methods);
 }
@@ -574,14 +606,112 @@ fn interface_arrows_move_within_focused_column() {
     assert_eq!(state.top_selected(), [1, 0, 0]);
     update(&mut state, key(KeyCode::Down));
     assert_eq!(state.top_selected(), [1, 0, 0], "clamped at last method");
-    // BackTab to signals (1 signal), Down clamps.
-    update(&mut state, key(KeyCode::BackTab));
+    // BackTab once to signals (1 signal), Down clamps.
     update(&mut state, key(KeyCode::BackTab));
     assert_eq!(state.top_focus(), InterfaceFocus::Signals);
     update(&mut state, key(KeyCode::Down));
     assert_eq!(state.top_selected(), [1, 0, 0]);
     update(&mut state, key(KeyCode::Up)); // no-op above 0
     assert_eq!(state.top_selected(), [1, 0, 0]);
+}
+
+/// `in_buttons` of the top Interface screen (test convenience, mirrors
+/// `top_focus` / `top_selected`).
+fn top_in_buttons(state: &busx::tui::State) -> bool {
+    match state.top() {
+        Screen::Interface(i) => i.in_buttons,
+        _ => false,
+    }
+}
+
+/// Enter from a member column drills INTO the button bar (`in_buttons = true`)
+/// without firing anything; a second Enter then fires the selected button.
+/// Esc inside the button bar backs out (`in_buttons = false`, screen NOT
+/// popped); a second Esc from a column pops the screen.
+#[test]
+fn interface_enter_drills_then_fires_and_esc_backs_out() {
+    let mut state =
+        busx::tui::State { screens: vec![Screen::Interface(interface_screen())], quit: false, popup: None };
+    // Start on the Methods column, not in the button bar.
+    assert_eq!(state.top_focus(), InterfaceFocus::Methods);
+    assert!(!top_in_buttons(&state));
+    assert_eq!(state.screens.len(), 1);
+
+    // Enter from the column → drill into the button bar (no Detail pushed).
+    let effect = update(&mut state, key(KeyCode::Enter));
+    assert!(effect.is_none(), "drill-Enter fires nothing");
+    assert!(top_in_buttons(&state), "Enter set in_buttons = true");
+    assert_eq!(state.screens.len(), 1, "drill-Enter does not push a screen");
+
+    // Esc inside the button bar → back out, screen NOT popped.
+    update(&mut state, key(KeyCode::Esc));
+    assert!(!top_in_buttons(&state), "Esc backed out of the button bar");
+    assert_eq!(state.screens.len(), 1, "Esc from the button bar does not pop");
+
+    // Re-enter the button bar, then a second Enter fires `调用` → pushes Detail.
+    update(&mut state, key(KeyCode::Enter)); // drill in
+    assert!(top_in_buttons(&state));
+    update(&mut state, key(KeyCode::Enter)); // fire 调用 (button_selected 0, m1)
+    assert_eq!(state.screens.len(), 2, "fire-Enter pushed a Detail screen");
+    assert!(matches!(state.top(), Screen::Detail(_)));
+}
+
+/// Esc from a member column (not in the button bar) pops the Interface screen.
+#[test]
+fn interface_esc_from_column_pops_screen() {
+    let mut state = busx::tui::State {
+        screens: vec![
+            Screen::Objects(objects_screen("s")),
+            Screen::Interface(interface_screen()),
+        ],
+        quit: false,
+        popup: None,
+    };
+    assert!(!top_in_buttons(&state));
+    assert_eq!(state.screens.len(), 2);
+    update(&mut state, key(KeyCode::Esc));
+    assert_eq!(state.screens.len(), 1, "Esc from a column pops the Interface screen");
+    assert!(matches!(state.top(), Screen::Objects(_)));
+}
+
+/// When `in_buttons`, ↑↓ move `button_selected` (clamped to the focused
+/// column's button list); when not `in_buttons`, ↑↓ move the column's `selected`
+/// (and leave `button_selected` untouched). This pins the split behavior of the
+/// two focus regions for the same arrow key.
+#[test]
+fn interface_arrows_in_buttons_move_button_selected() {
+    let mut screen = interface_screen();
+    // Properties column has three buttons: 读取/设置/监听.
+    screen.focus = InterfaceFocus::Properties;
+    screen.in_buttons = true;
+    screen.button_selected = 0;
+    screen.selected = [0, 0, 0];
+    let mut state = busx::tui::State { screens: vec![Screen::Interface(screen)], quit: false, popup: None };
+
+    // In the button bar, Down moves button_selected (0→1→2, clamped at 2).
+    update(&mut state, key(KeyCode::Down));
+    assert_eq!(button_selected(&state), 1);
+    update(&mut state, key(KeyCode::Down));
+    assert_eq!(button_selected(&state), 2);
+    update(&mut state, key(KeyCode::Down));
+    assert_eq!(button_selected(&state), 2, "clamped at last button");
+    // The column's property selection is untouched while in the buttons.
+    assert_eq!(state.top_selected(), [0, 0, 0]);
+    // Up moves button_selected back down (2→1→0, clamped at 0).
+    update(&mut state, key(KeyCode::Up));
+    assert_eq!(button_selected(&state), 1);
+    update(&mut state, key(KeyCode::Up));
+    assert_eq!(button_selected(&state), 0);
+    update(&mut state, key(KeyCode::Up));
+    assert_eq!(button_selected(&state), 0, "clamped above 0");
+}
+
+/// `button_selected` of the top Interface screen (test convenience).
+fn button_selected(state: &busx::tui::State) -> usize {
+    match state.top() {
+        Screen::Interface(i) => i.button_selected,
+        _ => 0,
+    }
 }
 
 #[test]
@@ -642,15 +772,16 @@ fn drill_down_auto_skips_service_to_interface() {
 
 #[test]
 fn interface_button_enter_pushes_call_detail() {
-    // Methods column, focus on the button bar, button_selected on `调用`.
+    // Methods column, already in the button bar (Enter drilled in earlier),
+    // button_selected on `调用`.
     let mut screen = interface_screen();
-    screen.active_column = InterfaceFocus::Methods;
-    screen.focus = InterfaceFocus::Buttons;
+    screen.focus = InterfaceFocus::Methods;
+    screen.in_buttons = true;
     screen.button_selected = 0;
     screen.selected = [0, 0, 0]; // m1 (signature "u")
     let mut state = busx::tui::State { screens: vec![Screen::Interface(screen)], quit: false, popup: None };
     let effect = update(&mut state, key(KeyCode::Enter));
-    assert!(effect.is_none(), "button Enter pushes a stub (no Effect this task)");
+    assert!(effect.is_none(), "button Enter pushes a Detail (no Effect)");
     match state.top() {
         Screen::Detail(d) => {
             assert_eq!(d.service, "s");
@@ -663,7 +794,7 @@ fn interface_button_enter_pushes_call_detail() {
                 }
                 other => panic!("expected Call, got {other:?}"),
             }
-            assert!(d.inputs.is_empty(), "stub Detail has no inputs yet");
+            assert!(d.inputs.is_empty(), "m1 has no IN-args (call_fields → 0 inputs)");
             assert!(!d.loading);
         }
         _ => panic!("Enter should push a Detail screen"),
@@ -672,10 +803,10 @@ fn interface_button_enter_pushes_call_detail() {
 
 #[test]
 fn interface_button_enter_pushes_get_detail() {
-    // Properties column, `读取` button (index 0) on p1.
+    // Properties column, already in the button bar, `读取` button (index 0) on p1.
     let mut screen = interface_screen();
-    screen.active_column = InterfaceFocus::Properties;
-    screen.focus = InterfaceFocus::Buttons;
+    screen.focus = InterfaceFocus::Properties;
+    screen.in_buttons = true;
     screen.button_selected = 0;
     screen.selected = [0, 0, 0]; // p1
     let mut state = busx::tui::State { screens: vec![Screen::Interface(screen)], quit: false, popup: None };
@@ -691,10 +822,10 @@ fn interface_button_enter_pushes_get_detail() {
 
 #[test]
 fn interface_button_enter_pushes_set_detail() {
-    // Properties column, `设置` button (index 1) on p1 (signature "s").
+    // Properties column, already in the button bar, `设置` button (index 1) on p1.
     let mut screen = interface_screen();
-    screen.active_column = InterfaceFocus::Properties;
-    screen.focus = InterfaceFocus::Buttons;
+    screen.focus = InterfaceFocus::Properties;
+    screen.in_buttons = true;
     screen.button_selected = 1; // 设置
     screen.selected = [0, 0, 0];
     let mut state = busx::tui::State { screens: vec![Screen::Interface(screen)], quit: false, popup: None };
@@ -713,8 +844,9 @@ fn interface_button_enter_pushes_set_detail() {
 
 #[test]
 fn interface_renders_action_button_bar() {
-    // Methods column with a method selected → the right panel shows `actions` /
-    // `调用`, focused when focus == Buttons.
+    // Methods column with a method selected, focus in the button bar
+    // (`in_buttons = true`) → the right panel shows the buttons with `调用`
+    // highlighted.
     let state = busx::tui::State {
         screens: vec![busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
             service: "org.busx.Test".into(),
@@ -724,8 +856,8 @@ fn interface_renders_action_button_bar() {
             properties: vec![("Name".into(), "s".into(), "read".into())],
             signals: vec![],
             prop_values: vec![],
-            focus: InterfaceFocus::Buttons,
-            active_column: InterfaceFocus::Methods,
+            focus: InterfaceFocus::Methods,
+            in_buttons: true,
             button_selected: 0,
             selected: [0, 0, 0],
             loading: false,
@@ -752,8 +884,8 @@ fn interface_on_button(methods: Vec<busx::tui::state::MethodMember>, button: usi
         properties: vec![],
         signals: vec![],
         prop_values: vec![],
-        focus: InterfaceFocus::Buttons,
-        active_column: InterfaceFocus::Methods,
+        focus: InterfaceFocus::Methods,
+        in_buttons: true,
         button_selected: button,
         selected: [0, 0, 0],
         loading: false,
@@ -1021,8 +1153,8 @@ fn interface_on_prop_button(button: usize, sig: &str) -> busx::tui::State {
         properties: vec![("p1".into(), sig.into(), "readwrite".into())],
         signals: vec![],
         prop_values: vec![],
-        focus: InterfaceFocus::Buttons,
-        active_column: InterfaceFocus::Properties,
+        focus: InterfaceFocus::Properties,
+        in_buttons: true,
         button_selected: button,
         selected: [0, 0, 0],
         loading: false,
@@ -1191,11 +1323,12 @@ fn get_result_renders_value() {
 
 // --- Phase 3 Task 4: capstone loop test (full call through run_loop) ---
 
-/// Drive a full method call through `run_loop`: Interface → Tab to the button
-/// bar → Enter (`调用`) pushes the Detail → type "42" → Tab to the trigger →
-/// Enter pushes the Result (loading) + a `CallMethod` Effect (no-op'd by the
-/// bus-free handler) → a scripted `ActionResult::Call` reply lands in the
-/// Result screen. Snapshots the final Result frame.
+/// Drive a full method call through `run_loop`: Interface (Methods column) →
+/// Enter drills into the button bar → Enter (`调用`) pushes the Detail →
+/// type "42" → Tab to the trigger → Enter pushes the Result (loading) +
+/// a `CallMethod` Effect (no-op'd by the bus-free handler) → a scripted
+/// `ActionResult::Call` reply lands in the Result screen. Snapshots the final
+/// Result frame.
 #[test]
 fn call_action_flows_interface_to_result() {
     let state = busx::tui::State {
@@ -1209,7 +1342,7 @@ fn call_action_flows_interface_to_result() {
             signals: vec![],
             prop_values: vec![],
             focus: InterfaceFocus::Methods,
-            active_column: InterfaceFocus::Methods,
+            in_buttons: false,
             button_selected: 0, // 调用
             selected: [0, 0, 0], // Add
             loading: false,
@@ -1219,7 +1352,7 @@ fn call_action_flows_interface_to_result() {
         popup: None,
     };
     let events = vec![
-        key(KeyCode::Tab),           // Methods column → Buttons
+        key(KeyCode::Enter),         // Methods column → drill into the button bar
         key(KeyCode::Enter),         // 调用 → push Call Detail (1 input)
         key(KeyCode::Char('4')),     // type into the field
         key(KeyCode::Char('2')),
@@ -1259,8 +1392,8 @@ fn interface_on_signal_button() -> busx::tui::State {
         properties: vec![],
         signals: vec![("Changed".into(), "u".into())],
         prop_values: vec![],
-        focus: InterfaceFocus::Buttons,
-        active_column: InterfaceFocus::Signals,
+        focus: InterfaceFocus::Signals,
+        in_buttons: true,
         button_selected: 0, // 监听
         selected: [0, 0, 0],
         loading: false,
@@ -1310,8 +1443,8 @@ fn property_listen_button_targets_propertieschanged_rule() {
         properties: vec![("volume".into(), "d".into(), "readwrite".into())],
         signals: vec![],
         prop_values: vec![],
-        focus: InterfaceFocus::Buttons,
-        active_column: InterfaceFocus::Properties,
+        focus: InterfaceFocus::Properties,
+        in_buttons: true,
         button_selected: 2, // 监听
         selected: [0, 0, 0],
         loading: false,
@@ -1449,8 +1582,8 @@ fn method_listen_button_and_trigger_target_method() {
         properties: vec![],
         signals: vec![],
         prop_values: vec![],
-        focus: InterfaceFocus::Buttons,
-        active_column: InterfaceFocus::Methods,
+        focus: InterfaceFocus::Methods,
+        in_buttons: true,
         button_selected: 1, // 监听
         selected: [0, 0, 0],
         loading: false,
@@ -1492,22 +1625,22 @@ fn method_listen_button_and_trigger_target_method() {
 // --- Phase 4 Task 4: listen capstone loop test (full signal listen through run_loop) ---
 
 /// Drive a full signal listen through `run_loop`: Interface (Signals column) →
-/// Tab to the button bar → Enter (`监听`) pushes the Listen Detail → Tab to the
-/// trigger → Enter pushes the streaming Result (loading) + `Effect::Listen`
-/// (no-op'd by the bus-free handler) → a scripted `ListenStarted` arms the
-/// cancel + clears loading → two `ListenMessage`s append message blocks → Esc
-/// pops the Result, dropping the cancel sender, so the matching receiver sees
-/// `Canceled` (the listen task would exit). Snapshots the streaming Result frame
-/// (two message blocks) *before* the Esc.
+/// Enter drills into the button bar → Enter (`监听`) pushes the Listen Detail →
+/// Tab to the trigger → Enter pushes the streaming Result (loading) +
+/// `Effect::Listen` (no-op'd by the bus-free handler) → a scripted
+/// `ListenStarted` arms the cancel + clears loading → two `ListenMessage`s
+/// append message blocks → Esc pops the Result, dropping the cancel sender, so
+/// the matching receiver sees `Canceled` (the listen task would exit).
+/// Snapshots the streaming Result frame (two message blocks) *before* the Esc.
 ///
 /// Focus sequence to reach the signal's `监听` button: start on the Signals
-/// column (`focus == active_column == Signals`, one signal `Changed`), then a
-/// single `Tab` toggles focus to the button bar (Signals offers only `监听`, so
-/// `button_selected` 0 is already on it).
+/// column (`focus == Signals`, one signal `Changed`), then `Enter` drills into
+/// the button bar (Signals offers only `监听`, so `button_selected` 0 is
+/// already on it), then a second `Enter` fires it.
 #[test]
 fn listen_action_flows_interface_to_streaming_result() {
-    // Start on the Signals column (not yet on the button bar) so the first Tab
-    // exercises the column→Buttons toggle, just as a real user would.
+    // Start on the Signals column (not yet on the button bar) so the first Enter
+    // exercises the column→button-bar drill, just as a real user would.
     let screen = busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
         service: "s".into(),
         object: "/o".into(),
@@ -1517,7 +1650,7 @@ fn listen_action_flows_interface_to_streaming_result() {
         signals: vec![("Changed".into(), "u".into())],
         prop_values: vec![],
         focus: InterfaceFocus::Signals,
-        active_column: InterfaceFocus::Signals,
+        in_buttons: false,
         button_selected: 0, // 监听 (Signals offers only one button)
         selected: [0, 0, 0],
         loading: false,
@@ -1533,10 +1666,10 @@ fn listen_action_flows_interface_to_streaming_result() {
     // Events up to (but excluding) the Esc: the streaming Result is fully armed
     // with two message blocks when this list is exhausted.
     let events = vec![
-        key(KeyCode::Tab),  // Signals column → Buttons
-        key(KeyCode::Enter), // 监听 → push Listen Detail (0 inputs)
-        key(KeyCode::Tab),   // 0 inputs → Trigger
-        key(KeyCode::Enter), // push Result (loading) + Effect::Listen (no-op'd)
+        key(KeyCode::Enter),  // Signals column → drill into the button bar
+        key(KeyCode::Enter),  // 监听 → push Listen Detail (0 inputs)
+        key(KeyCode::Tab),    // 0 inputs → Trigger
+        key(KeyCode::Enter),  // push Result (loading) + Effect::Listen (no-op'd)
         Msg::ListenStarted(cancel_tx), // store cancel, clear loading
         Msg::ListenMessage("signal  sender=:1.1\n  …block1\n".into()),
         Msg::ListenMessage("signal  sender=:1.2\n  …block2\n".into()),
@@ -1888,7 +2021,7 @@ fn copy_as_capstone_loop_closes_popup_over_result() {
             signals: vec![],
             prop_values: vec![],
             focus: InterfaceFocus::Methods,
-            active_column: InterfaceFocus::Methods,
+            in_buttons: false,
             button_selected: 0, // 调用
             selected: [0, 0, 0],
             loading: false,
@@ -1898,7 +2031,7 @@ fn copy_as_capstone_loop_closes_popup_over_result() {
         popup: None,
     };
     let events = vec![
-        key(KeyCode::Tab),           // Methods column → Buttons
+        key(KeyCode::Enter),         // Methods column → drill into the button bar
         key(KeyCode::Enter),         // 调用 → push Call Detail (1 input)
         key(KeyCode::Char('4')),     // type "4" then "2"
         key(KeyCode::Char('2')),
@@ -1939,7 +2072,7 @@ fn copy_as_capstone_copies_busctl_command() {
             signals: vec![],
             prop_values: vec![],
             focus: InterfaceFocus::Methods,
-            active_column: InterfaceFocus::Methods,
+            in_buttons: false,
             button_selected: 0,
             selected: [0, 0, 0],
             loading: false,
@@ -1948,8 +2081,8 @@ fn copy_as_capstone_copies_busctl_command() {
         quit: false,
         popup: None,
     };
-    update(&mut state, key(KeyCode::Tab));
-    update(&mut state, key(KeyCode::Enter)); // push the Call Detail
+    update(&mut state, key(KeyCode::Enter)); // Methods column → drill into the button bar
+    update(&mut state, key(KeyCode::Enter)); // 调用 → push the Call Detail
     update(&mut state, key(KeyCode::Char('4')));
     update(&mut state, key(KeyCode::Char('2')));
     update(&mut state, key(KeyCode::Tab)); // → trigger
