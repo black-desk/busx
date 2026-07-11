@@ -2293,3 +2293,240 @@ fn y_on_detail_edits_input_not_copy() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Mouse hit-testing + interactions (spec §3). Each test draws to populate
+// `click_targets` (render's out-param), then feeds a `Msg::Mouse` whose column
+// falls inside the target's recorded Rect. Real app flow: `run_loop` copies the
+// out-param into `state.click_targets` after every frame.
+// ---------------------------------------------------------------------------
+
+use busx::tui::ClickTarget;
+use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+
+/// Click `target` by drawing to populate `click_targets`, finding its Rect, and
+/// feeding a left-click at the Rect's top-center. Panics if `target` isn't among
+/// the recorded click_targets (so a missing widget fails loudly, not silently).
+fn click(state: &mut State, target: &ClickTarget, w: u16, h: u16) {
+    let backend = TestBackend::new(w, h);
+    let mut term = Terminal::new(backend).unwrap();
+    let mut targets = Vec::new();
+    term.draw(|f| render(f, state, &mut targets)).unwrap();
+    state.click_targets = targets;
+    let rect = state
+        .click_targets
+        .iter()
+        .find(|(_, t)| t == target)
+        .map(|(r, _)| *r)
+        .unwrap_or_else(|| panic!("target {target:?} not in click_targets"));
+    update(
+        state,
+        Msg::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: rect.x + rect.width.saturating_sub(1) / 2,
+            row: rect.y,
+            modifiers: KeyModifiers::NONE,
+        }),
+    );
+}
+
+/// Feed a bare scroll Msg (no click_targets lookup needed — scroll doesn't
+/// hit-test). Used by the scroll test.
+fn scroll_msg(kind: MouseEventKind) -> Msg {
+    Msg::Mouse(MouseEvent { kind, column: 0, row: 0, modifiers: KeyModifiers::NONE })
+}
+
+#[test]
+fn mouse_click_selects_service_row() {
+    let mut state = State::service(vec![
+        svc("org.busx.A", None, None),
+        svc("org.busx.B", None, None),
+        svc("org.busx.C", None, None),
+    ]);
+    click(&mut state, &ClickTarget::ServiceRow(2), 40, 7);
+    assert_eq!(selected_of(&state), 2, "clicking ServiceRow(2) selects row 2");
+}
+
+#[test]
+fn mouse_click_selects_objects_row() {
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Objects(busx::tui::state::ObjectsScreen {
+            service: "s".into(),
+            paths: vec!["/a".into(), "/b".into(), "/c".into()],
+            selected: 0,
+            loading: false,
+            error: None,
+        })],
+        quit: false,
+        popup: None,
+        click_targets: Vec::new(),
+    };
+    click(&mut state, &ClickTarget::ObjectsRow(1), 40, 7);
+    match state.top() {
+        Screen::Objects(o) => assert_eq!(o.selected, 1, "clicking ObjectsRow(1) selects row 1"),
+        _ => panic!("still on Objects"),
+    }
+}
+
+#[test]
+fn mouse_click_selects_interfaces_row() {
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Interfaces(busx::tui::state::InterfacesScreen {
+            service: "s".into(),
+            object: "/o".into(),
+            names: vec!["i0".into(), "i1".into(), "i2".into()],
+            node: None,
+            selected: 0,
+            loading: false,
+            error: None,
+        })],
+        quit: false,
+        popup: None,
+        click_targets: Vec::new(),
+    };
+    click(&mut state, &ClickTarget::InterfacesRow(2), 44, 7);
+    match state.top() {
+        Screen::Interfaces(i) => {
+            assert_eq!(i.selected, 2, "clicking InterfacesRow(2) selects row 2")
+        }
+        _ => panic!("still on Interfaces"),
+    }
+}
+
+#[test]
+fn mouse_click_on_interface_method_row_switches_focus() {
+    // An Interface screen on the methods column (default focus). Clicking
+    // MethodRow(1) moves the selection to m2 AND keeps focus on Methods with the
+    // focus out of the button bar.
+    let mut state = busx::tui::State {
+        screens: vec![Screen::Interface(interface_screen())],
+        quit: false,
+        popup: None,
+        click_targets: Vec::new(),
+    };
+    click(&mut state, &ClickTarget::MethodRow(1), 64, 16);
+    match state.top() {
+        Screen::Interface(i) => {
+            assert_eq!(i.focus, InterfaceFocus::Methods, "focus stays Methods");
+            assert!(!i.in_buttons, "focus leaves the button bar");
+            assert_eq!(i.selected[0], 1, "methods selection → m2");
+        }
+        _ => panic!("still on Interface"),
+    }
+}
+
+#[test]
+fn mouse_click_on_action_button_fires() {
+    // An Interface with a method. Clicking ActionButton(0) (the 调用 button)
+    // selects + fires it — reusing the Enter "fire button" path, which builds
+    // the Call ActionKind and pushes a Detail. Assert the stack grew.
+    let mut state = busx::tui::State {
+        screens: vec![Screen::Interface(interface_screen())],
+        quit: false,
+        popup: None,
+        click_targets: Vec::new(),
+    };
+    let before = state.screens.len();
+    click(&mut state, &ClickTarget::ActionButton(0), 64, 16);
+    assert_eq!(state.screens.len(), before + 1, "ActionButton click pushed a Detail");
+    match state.top() {
+        Screen::Detail(d) => {
+            // 调用 on the selected method m1 → a Call kind for "m1".
+            assert!(matches!(d.kind, ActionKind::Call { .. }), "fired the call button");
+        }
+        _ => panic!("expected Detail"),
+    }
+}
+
+#[test]
+fn mouse_click_on_detail_field_focuses_it() {
+    // A call Detail with one input field. Clicking DetailField(0) sets
+    // field_selected=0 and focus=Field (so subsequent typing edits that field).
+    let mut state = call_detail_with_input();
+    // Move focus off the field first so the click's effect is observable.
+    match state.top_mut() {
+        Screen::Detail(d) => d.focus = DetailFocus::Trigger,
+        _ => panic!("expected Detail"),
+    }
+    click(&mut state, &ClickTarget::DetailField(0), 48, 10);
+    match state.top() {
+        Screen::Detail(d) => {
+            assert_eq!(d.field_selected, 0, "DetailField(0) selected");
+            assert_eq!(d.focus, DetailFocus::Field, "focus on the field");
+        }
+        _ => panic!("still on Detail"),
+    }
+}
+
+#[test]
+fn mouse_click_on_popup_tool_selects_it() {
+    // A copy-as popup open over a Detail. Clicking PopupTool(1) moves the popup
+    // selection without copying (copy happens via Enter).
+    let mut state = call_detail_with_input();
+    update(&mut state, key(KeyCode::Char('c'))); // open the popup
+    let popup = state.popup.as_ref().expect("popup opened");
+    assert_eq!(popup.selected, 0, "popup starts on tool 0");
+    click(&mut state, &ClickTarget::PopupTool(1), 56, 14);
+    let popup = state.popup.as_ref().expect("popup still open");
+    assert_eq!(popup.selected, 1, "PopupTool(1) selected");
+}
+
+#[test]
+fn mouse_scroll_on_result_changes_scroll() {
+    // A Result with several streaming messages (the scrollable content). ScrollDown
+    // increases `scroll`; ScrollUp decreases it (clamped at 0).
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Result(ResultScreen {
+            title: "listen".into(),
+            result: None,
+            error: None,
+            loading: false,
+            scroll: 0,
+            messages: vec!["m0".into(), "m1".into(), "m2".into(), "m3".into()],
+            cancel: None,
+            op: None,
+        })],
+        quit: false,
+        popup: None,
+        click_targets: Vec::new(),
+    };
+    // ScrollDown twice: 0 → 1 → 2.
+    update(&mut state, scroll_msg(MouseEventKind::ScrollDown));
+    match state.top() {
+        Screen::Result(r) => assert_eq!(r.scroll, 1, "ScrollDown 0 → 1"),
+        _ => panic!("still on Result"),
+    }
+    update(&mut state, scroll_msg(MouseEventKind::ScrollDown));
+    match state.top() {
+        Screen::Result(r) => assert_eq!(r.scroll, 2, "ScrollDown 1 → 2"),
+        _ => panic!("still on Result"),
+    }
+    // ScrollUp three times: 2 → 1 → 0 → 0 (clamped).
+    update(&mut state, scroll_msg(MouseEventKind::ScrollUp));
+    update(&mut state, scroll_msg(MouseEventKind::ScrollUp));
+    update(&mut state, scroll_msg(MouseEventKind::ScrollUp));
+    match state.top() {
+        Screen::Result(r) => assert_eq!(r.scroll, 0, "ScrollUp clamps at 0"),
+        _ => panic!("still on Result"),
+    }
+}
+
+#[test]
+fn mouse_click_on_unrendered_rect_is_noop() {
+    // A left-click that hits no recorded Rect does nothing (no panic, no state
+    // change). Guards the hit-test's `None` path.
+    let mut state = State::service(vec![svc("a", None, None)]);
+    let before = state.screens.len();
+    update(
+        &mut state,
+        Msg::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            // With no click_targets populated, any coord misses → no-op.
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        }),
+    );
+    assert_eq!(state.screens.len(), before, "missed click is a no-op");
+    assert_eq!(selected_of(&state), 0, "selection unchanged");
+}
+

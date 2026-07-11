@@ -25,7 +25,7 @@ pub struct State {
 
 /// A clickable region recorded by `render`, mapping a screen rect to what a
 /// left-click there should do (so the mouse handler can hit-test).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ClickTarget {
     ServiceRow(usize),
     ObjectsRow(usize),
