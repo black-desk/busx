@@ -89,6 +89,20 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
     if state.popup.is_some() {
         return update_popup_key(state, k.code);
     }
+    // The help overlay, when open, captures all keys except `q` (handled above):
+    // Esc or `?` closes it; everything else is swallowed (no screen dispatch), so
+    // arrow keys / `c` / `y` / etc. don't leak through while help is up.
+    if state.help_open {
+        if matches!(k.code, KeyCode::Esc | KeyCode::Char('?')) {
+            state.help_open = false;
+        }
+        return None;
+    }
+    // `?` opens the help overlay (only when no popup is up and help is closed).
+    if matches!(k.code, KeyCode::Char('?')) {
+        state.help_open = true;
+        return None;
+    }
     // `c` opens the copy-as popup on a Detail or Result (the screens that carry
     // a copyable operation). No popup is open here, so `c` is unambiguous.
     if matches!(k.code, KeyCode::Char('c')) {
