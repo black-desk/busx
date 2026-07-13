@@ -195,12 +195,8 @@ fn call_dict_arg_each_tool() {
         "dbus-send --print-reply --dest=org.busx.Test /o org.busx.Test.Map \
          dict:string:string:k,v"
     );
-    // qdbus: no positional dict syntax → honest note, value slot omitted.
-    assert_eq!(
-        cmd(&op, Tool::Qdbus),
-        "qdbus org.busx.Test /o org.busx.Test.Map\n\
-         # qdbus cannot express signature \"a{ss}\" positionally; use busctl"
-    );
+    // qdbus: no positional dict syntax → can't express the op (None).
+    assert!(generate(&op, Tool::Qdbus).is_none());
     // gdbus: GVariant dict literal {"k":"v"}.
     assert_eq!(
         cmd(&op, Tool::Gdbus),
@@ -261,18 +257,10 @@ fn call_struct_arg_each_tool() {
         cmd(&op, Tool::Busctl),
         "busctl call org.busx.Test /o org.busx.Test Point (ii) 1 2"
     );
-    // dbus-send: structs are not in the dbus-send BNF → honest note, arg dropped.
-    assert_eq!(
-        cmd(&op, Tool::DbusSend),
-        "dbus-send --print-reply --dest=org.busx.Test /o org.busx.Test.Point\n\
-         # dbus-send cannot express signature \"(ii)\"; use busctl"
-    );
-    // qdbus: no positional struct syntax → honest note, arg dropped.
-    assert_eq!(
-        cmd(&op, Tool::Qdbus),
-        "qdbus org.busx.Test /o org.busx.Test.Point\n\
-         # qdbus cannot express signature \"(ii)\" positionally; use busctl"
-    );
+    // dbus-send: structs are not in the dbus-send BNF → can't express (None).
+    assert!(generate(&op, Tool::DbusSend).is_none());
+    // qdbus: no positional struct syntax → can't express (None).
+    assert!(generate(&op, Tool::Qdbus).is_none());
     // gdbus: GVariant struct literal (1,2).
     assert_eq!(
         cmd(&op, Tool::Gdbus),
@@ -299,18 +287,10 @@ fn call_nested_asv_each_tool() {
         cmd(&op, Tool::Busctl),
         "busctl call org.busx.Test /o org.busx.Test Hints a{sv} 1 k s v"
     );
-    // dbus-send forbids nested containers (a{sv}'s value is a variant) → note.
-    assert_eq!(
-        cmd(&op, Tool::DbusSend),
-        "dbus-send --print-reply --dest=org.busx.Test /o org.busx.Test.Hints\n\
-         # dbus-send cannot express signature \"a{sv}\"; use busctl"
-    );
-    // qdbus → note.
-    assert_eq!(
-        cmd(&op, Tool::Qdbus),
-        "qdbus org.busx.Test /o org.busx.Test.Hints\n\
-         # qdbus cannot express signature \"a{sv}\" positionally; use busctl"
-    );
+    // dbus-send forbids nested containers (a{sv}'s value is a variant) → None.
+    assert!(generate(&op, Tool::DbusSend).is_none());
+    // qdbus → None.
+    assert!(generate(&op, Tool::Qdbus).is_none());
     // gdbus: full nesting — {"k":<"v">} (dict value is a GVariant variant).
     assert_eq!(
         cmd(&op, Tool::Gdbus),
@@ -337,18 +317,10 @@ fn call_nested_aas_each_tool() {
         cmd(&op, Tool::Busctl),
         "busctl call org.busx.Test /o org.busx.Test Grid aas 1 2 x y"
     );
-    // dbus-send forbids nested containers → note.
-    assert_eq!(
-        cmd(&op, Tool::DbusSend),
-        "dbus-send --print-reply --dest=org.busx.Test /o org.busx.Test.Grid\n\
-         # dbus-send cannot express signature \"aas\"; use busctl"
-    );
-    // qdbus → note.
-    assert_eq!(
-        cmd(&op, Tool::Qdbus),
-        "qdbus org.busx.Test /o org.busx.Test.Grid\n\
-         # qdbus cannot express signature \"aas\" positionally; use busctl"
-    );
+    // dbus-send forbids nested containers → None.
+    assert!(generate(&op, Tool::DbusSend).is_none());
+    // qdbus → None.
+    assert!(generate(&op, Tool::Qdbus).is_none());
     // gdbus: [["x","y"]] (one outer array element, itself a 2-string array).
     assert_eq!(
         cmd(&op, Tool::Gdbus),
@@ -375,17 +347,10 @@ fn call_empty_containers_each_tool() {
         cmd(&op, Tool::Busctl),
         "busctl call org.busx.Test /o org.busx.Test Take as 0"
     );
-    // dbus-send: empty array is forbidden → honest note, arg dropped.
-    assert_eq!(
-        cmd(&op, Tool::DbusSend),
-        "dbus-send --print-reply --dest=org.busx.Test /o org.busx.Test.Take\n\
-         # dbus-send cannot express signature \"as\"; use busctl"
-    );
+    // dbus-send: empty array is forbidden → can't express (None).
+    assert!(generate(&op, Tool::DbusSend).is_none());
     // qdbus: empty array expands to zero positional args (no note).
-    assert_eq!(
-        cmd(&op, Tool::Qdbus),
-        "qdbus org.busx.Test /o org.busx.Test.Take"
-    );
+    assert_eq!(cmd(&op, Tool::Qdbus), "qdbus org.busx.Test /o org.busx.Test.Take");
     // gdbus: empty array literal [].
     assert_eq!(
         cmd(&op, Tool::Gdbus),
@@ -578,20 +543,10 @@ fn set_array_property_each_tool() {
         "busctl set-property org.busx.Test /o org.busx.Test Tags as 2 a b"
     );
     // dbus-send Properties.Set: the property value is a variant; dbus-send's
-    // variant inner type must be basic, and `as` is not → honest note.
-    assert_eq!(
-        cmd(&op, Tool::DbusSend),
-        "dbus-send --print-reply --dest=org.busx.Test /o \
-         org.freedesktop.DBus.Properties.Set string:org.busx.Test string:Tags\n\
-         # dbus-send cannot express signature \"as\"; use busctl"
-    );
-    // qdbus Properties.Set: array not expressible positionally → note.
-    assert_eq!(
-        cmd(&op, Tool::Qdbus),
-        "qdbus org.busx.Test /o org.freedesktop.DBus.Properties.Set \
-         org.busx.Test Tags\n\
-         # qdbus cannot express signature \"as\" positionally; use busctl"
-    );
+    // variant inner type must be basic, and `as` is not → can't express (None).
+    assert!(generate(&op, Tool::DbusSend).is_none());
+    // qdbus Properties.Set: array not expressible positionally → None.
+    assert!(generate(&op, Tool::Qdbus).is_none());
     // gdbus Properties.Set: array value wrapped in a GVariant variant `<[...]>`.
     assert_eq!(
         cmd(&op, Tool::Gdbus),

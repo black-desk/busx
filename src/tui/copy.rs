@@ -94,13 +94,13 @@ impl Tool {
 pub fn generate(op: &CopyOp, tool: Tool) -> Option<String> {
     match op {
         CopyOp::Call { service, object, iface, method, signature, args } => {
-            Some(call(service, object, iface, method, signature, args, tool))
+            call(service, object, iface, method, signature, args, tool)
         }
         CopyOp::Get { service, object, iface, property } => {
             Some(get(service, object, iface, property, tool))
         }
         CopyOp::Set { service, object, iface, property, signature, value } => {
-            Some(set(service, object, iface, property, signature, value, tool))
+            set(service, object, iface, property, signature, value, tool)
         }
         CopyOp::Listen { rule } => listen(rule, tool),
     }
@@ -117,7 +117,7 @@ fn call(
     signature: &str,
     args: &[String],
     tool: Tool,
-) -> String {
+) -> Option<String> {
     match tool {
         // 1:1 — the args are already busctl tokens. Quote each and space-join.
         Tool::Busctl => {
@@ -135,7 +135,7 @@ fn call(
             for a in args {
                 parts.push(quote(a));
             }
-            parts.join(" ")
+            Some(parts.join(" "))
         }
         Tool::DbusSend => {
             let mut out = format!(
@@ -143,19 +143,14 @@ fn call(
             );
             let (rendered, notes) = render_args(signature, args, tool);
             for r in &rendered {
-                // Skip emitting a value slot for an unsupported arg — dbus-send
-                // would reject it; the note (below) explains why.
                 if r.unsupported.is_none() && !(r.quoted && r.text.is_empty()) {
                     out.push(' ');
                     out.push_str(&r.text);
                 }
             }
-            for sig in &notes {
-                out.push_str(&format!(
-                    "\n# dbus-send cannot express signature \"{sig}\"; use busctl"
-                ));
-            }
-            out
+            // If any arg is unsupported, dbus-send can't express this op → grey
+            // it out in the popup (None) rather than showing a broken command.
+            if notes.is_empty() { Some(out) } else { None }
         }
         Tool::Qdbus => {
             let mut out = format!("qdbus {service} {object} {iface}.{method}");
@@ -166,12 +161,7 @@ fn call(
                     out.push_str(&append_rendered(r));
                 }
             }
-            for sig in &notes {
-                out.push_str(&format!(
-                    "\n# qdbus cannot express signature \"{sig}\" positionally; use busctl"
-                ));
-            }
-            out
+            if notes.is_empty() { Some(out) } else { None }
         }
         Tool::Gdbus => {
             let mut out = format!(
@@ -183,7 +173,7 @@ fn call(
                 out.push(' ');
                 out.push_str(&r.text);
             }
-            out
+            Some(out)
         }
     }
 }
@@ -223,7 +213,7 @@ fn set(
     signature: &str,
     value: &[String],
     tool: Tool,
-) -> String {
+) -> Option<String> {
     match tool {
         // 1:1 — signature + value tokens map straight onto set-property.
         Tool::Busctl => {
@@ -239,66 +229,50 @@ fn set(
             for v in value {
                 parts.push(quote(v));
             }
-            parts.join(" ")
+            Some(parts.join(" "))
         }
         Tool::DbusSend => {
-            // dbus-send Properties.Set takes `(string interface, string
-            // property, variant value)`. dbus-send's variant inner type must be
-            // a basic `type` (string/uint32/…), so only basic-typed properties
-            // are expressible; arrays/dicts/structs → honest note.
+            // dbus-send Properties.Set variant inner type must be basic.
             let mut tok = Tok { toks: value, pos: 0 };
-            let mut out = format!(
-                "dbus-send --print-reply --dest={service} {object} \
-                 org.freedesktop.DBus.Properties.Set string:{iface} string:{property}"
-            );
             match dbus_send_basic_tag(signature) {
                 Some(tag) => {
                     let val = tok.next();
-                    out.push_str(&format!(" variant:{tag}:{val}"));
+                    Some(format!(
+                        "dbus-send --print-reply --dest={service} {object} \
+                         org.freedesktop.DBus.Properties.Set string:{iface} string:{property} variant:{tag}:{val}"
+                    ))
                 }
                 None => {
-                    // Drain the property value's tokens to keep the cursor sane,
-                    // then flag the signature (no malformed value emitted).
+                    // Non-basic property type — dbus-send can't express it.
                     drain_value(&mut tok, signature);
-                    out.push_str(&format!(
-                        "\n# dbus-send cannot express signature \"{signature}\"; use busctl"
-                    ));
+                    None
                 }
             }
-            out
         }
-        // qdbus Properties.Set: interface, property, then a `variant:...`
-        // value (qdbus wraps it in a QDBusVariant). qdbus's `variant:` takes a
-        // single positional value, so only basic-typed properties are
-        // expressible on the command line; complex types → honest note.
+        // qdbus Properties.Set: `variant:` takes a single basic value.
         Tool::Qdbus => {
             let mut tok = Tok { toks: value, pos: 0 };
-            let mut out = format!(
-                "qdbus {service} {object} org.freedesktop.DBus.Properties.Set \
-                 {iface} {property}"
-            );
             if dbus_send_basic_literal_kind(signature).is_some() {
                 let val = tok.next();
-                out.push_str(&format!(" variant:{val}"));
+                Some(format!(
+                    "qdbus {service} {object} org.freedesktop.DBus.Properties.Set \
+                     {iface} {property} variant:{val}"
+                ))
             } else {
                 drain_value(&mut tok, signature);
-                out.push_str(&format!(
-                    "\n# qdbus cannot express signature \"{signature}\" positionally; use busctl"
-                ));
+                None
             }
-            out
         }
-        // gdbus Properties.Set: interface, property, then a GVariant variant
-        // value (`<inner>`). gdbus can express every type → full conversion.
+        // gdbus Properties.Set: GVariant variant value. gdbus can express every type.
         Tool::Gdbus => {
             let mut tok = Tok { toks: value, pos: 0 };
             let inner = gdbus_value(signature, &mut tok).text;
             let gv = format!("<{inner}>");
-            format!(
+            Some(format!(
                 "gdbus call --session --dest {service} --object-path {object} \
                  --method org.freedesktop.DBus.Properties.Set \
                  \"{iface}\" \"{property}\" {gv}"
-            )
+            ))
         }
     }
 }
