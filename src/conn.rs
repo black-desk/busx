@@ -6,7 +6,7 @@ use crate::error::Result;
 use zbus::blocking::Connection;
 use zbus::blocking::connection::Builder;
 
-/// Resolve which bus to connect to (spec §9).
+/// Resolve which bus to connect to.
 ///
 /// - `--address=ADDR` → that bus only.
 /// - `--system` → system bus only.

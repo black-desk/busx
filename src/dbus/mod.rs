@@ -2,9 +2,9 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Shared async D-Bus core (spec §3). All concrete D-Bus operations live here as
+//! Shared async D-Bus core. All concrete D-Bus operations live here as
 //! `async fn`s returning typed data (no printing). Both the CLI (`ops/`) and the
-//! future TUI consume this module.
+//! the TUI consume this module.
 
 pub mod call;
 pub mod conn;

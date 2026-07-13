@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! `busx get` / `busx set` — thin wrappers over the async core (spec §8).
+//! `busx get` / `busx set` — thin wrappers over the async core.
 //!
 //! `get` overloads:
 //! - no property names ⇒ `GetAll` (empty interface = all interfaces);
@@ -71,7 +71,7 @@ pub fn get(
     }
 }
 
-/// Implementation of `busx set` (spec §8). `signature` is the busctl-style type
+/// Implementation of `busx set`. `signature` is the busctl-style type
 /// code of the single value; `value_tokens` are the positional value tokens,
 /// both routed through the shared encoder.
 #[allow(clippy::too_many_arguments)]

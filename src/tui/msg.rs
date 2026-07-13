@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Messages fed to `update` (spec §6).
+//! Messages fed to `update`.
 
 use crate::dbus::types::{ObjectNode, ServiceInfo};
 use crate::tui::state::{ActionResult, ListenTarget};
@@ -67,7 +67,7 @@ pub enum Effect {
     /// Start a streaming listen. The loop spawns a task that arms a cancel
     /// channel (`Msg::ListenStarted`) and forwards matching messages
     /// (`Msg::ListenMessage`); signal/property subscribe a `MessageStream`,
-    /// method listen is Task 3.
+    /// method listen uses BecomeMonitor (dedicated connection).
     Listen {
         service: String,
         object: String,

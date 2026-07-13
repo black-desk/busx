@@ -2,9 +2,9 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Render a busx operation as another D-Bus tool's command line (spec §10).
+//! Render a busx operation as another D-Bus tool's command line.
 //!
-//! Pure: no IO, no clipboard — the copy-as popup (Phase 5 Task 2) calls
+//! Pure: no IO, no clipboard — the copy-as popup calls
 //! [`generate`]. busx's method/property-set args are **busctl-style**
 //! (`crate::value::encode`): a separate signature string plus positional
 //! value tokens (basic → one token; variant → inner-sig+value; array →

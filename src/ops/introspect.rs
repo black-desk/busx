@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! `busx introspect` — thin wrapper over the async core. Renders `zbus_xml::Node`
-//! into the SAME JSON/human shapes as before (spec §6), so e2e output is unchanged.
+//! into the SAME JSON/human shapes as before, so e2e output is unchanged.
 
 use crate::dbus;
 use crate::error::Result;

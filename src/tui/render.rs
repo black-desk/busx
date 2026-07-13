@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Pure rendering (spec §6, §8). Reads `&State`; draws breadcrumb + top screen
+//! Pure rendering. Reads `&State`; draws breadcrumb + top screen
 //! + key-hint. Nothing else.
 
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
@@ -426,8 +426,8 @@ fn render_detail(
 
 /// The outcome of a one-shot action. Loading → "…" (the title carries the
 /// context); error → the message; `Call(lines)` → one reply value per line
-/// (offset by `scroll` — clamped in Task 4). `Get`/`Set` render their payload
-/// too (Task 3 owns their detail forms).
+/// (offset by `scroll` — clamped). `Get`/`Set` render their payload
+/// too.
 fn render_result(frame: &mut Frame, area: Rect, r: &ResultScreen) {
     // Result screens are read-only (scroll-only) — no click targets.
     let title = if r.loading {

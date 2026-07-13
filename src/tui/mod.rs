@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Interactive TUI (spec §5–§8). Built on the async `dbus::` core.
+//! Interactive TUI. Built on the async `dbus::` core.
 
 pub mod app;
 pub mod copy;

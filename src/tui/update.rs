@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Pure state machine (spec §6, §7). Returns an `Option<Effect>` so it stays
+//! Pure state machine. Returns an `Option<Effect>` so it stays
 //! IO-free: pushing/loading a screen requests a fetch the loop performs.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -649,7 +649,7 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
 /// last content line. `update` has no frame area, so visible-row-precise
 /// clamping can't be done here — render applies the offset (and single-line
 /// results simply don't scroll). Real precise scrolling matters most for
-/// streaming monitor results (Phase 4).
+/// streaming monitor results.
 fn update_result_key(r: &mut ResultScreen, code: KeyCode) {
     // Streaming-listen mode counts received message blocks; one-shot mode counts
     // reply lines (1 for Get/Set/empty). Clamp coarsely: render applies the offset.
@@ -709,7 +709,7 @@ fn update_interfaces_key(i: &mut InterfacesScreen, code: KeyCode) {
     }
 }
 
-/// Interface focus scheme (spec §2):
+/// Interface focus scheme:
 /// - `Tab` / `Shift+Tab` cycle the three columns (Methods→Properties→Signals→
 ///   Methods, reverse for Shift+Tab). The button bar is NOT in this ring; Tab
 ///   always leaves the button bar first (`in_buttons = false`) then cycles.
@@ -1096,7 +1096,7 @@ fn push_detail(
 ///   `object`; the named property is filtered client-side in `app.rs`.
 /// - Method → a `type='method_call'` rule on `(iface, member, object)`; the TUI
 ///   listens via BecomeMonitor on a dedicated connection, which delivers only
-///   matching calls (Task 3).
+///   matching calls.
 pub(crate) fn listen_rule(
     iface: &str,
     object: &str,

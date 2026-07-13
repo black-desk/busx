@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! `busx list` — print the names on the bus (spec §7). Thin wrapper: runs the
+//! `busx list` — print the names on the bus. Thin wrapper: runs the
 //! async core under `block_on`, then renders (human table ≤80 cols / JSON array).
 
 use crate::dbus;

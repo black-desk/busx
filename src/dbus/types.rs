@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Owned data types returned by the async core (spec §4). Introspection reuses
+//! Owned data types returned by the async core. Introspection reuses
 //! `zbus_xml` types directly; only these non-introspection results are ours.
 
 /// One bus name with best-effort PID + process enrichment.

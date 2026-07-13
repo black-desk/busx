@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Event loop (spec §5). `run_loop` is backend- and event-source-agnostic so it
+//! Event loop. `run_loop` is backend- and event-source-agnostic so it
 //! is exercised end-to-end with TestBackend + a scripted event iterator; the
 //! real crossterm + flume wiring lives in `run`.
 
@@ -232,7 +232,7 @@ fn run_effect(
                 let _ = tx.send(Msg::ListenStarted(cancel_tx));
                 let mut cancel_rx = cancel_rx.fuse();
 
-                // Method listen (Task 3): BecomeMonitor makes a connection
+                // Method listen: BecomeMonitor makes a connection
                 // recv-only, so build a dedicated one and let the bus filter the
                 // method's calls. `ListenStarted` is already sent above so the
                 // cancel is wired for this branch too.

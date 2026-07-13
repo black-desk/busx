@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! `list_names` — names on the bus + best-effort PID/process (spec §7).
+//! `list_names` — names on the bus + best-effort PID/process.
 
 use crate::dbus::types::ServiceInfo;
 use crate::error::Result;

@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Pure display state (spec §6, §7). A navigation stack of `Screen`s; `render`
+//! Pure display state. A navigation stack of `Screen`s; `render`
 //! draws the top screen + a breadcrumb. `update`/`render` read only this.
 
 use crate::dbus::types::{ObjectNode, ServiceInfo};
@@ -97,7 +97,7 @@ pub struct InterfacesScreen {
     pub object: String,
     pub names: Vec<String>,
     /// Cached introspection of this object — the source of `names` now and of the
-    /// interface members (methods/properties/signals) when drilling in (Task 4).
+    /// interface members (methods/properties/signals) when drilling in.
     pub node: Option<zbus_xml::Node<'static>>,
     pub selected: usize,
     pub loading: bool,
@@ -173,7 +173,7 @@ pub enum ActionKind {
 }
 
 /// What a listen targets — a signal member, a property's `PropertiesChanged`
-/// notifications, or (Task 3) a method-call stream via BecomeMonitor.
+/// notifications, or a method-call stream via BecomeMonitor.
 #[derive(Clone, Debug)]
 pub enum ListenTarget {
     Signal { member: String },

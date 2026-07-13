@@ -32,7 +32,7 @@ impl From<Infallible> for Error {
 }
 
 impl Error {
-    /// All failures exit 1 (spec §9).
+    /// All failures exit 1.
     pub fn exit_code(&self) -> ExitCode {
         ExitCode::FAILURE
     }

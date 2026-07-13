@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Dict rendering with the spec §7.2 safety rule.
+//! Dict rendering with the  safety rule.
 //!
 //! - **string-key dict** (`a{sv}`, `a{ss}`, `a{os}`, ...) → JSON object:
 //!   `{"type":"a{kv}","data":{key: <tagged value>, ...}}`

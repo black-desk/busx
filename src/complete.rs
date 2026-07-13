@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Shell completion via `clap_complete::dynamic` (spec §12).
+//! Shell completion via `clap_complete::dynamic`.
 //!
 //! Two layers:
 //! - **Structural completion** (subcommand names, flag names, global-flag

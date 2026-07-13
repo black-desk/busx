@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Async bus connection with the session→system fallback (spec §9), mirroring
+//! Async bus connection with the session→system fallback, mirroring
 //! the blocking `crate::conn::connect`. `--address` > `--system` > session with
 //! silent fallback to system (warn on `--verbose`).
 

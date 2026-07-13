@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Human-friendly rendering of a [`zvariant::Value`] (spec §7.3).
+//! Human-friendly rendering of a [`zvariant::Value`].
 //!
 //! This is the value pretty-printer used by every command's *default* output
 //! (human text). It mirrors the variant walk in [`crate::value::decode`] so the

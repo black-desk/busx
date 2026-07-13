@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! `call_method` — encode busctl-style args, invoke via a generic proxy, return
-//! the reply values as owned (spec §7). Encoding is shared (`value::encode`).
+//! the reply values as owned. Encoding is shared (`value::encode`).
 
 use crate::error::Result;
 use zvariant::{OwnedValue, Structure, StructureBuilder};

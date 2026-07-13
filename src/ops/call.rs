@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! `busx call` — thin wrapper: run the async core, render return values (human
-//! `<sig>  <pretty>` per line / type-tagged JSON array). spec §7.
+//! `<sig>  <pretty>` per line / type-tagged JSON array).
 
 use crate::dbus;
 use crate::error::Result;

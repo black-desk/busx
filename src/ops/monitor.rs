@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! `busx monitor` — stream bus messages as NDJSON, with match-rule filtering
-//! (spec §10).
+//!.
 //!
 //! Each message is rendered as one JSON object per line:
 //!
@@ -61,9 +61,9 @@ fn epoch_secs() -> f64 {
     dur.as_secs() as f64 + dur.subsec_nanos() as f64 / 1_000_000_000.0
 }
 
-/// Render a single received message as the spec §10 JSON object.
+/// Render a single received message as the  JSON object.
 ///
-/// The body is decoded as a `Structure` (Task 5's trick: this accepts any body
+/// The body is decoded as a `Structure` (a trick: this accepts any body
 /// signature and yields the positional values as fields) and each field is
 /// rendered type-tagged via [`crate::value::decode::to_tagged`]. A body that
 /// fails to deserialize (e.g. an empty method return) degrades to `args: []`.

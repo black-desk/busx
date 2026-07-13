@@ -2,8 +2,8 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Property read/write via `org.freedesktop.DBus.Properties` (spec §8). Returns
-//! owned values so callers (CLI render, future TUI state) can store them.
+//! Property read/write via `org.freedesktop.DBus.Properties`. Returns
+//! owned values so callers (CLI render, the TUI state) can store them.
 
 use crate::error::{Error, Result};
 use zbus::fdo::PropertiesProxy;
@@ -62,7 +62,7 @@ pub async fn set(
 
 /// Resolve an interface name. The empty string is a special "all interfaces"
 /// sentinel for `GetAll` (not a valid `InterfaceName`), injected unchecked to
-/// match dbus-send/busctl semantics (spec §8).
+/// match dbus-send/busctl semantics.
 fn resolve_iface(iface: &str) -> Result<InterfaceName<'_>> {
     if iface.is_empty() {
         Ok(InterfaceName::from_str_unchecked(""))

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! `busx` value encoder — busctl-style signature + positional tokens →
-//! [`zvariant::Value`] (spec §7.1).
+//! [`zvariant::Value`].
 //!
 //! The **signature string** is passed separately; the value tokens are laid out
 //! positionally per busctl rules:

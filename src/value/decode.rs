@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Render a [`zvariant::Value`] as type-tagged JSON (spec §7.2).
+//! Render a [`zvariant::Value`] as type-tagged JSON.
 //!
 //! Every value is encoded as `{"type": <signature>, "data": <native JSON>}`.
 //! Non-string-key dicts are kept safe — see [`crate::value::dict`].

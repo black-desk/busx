@@ -65,6 +65,7 @@ once:
 - `get` / `set` — read (no property names = `GetAll`) / write properties.
 - `monitor` — monitor bus messages, filter by match rule (`--json` emits NDJSON with `PropertiesChanged` decoded).
 - `completion` — generate a dynamic shell-completion script (live-completes services/paths/interfaces/methods/signature/properties).
+- **TUI mode** — bare `busx` (no subcommand) opens a full-screen interactive browser: drill down service → objects → interfaces → interface (methods / properties / signals). Call methods, get/set properties, listen to signals (Esc stops), and copy any operation as a `dbus-send` / `busctl` / `qdbus` / `gdbus` command. Mouse supported.
 
 ## Install
 
@@ -84,6 +85,9 @@ cargo install-update -g busx       # or `cargo install-update -ag` for everythin
 ## Usage
 
 ```bash
+# Interactive TUI (bare busx with no subcommand): browse, call, listen, copy-as
+busx
+
 # List services (defaults to the session bus, falling back to the system bus)
 busx list
 
@@ -117,19 +121,12 @@ field transformation. All diagnostics (errors, warnings) go to stderr with the
 `busx:` prefix; exit code is `0` on success, `1` on failure. Piping into
 `less`/`head` does not panic (SIGPIPE is handled the Unix way).
 
-See the [design doc] for details.
-
-[design doc]: docs/superpowers/specs/2026-07-07-busx-design.md
-
 ## Roadmap
 
-1. **TUI**: built on this crate's modules (a second `[[bin]]`, or extract a lib
-   then), providing interactive browsing / call / monitor; with
-   `copy as dbus-send / busctl / gdbus`.
-2. `emit` (emit signals), pcapng `capture`.
-3. `--host` / `--machine` remote and container buses.
-4. A bytestring string view for `ay` and other value-rendering enhancements.
-5. Re-evaluate an embedded `busx jq` subcommand if `jaq` ever publishes a
+1. `emit` (emit signals), pcapng `capture`.
+2. `--host` / `--machine` remote and container buses.
+3. A bytestring string view for `ay` and other value-rendering enhancements.
+4. Re-evaluate an embedded `busx jq` subcommand if `jaq` ever publishes a
    reusable flag-parsing library entry.
 
 ## License

@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! `object_tree` — recursively introspect a service's object paths (spec §6).
+//! `object_tree` — recursively introspect a service's object paths.
 
 use crate::dbus::types::ObjectNode;
 use crate::error::{Error, Result};

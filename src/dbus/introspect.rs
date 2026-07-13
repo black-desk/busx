@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! `introspect` — call `Introspect` and parse the XML with `zbus_xml` (spec §6).
+//! `introspect` — call `Introspect` and parse the XML with `zbus_xml`.
 //! `Node::from_reader` yields an owned (`'static`) tree.
 
 use crate::error::{Error, Result};
