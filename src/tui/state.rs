@@ -21,6 +21,9 @@ pub struct State {
     /// Interactive widget rects from the last render, for mouse hit-testing.
     /// Populated by the loop after `render` (render writes them to an out-param).
     pub click_targets: Vec<(Rect, ClickTarget)>,
+    /// The `?` help overlay (open/closed). Renders on top of the current screen;
+    /// captures keys while open (Esc/`?` close it; other keys are swallowed).
+    pub help_open: bool,
 }
 
 /// A clickable region recorded by `render`, mapping a screen rect to what a
@@ -217,6 +220,7 @@ impl State {
             quit: false,
             popup: None,
             click_targets: Vec::new(),
+            help_open: false,
         }
     }
 
@@ -227,6 +231,7 @@ impl State {
             quit: false,
             popup: None,
             click_targets: Vec::new(),
+            help_open: false,
         }
     }
 

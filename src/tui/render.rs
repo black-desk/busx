@@ -41,6 +41,12 @@ pub fn render(frame: &mut Frame, state: &State, targets: &mut Vec<(Rect, ClickTa
     if let Some(popup) = &state.popup {
         render_popup(frame, area, popup, targets);
     }
+    // The help overlay sits on top of everything (above the popup too, though the
+    // two can't be open at once — help can't open while the popup is up). Not
+    // clickable, so it records no click targets.
+    if state.help_open {
+        render_help(frame, area);
+    }
 }
 
 fn render_breadcrumb(frame: &mut Frame, area: Rect, state: &State) {
@@ -475,17 +481,17 @@ fn render_sub_list(
 fn render_keyhint(frame: &mut Frame, area: Rect, screen: &Screen) {
     let hint = match screen {
         Screen::Service(_) => "↑↓ select · Enter open · q quit · ? help",
-        Screen::Objects(_) => "↑↓ select · Enter open · Esc back · q quit",
-        Screen::Interfaces(_) => "↑↓ select · Enter open · Esc back · q quit",
-        Screen::Interface(_) => "Tab column · ↑↓ select · Enter open · r refresh · Esc back · q quit",
-        Screen::Detail(_) => "Tab move · Enter trigger · c copy-as · Esc back · q quit",
+        Screen::Objects(_) => "↑↓ select · Enter open · Esc back · q quit · ? help",
+        Screen::Interfaces(_) => "↑↓ select · Enter open · Esc back · q quit · ? help",
+        Screen::Interface(_) => "Tab column · ↑↓ select · Enter open · r refresh · Esc back · q quit · ? help",
+        Screen::Detail(_) => "Tab move · Enter trigger · c copy-as · Esc back · q quit · ? help",
         // A streaming-listen Result is armed when it has streamed messages or a
         // live cancel sender; on those, Esc both pops the screen and stops the
         // listen (the cancel sender drops). One-shot Results keep "Esc back".
         Screen::Result(r) if !r.messages.is_empty() || r.cancel.is_some() => {
-            "↑↓ scroll · c copy-as · y copy · Esc back/stop · q quit"
+            "↑↓ scroll · c copy-as · y copy · Esc back/stop · q quit · ? help"
         }
-        Screen::Result(_) => "↑↓ scroll · c copy-as · y copy · Esc back · q quit",
+        Screen::Result(_) => "↑↓ scroll · c copy-as · y copy · Esc back · q quit · ? help",
     };
     frame.render_widget(Paragraph::new(hint), area);
 }
@@ -588,6 +594,43 @@ fn render_popup(
 /// preview area below shows the full multi-line text.
 fn first_line(s: &str) -> &str {
     s.split('\n').next().unwrap_or(s)
+}
+
+/// The global keybindings reference shown by the `?` help overlay. Mirrors the
+/// keys handled in `update::update_key` (and per-screen `update_*_key`); keep it
+/// in sync when a key changes.
+const HELP_TEXT: &str = "\
+busx — keybindings
+
+global:
+  ↑↓ / jk     move selection (or scroll on the Result screen)
+  Enter       open / activate / drill in / fire the focused button
+  Esc         back (or stop a listen); at the root Service screen, quit
+  q           quit
+  Tab         (Interface) cycle the methods/properties/signals columns
+  r           (Interface) refresh the property-value snapshot
+  c           copy-as — generate dbus-send/busctl/qdbus/gdbus for the current op
+  y           (Result) copy the result text
+  ?           toggle this help
+  mouse       click to select / click a button to activate / wheel to scroll
+
+navigation: Service → Objects → Interfaces → Interface → Detail → Result
+  (single-item levels auto-skip; Esc unwinds the stack)
+";
+
+/// Render the `?` help overlay: a centered, bordered block (titled with its own
+/// close hint) wrapping the `HELP_TEXT`. `Clear` wipes the underlying screen so
+/// the text reads cleanly on top. Not clickable — records no click targets.
+fn render_help(frame: &mut Frame, area: Rect) {
+    let popup_area = centered_rect(70, 70, area);
+    frame.render_widget(Clear, popup_area);
+    let block = Block::default().borders(Borders::ALL).title("help — Esc or ? to close");
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+    frame.render_widget(
+        Paragraph::new(HELP_TEXT).wrap(ratatui::widgets::Wrap { trim: false }),
+        inner,
+    );
 }
 
 /// The standard ratatui centered-rect helper: a rect of `pct_x`% × `pct_y`% of
