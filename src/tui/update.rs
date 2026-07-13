@@ -19,6 +19,34 @@ use crate::tui::state::{
 };
 use tui_input::backend::crossterm::EventHandler;
 
+/// Split a field value into busctl-style tokens, shell-style: split on
+/// whitespace, respect single/double quotes. So an `as` field with `1 a`
+/// becomes `["1", "a"]` (count=1 + one element), matching `busx call … as 1 a`.
+/// A basic `s` field with `hello world` (no quotes) splits into two tokens
+/// (the user quotes it: `"hello world"`) — same shell semantics as the CLI.
+fn shell_split(s: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_quote: Option<char> = None;
+    for ch in s.chars() {
+        match (in_quote, ch) {
+            (Some(q), ch) if ch == q => in_quote = None,
+            (Some(_), ch) => current.push(ch),
+            (None, '"' | '\'') => in_quote = Some(ch),
+            (None, c) if c.is_whitespace() => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            (None, ch) => current.push(ch),
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
 pub fn update(state: &mut State, msg: Msg) -> Option<Effect> {
     match msg {
         Msg::Key(k) => update_key(state, k),
@@ -362,7 +390,7 @@ fn copy_op_from_detail(d: &DetailScreen) -> CopyOp {
             iface: d.interface.clone(),
             method: method.clone(),
             signature: signature.clone(),
-            args: d.inputs.iter().map(|i| i.value().to_string()).collect(),
+            args: d.inputs.iter().flat_map(|i| shell_split(i.value())).collect(),
         },
         ActionKind::Get { property } => CopyOp::Get {
             service: d.service.clone(),
@@ -546,7 +574,7 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
             let (title, effect) = match &d.kind {
                 ActionKind::Call { method, signature } => {
                     let args: Vec<String> =
-                        d.inputs.iter().map(|i| i.value().to_string()).collect();
+                        d.inputs.iter().flat_map(|i| shell_split(i.value())).collect();
                     (
                         format!("{}.{}", d.interface, method),
                         Effect::CallMethod {
