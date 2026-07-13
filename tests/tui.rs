@@ -2549,6 +2549,33 @@ fn mouse_click_on_popup_tool_selects_it() {
 }
 
 #[test]
+fn mouse_click_on_already_selected_service_row_drills_in() {
+    // Clicking the already-selected row == Enter (drill in), so a mouse user can
+    // click to select, then click again to open.
+    let mut state = State::service(vec![svc("org.busx.A", None, None), svc("org.busx.B", None, None)]);
+    // selected starts at 0; clicking ServiceRow(0) drills into Objects.
+    click(&mut state, &ClickTarget::ServiceRow(0), 60, 8);
+    assert!(
+        matches!(state.top(), Screen::Objects(_)),
+        "clicking the already-selected row drills in (== Enter)"
+    );
+}
+
+#[test]
+fn mouse_click_on_already_selected_popup_tool_copies() {
+    // Clicking the already-selected popup tool == Enter on the popup → copy.
+    let mut state = call_detail_with_input();
+    update(&mut state, key(KeyCode::Char('c'))); // open popup; selected == 0
+    click(&mut state, &ClickTarget::PopupTool(0), 56, 14); // already-selected tool
+    let popup = state.popup.as_ref().expect("popup still open");
+    assert_eq!(
+        popup.status.as_deref(),
+        Some("copying…"),
+        "clicking the already-selected tool triggers the copy"
+    );
+}
+
+#[test]
 fn mouse_scroll_on_result_changes_scroll() {
     // A Result with several streaming messages (the scrollable content). ScrollDown
     // increases `scroll`; ScrollUp decreases it (clamped at 0).

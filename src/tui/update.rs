@@ -197,51 +197,62 @@ fn hit_test(state: &State, col: u16, row: u16) -> Option<ClickTarget> {
 /// tool is selected for preview (the copy itself happens via Enter).
 fn apply_click(state: &mut State, t: ClickTarget) -> Option<Effect> {
     match t {
+        // List rows: first click selects; clicking the already-selected row acts
+        // as Enter (drill in / activate) — so a mouse user can click to select,
+        // then click again to open.
         ClickTarget::ServiceRow(i) => {
+            let already = matches!(state.top(), Screen::Service(s) if s.selected == i);
             if let Screen::Service(s) = state.top_mut() {
                 s.selected = i;
             }
-            None
+            if already { handle_enter(state) } else { None }
         }
         ClickTarget::ObjectsRow(i) => {
+            let already = matches!(state.top(), Screen::Objects(o) if o.selected == i);
             if let Screen::Objects(o) = state.top_mut() {
                 o.selected = i;
             }
-            None
+            if already { handle_enter(state) } else { None }
         }
         ClickTarget::InterfacesRow(i) => {
+            let already = matches!(state.top(), Screen::Interfaces(it) if it.selected == i);
             if let Screen::Interfaces(it) = state.top_mut() {
                 it.selected = i;
             }
-            None
+            if already { handle_enter(state) } else { None }
         }
         ClickTarget::MethodRow(i) => {
+            let already = matches!(state.top(), Screen::Interface(it)
+                if it.focus == InterfaceFocus::Methods && it.selected[0] == i && !it.in_buttons);
             if let Screen::Interface(it) = state.top_mut() {
                 it.focus = InterfaceFocus::Methods;
                 it.in_buttons = false;
                 it.selected[0] = i;
             }
-            None
+            if already { handle_enter(state) } else { None }
         }
         ClickTarget::PropertyRow(i) => {
+            let already = matches!(state.top(), Screen::Interface(it)
+                if it.focus == InterfaceFocus::Properties && it.selected[1] == i && !it.in_buttons);
             if let Screen::Interface(it) = state.top_mut() {
                 it.focus = InterfaceFocus::Properties;
                 it.in_buttons = false;
                 it.selected[1] = i;
             }
-            None
+            if already { handle_enter(state) } else { None }
         }
         ClickTarget::SignalRow(i) => {
+            let already = matches!(state.top(), Screen::Interface(it)
+                if it.focus == InterfaceFocus::Signals && it.selected[2] == i && !it.in_buttons);
             if let Screen::Interface(it) = state.top_mut() {
                 it.focus = InterfaceFocus::Signals;
                 it.in_buttons = false;
                 it.selected[2] = i;
             }
-            None
+            if already { handle_enter(state) } else { None }
         }
+        // Buttons / trigger fire on the first click (== Enter).
         ClickTarget::ActionButton(i) => {
-            // Select the button + fire it (== Enter when in_buttons). Reuses the
-            // Interface "fire button" path in `handle_enter`.
             if let Screen::Interface(it) = state.top_mut() {
                 it.in_buttons = true;
                 it.button_selected = i;
@@ -256,18 +267,38 @@ fn apply_click(state: &mut State, t: ClickTarget) -> Option<Effect> {
             None
         }
         ClickTarget::DetailTrigger => {
-            // Focus the trigger + fire it (== Enter on the trigger).
             if let Screen::Detail(d) = state.top_mut() {
                 d.focus = DetailFocus::Trigger;
             }
             handle_enter(state)
         }
+        // Popup tools: first click selects (previews); clicking the already-
+        // selected tool copies it (== Enter on the popup).
         ClickTarget::PopupTool(i) => {
+            let already = matches!(&state.popup, Some(p) if p.selected == i && p.status.is_none());
             if let Some(p) = state.popup.as_mut() {
                 p.selected = i;
             }
-            None
+            if already { state.popup.as_mut().and_then(copy_selected_tool) } else { None }
         }
+    }
+}
+
+/// Trigger the copy-as for the popup's selected tool: set the "copying…" status
+/// and return `CopyToClipboard`. No-op if a copy already happened (status set)
+/// or the selected tool can't express the op. Shared by the popup's `Enter` and
+/// the mouse "click the already-selected tool" path.
+fn copy_selected_tool(popup: &mut crate::tui::state::CopyAsPopup) -> Option<Effect> {
+    if popup.status.is_some() {
+        return None;
+    }
+    let cmd = popup.commands.get(popup.selected).and_then(|(_, c)| c.clone());
+    match cmd {
+        Some(cmd) => {
+            popup.status = Some("copying…".to_string());
+            Some(Effect::CopyToClipboard(cmd))
+        }
+        None => None,
     }
 }
 
@@ -395,20 +426,7 @@ fn update_popup_key(state: &mut State, code: KeyCode) -> Option<Effect> {
             state.popup = None;
             None
         }
-        KeyCode::Enter => {
-            // First Enter: trigger the copy. Set the transient "copying…" status
-            // and emit the effect; the popup STAYS OPEN so the eventual
-            // `Msg::ClipboardResult` can update the status. A no-op (popup stays
-            // open, no status) if the selected tool can't express the op.
-            let cmd = popup.commands.get(popup.selected).and_then(|(_, c)| c.clone());
-            match cmd {
-                Some(cmd) => {
-                    popup.status = Some("copying…".to_string());
-                    Some(Effect::CopyToClipboard(cmd))
-                }
-                None => None,
-            }
-        }
+        KeyCode::Enter => copy_selected_tool(popup),
         _ => None,
     }
 }
