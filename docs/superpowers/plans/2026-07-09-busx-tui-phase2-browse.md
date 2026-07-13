@@ -584,7 +584,7 @@ And in `update_service_key`, handle `Enter`:
 
 - [ ] **Step 6: Loop spawns the Objects fetch on push**
 
-In `src/tui/app.rs`, the loop must spawn the right fetch when a loading screen is on top. Add a `spawn_for(top, conn, tx)` helper called after each `update` in `run_loop` (only when the top screen is in a `loading` state it hasn't spawned for yet). To avoid re-spawning every frame, track a `spawned: bool` per screen OR spawn only when `loading && !spawned`. Simplest: give each loading screen a `loading: bool` that the loop flips to a sentinel — but `update` sets `loading=false` on result. 
+In `src/tui/app.rs`, the loop must spawn the right fetch when a loading screen is on top. Add a `spawn_for(top, conn, tx)` helper called after each `update` in `run_loop` (only when the top screen is in a `loading` state it hasn't spawned for yet). To avoid re-spawning every frame, track a `spawned: bool` per screen OR spawn only when `loading && !spawned`. Simplest: give each loading screen a `loading: bool` that the loop flips to a sentinel — but `update` sets `loading=false` on result.
 
 Cleanest: the loop spawns when it observes a transition to a loading screen. Add to `App` a `last_top_kind` (an enum of screen kinds) and spawn when the top kind changes to a loading screen. Concretely, after `update`, call `maybe_spawn(&mut self)`:
 
@@ -830,7 +830,7 @@ fn render_sub_list(frame: &mut Frame, area: Rect, title: &str, items: Vec<ListIt
 In `update.rs`:
 - `Msg::PropertiesLoaded(res)`: if top is Interface, set `prop_values` (name → pretty via `value::pretty::pretty`), `loading=false` (or error).
 - Interface keys: `Tab` cycles `focus` (Methods→Properties→Signals→Methods); `↑↓` move `selected[focus_index]` within that column's list (clamped); `r` returns `Effect::FetchProperties(svc, obj, iface)` (re-fetch). `Enter` is a no-op in Phase 2 (Phase 3 wires method/property actions).
-- Building the InterfaceScreen on push: from the Interfaces list, `Enter` pushes `InterfaceScreen { service, object, interface, methods/properties/signals: parsed from the introspect Node (cached on the InterfacesScreen or re-fetched), loading, ... }` + `Effect::FetchProperties`. 
+- Building the InterfaceScreen on push: from the Interfaces list, `Enter` pushes `InterfaceScreen { service, object, interface, methods/properties/signals: parsed from the introspect Node (cached on the InterfacesScreen or re-fetched), loading, ... }` + `Effect::FetchProperties`.
 
   Where do methods/properties/signals come from? The introspect `Node` was fetched for the Interfaces screen. Cache the parsed members on `InterfacesScreen` (add `members: Vec<(String, String /*method*/, ...)>` — or simpler, re-introspect on Interface push). Simplest: on Interfaces `Enter`, push InterfaceScreen with members parsed from the `Node` we already have (store the `Node` on `InterfacesScreen`). Add `node: Option<zbus_xml::Node<'static>>` to `InterfacesScreen` and populate it in `InterfacesLoaded`; on `Enter`, parse methods/properties/signals from it into the InterfaceScreen. This avoids a second introspect round-trip.
 
