@@ -2636,3 +2636,35 @@ fn mouse_click_on_unrendered_rect_is_noop() {
     assert_eq!(selected_of(&state), 0, "selection unchanged");
 }
 
+
+#[test]
+fn call_as_arg_shell_splits_field_value() {
+    // An `as` field with "1 a" → shell-split into ["1", "a"] (count=1, elem=a),
+    // matching how `busx call … as 1 a` works.
+    use busx::tui::state::{ActionKind, DetailFocus};
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Detail(busx::tui::state::DetailScreen {
+            service: "s".into(),
+            object: "/o".into(),
+            interface: "i".into(),
+            kind: ActionKind::Call { method: "M".into(), signature: "as".into() },
+            inputs: vec![tui_input::Input::new("1 a".into())],
+            field_labels: vec!["as".into()],
+            field_selected: 0,
+            focus: DetailFocus::Trigger,
+            loading: false,
+            error: None,
+        })],
+        quit: false,
+        popup: None,
+        click_targets: Vec::new(),
+        help_open: false,
+    };
+    let effect = update(&mut state, key(KeyCode::Enter));
+    match effect {
+        Some(Effect::CallMethod { args, .. }) => {
+            assert_eq!(args, vec!["1".to_string(), "a".to_string()]);
+        }
+        _ => panic!("Enter should fire CallMethod with shell-split args"),
+    }
+}
