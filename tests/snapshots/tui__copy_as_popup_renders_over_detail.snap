@@ -4,7 +4,7 @@ expression: "render_to_string(&state, 56, 14)"
 ---
 "s:/o:i › call Add                                       "
 "┌call Add──────────────────────────────────────────────┐"
-"│n  u  42                                              │"
+"│▶ n  u  42▏                                           │"
 "│     ┌copy as — ↑↓ choose · Enter copy · Esc────┐     │"
 "│     │dbus-send: dbus-send --print-reply --dest=│     │"
 "│     │busctl: busctl call s /o i Add u 42       │     │"

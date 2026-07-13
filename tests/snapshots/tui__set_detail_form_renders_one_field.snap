@@ -1,11 +1,10 @@
 ---
 source: tests/tui.rs
-assertion_line: 1104
 expression: "render_to_string(&state, 40, 8)"
 ---
 "s:/o:i › set p1                         "
 "┌set p1────────────────────────────────┐"
-"│s  hi                                 │"
+"│▶ s  hi▏                              │"
 "│                                      │"
 "│                                      │"
 "│                [触发]                │" Hidden by multi-width symbols: [(19, " "), (21, " ")]
