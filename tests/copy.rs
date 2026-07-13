@@ -133,10 +133,10 @@ fn call_zero_args_busctl_omits_signature() {
     );
 }
 
-// --- method call: complex (array) arg → best-effort + note ---
+// --- method call: complex (array) arg → full conversion per tool ---
 
 #[test]
-fn call_array_arg_dbus_send_notes_cannot_nest() {
+fn call_array_arg_each_tool() {
     // busctl lays out `as` as `count elem…` → ["2", "a", "b"].
     let op = CopyOp::Call {
         service: "org.busx.Test".into(),
@@ -146,23 +146,289 @@ fn call_array_arg_dbus_send_notes_cannot_nest() {
         signature: "as".into(),
         args: vec!["2".into(), "a".into(), "b".into()],
     };
-    // dbus-send can't express arrays like busx → best-effort + note.
+    // busctl: 1:1.
+    assert_eq!(
+        cmd(&op, Tool::Busctl),
+        "busctl call org.busx.Test /o org.busx.Test Take as 2 a b"
+    );
+    // dbus-send: array:string:a,b (man dbus-send BNF `array:<type>:<v>,<v>`).
     assert_eq!(
         cmd(&op, Tool::DbusSend),
-        "dbus-send --print-reply --dest=org.busx.Test /o org.busx.Test.Take variant:2\n\
-         # dbus-send cannot fully express signature \"as\""
+        "dbus-send --print-reply --dest=org.busx.Test /o org.busx.Test.Take array:string:a,b"
     );
-    // qdbus drops the busctl count prefix and joins the elements.
+    // qdbus: drop the count, pass each element positionally.
     assert_eq!(
         cmd(&op, Tool::Qdbus),
         "qdbus org.busx.Test /o org.busx.Test.Take a b"
     );
-    // gdbus flags the complex type as best-effort.
-    let g = cmd(&op, Tool::Gdbus);
-    assert!(g.starts_with(
-        "gdbus call --session --dest org.busx.Test --object-path /o --method org.busx.Test.Take"
-    ));
-    assert!(g.contains("# gdbus: complex-type args are best-effort GVariant text"));
+    // gdbus: GVariant array literal ["a","b"] (GVariant text strings are
+    // double-quoted per the GVariant text format spec).
+    assert_eq!(
+        cmd(&op, Tool::Gdbus),
+        "gdbus call --session --dest org.busx.Test --object-path /o \
+         --method org.busx.Test.Take [\"a\",\"b\"]"
+    );
+}
+
+// --- method call: dict arg (a{ss}) → per-tool dict forms ---
+
+#[test]
+fn call_dict_arg_each_tool() {
+    // busctl lays out `a{ss}` as `count key val …` → ["1", "k", "v"].
+    let op = CopyOp::Call {
+        service: "org.busx.Test".into(),
+        object: "/o".into(),
+        iface: "org.busx.Test".into(),
+        method: "Map".into(),
+        signature: "a{ss}".into(),
+        args: vec!["1".into(), "k".into(), "v".into()],
+    };
+    // busctl: 1:1.
+    assert_eq!(
+        cmd(&op, Tool::Busctl),
+        "busctl call org.busx.Test /o org.busx.Test Map a{ss} 1 k v"
+    );
+    // dbus-send: dict:string:string:k,v (man dbus-send BNF
+    // `dict:<keytype>:<valtype>:<key>,<value>`).
+    assert_eq!(
+        cmd(&op, Tool::DbusSend),
+        "dbus-send --print-reply --dest=org.busx.Test /o org.busx.Test.Map \
+         dict:string:string:k,v"
+    );
+    // qdbus: no positional dict syntax → honest note, value slot omitted.
+    assert_eq!(
+        cmd(&op, Tool::Qdbus),
+        "qdbus org.busx.Test /o org.busx.Test.Map\n\
+         # qdbus cannot express signature \"a{ss}\" positionally; use busctl"
+    );
+    // gdbus: GVariant dict literal {"k":"v"}.
+    assert_eq!(
+        cmd(&op, Tool::Gdbus),
+        "gdbus call --session --dest org.busx.Test --object-path /o \
+         --method org.busx.Test.Map {\"k\":\"v\"}"
+    );
+}
+
+// --- method call: variant arg (v) → per-tool variant forms ---
+
+#[test]
+fn call_variant_arg_each_tool() {
+    // busctl lays out `v` as `inner-signature value` → ["s", "hi"].
+    let op = CopyOp::Call {
+        service: "org.busx.Test".into(),
+        object: "/o".into(),
+        iface: "org.busx.Test".into(),
+        method: "Echo".into(),
+        signature: "v".into(),
+        args: vec!["s".into(), "hi".into()],
+    };
+    assert_eq!(
+        cmd(&op, Tool::Busctl),
+        "busctl call org.busx.Test /o org.busx.Test Echo v s hi"
+    );
+    // dbus-send: variant:string:hi (man dbus-send BNF `variant:<type>:<value>`).
+    assert_eq!(
+        cmd(&op, Tool::DbusSend),
+        "dbus-send --print-reply --dest=org.busx.Test /o org.busx.Test.Echo variant:string:hi"
+    );
+    // qdbus: variant:hi.
+    assert_eq!(
+        cmd(&op, Tool::Qdbus),
+        "qdbus org.busx.Test /o org.busx.Test.Echo variant:hi"
+    );
+    // gdbus: GVariant variant literal <"hi">.
+    assert_eq!(
+        cmd(&op, Tool::Gdbus),
+        "gdbus call --session --dest org.busx.Test --object-path /o \
+         --method org.busx.Test.Echo <\"hi\">"
+    );
+}
+
+// --- method call: struct arg ((ii)) → gdbus full; dbus-send/qdbus honest note ---
+
+#[test]
+fn call_struct_arg_each_tool() {
+    // busctl lays out `(ii)` flat → ["1", "2"].
+    let op = CopyOp::Call {
+        service: "org.busx.Test".into(),
+        object: "/o".into(),
+        iface: "org.busx.Test".into(),
+        method: "Point".into(),
+        signature: "(ii)".into(),
+        args: vec!["1".into(), "2".into()],
+    };
+    assert_eq!(
+        cmd(&op, Tool::Busctl),
+        "busctl call org.busx.Test /o org.busx.Test Point (ii) 1 2"
+    );
+    // dbus-send: structs are not in the dbus-send BNF → honest note, arg dropped.
+    assert_eq!(
+        cmd(&op, Tool::DbusSend),
+        "dbus-send --print-reply --dest=org.busx.Test /o org.busx.Test.Point\n\
+         # dbus-send cannot express signature \"(ii)\"; use busctl"
+    );
+    // qdbus: no positional struct syntax → honest note, arg dropped.
+    assert_eq!(
+        cmd(&op, Tool::Qdbus),
+        "qdbus org.busx.Test /o org.busx.Test.Point\n\
+         # qdbus cannot express signature \"(ii)\" positionally; use busctl"
+    );
+    // gdbus: GVariant struct literal (1,2).
+    assert_eq!(
+        cmd(&op, Tool::Gdbus),
+        "gdbus call --session --dest org.busx.Test --object-path /o \
+         --method org.busx.Test.Point (1,2)"
+    );
+}
+
+// --- method call: nested a{sv} → dbus-send/qdbus note; gdbus full nesting ---
+
+#[test]
+fn call_nested_asv_each_tool() {
+    // busctl lays out `a{sv}` as `count key <inner-sig> <inner-value> …`.
+    // One entry: key "k", variant of signature "s" value "v".
+    let op = CopyOp::Call {
+        service: "org.busx.Test".into(),
+        object: "/o".into(),
+        iface: "org.busx.Test".into(),
+        method: "Hints".into(),
+        signature: "a{sv}".into(),
+        args: vec!["1".into(), "k".into(), "s".into(), "v".into()],
+    };
+    assert_eq!(
+        cmd(&op, Tool::Busctl),
+        "busctl call org.busx.Test /o org.busx.Test Hints a{sv} 1 k s v"
+    );
+    // dbus-send forbids nested containers (a{sv}'s value is a variant) → note.
+    assert_eq!(
+        cmd(&op, Tool::DbusSend),
+        "dbus-send --print-reply --dest=org.busx.Test /o org.busx.Test.Hints\n\
+         # dbus-send cannot express signature \"a{sv}\"; use busctl"
+    );
+    // qdbus → note.
+    assert_eq!(
+        cmd(&op, Tool::Qdbus),
+        "qdbus org.busx.Test /o org.busx.Test.Hints\n\
+         # qdbus cannot express signature \"a{sv}\" positionally; use busctl"
+    );
+    // gdbus: full nesting — {"k":<"v">} (dict value is a GVariant variant).
+    assert_eq!(
+        cmd(&op, Tool::Gdbus),
+        "gdbus call --session --dest org.busx.Test --object-path /o \
+         --method org.busx.Test.Hints {\"k\":<\"v\">}"
+    );
+}
+
+// --- method call: nested array aas → gdbus nested; dbus-send/qdbus note ---
+
+#[test]
+fn call_nested_aas_each_tool() {
+    // `aas`: one outer element which is a 2-element string array.
+    // busctl: `1 2 x y` (outer count 1, inner count 2, x, y).
+    let op = CopyOp::Call {
+        service: "org.busx.Test".into(),
+        object: "/o".into(),
+        iface: "org.busx.Test".into(),
+        method: "Grid".into(),
+        signature: "aas".into(),
+        args: vec!["1".into(), "2".into(), "x".into(), "y".into()],
+    };
+    assert_eq!(
+        cmd(&op, Tool::Busctl),
+        "busctl call org.busx.Test /o org.busx.Test Grid aas 1 2 x y"
+    );
+    // dbus-send forbids nested containers → note.
+    assert_eq!(
+        cmd(&op, Tool::DbusSend),
+        "dbus-send --print-reply --dest=org.busx.Test /o org.busx.Test.Grid\n\
+         # dbus-send cannot express signature \"aas\"; use busctl"
+    );
+    // qdbus → note.
+    assert_eq!(
+        cmd(&op, Tool::Qdbus),
+        "qdbus org.busx.Test /o org.busx.Test.Grid\n\
+         # qdbus cannot express signature \"aas\" positionally; use busctl"
+    );
+    // gdbus: [["x","y"]] (one outer array element, itself a 2-string array).
+    assert_eq!(
+        cmd(&op, Tool::Gdbus),
+        "gdbus call --session --dest org.busx.Test --object-path /o \
+         --method org.busx.Test.Grid [[\"x\",\"y\"]]"
+    );
+}
+
+// --- method call: empty containers → dbus-send note; gdbus empty literal ---
+
+#[test]
+fn call_empty_containers_each_tool() {
+    // dbus-send forbids empty containers (`man dbus-send`); gdbus/qdbus can.
+    let op = CopyOp::Call {
+        service: "org.busx.Test".into(),
+        object: "/o".into(),
+        iface: "org.busx.Test".into(),
+        method: "Take".into(),
+        signature: "as".into(),
+        args: vec!["0".into()],
+    };
+    // busctl: 1:1.
+    assert_eq!(
+        cmd(&op, Tool::Busctl),
+        "busctl call org.busx.Test /o org.busx.Test Take as 0"
+    );
+    // dbus-send: empty array is forbidden → honest note, arg dropped.
+    assert_eq!(
+        cmd(&op, Tool::DbusSend),
+        "dbus-send --print-reply --dest=org.busx.Test /o org.busx.Test.Take\n\
+         # dbus-send cannot express signature \"as\"; use busctl"
+    );
+    // qdbus: empty array expands to zero positional args (no note).
+    assert_eq!(
+        cmd(&op, Tool::Qdbus),
+        "qdbus org.busx.Test /o org.busx.Test.Take"
+    );
+    // gdbus: empty array literal [].
+    assert_eq!(
+        cmd(&op, Tool::Gdbus),
+        "gdbus call --session --dest org.busx.Test --object-path /o \
+         --method org.busx.Test.Take []"
+    );
+}
+
+// --- method call: partial args (array with only the count token) → no panic ---
+
+#[test]
+fn call_partial_array_args_render_placeholder() {
+    // `as` with only the count token "2" — both elements missing.
+    let op = CopyOp::Call {
+        service: "org.busx.Test".into(),
+        object: "/o".into(),
+        iface: "org.busx.Test".into(),
+        method: "Take".into(),
+        signature: "as".into(),
+        args: vec!["2".into()],
+    };
+    // busctl: 1:1 (the missing tokens are simply absent).
+    assert_eq!(
+        cmd(&op, Tool::Busctl),
+        "busctl call org.busx.Test /o org.busx.Test Take as 2"
+    );
+    // dbus-send: count 2, two missing elements → `?` placeholders each.
+    assert_eq!(
+        cmd(&op, Tool::DbusSend),
+        "dbus-send --print-reply --dest=org.busx.Test /o org.busx.Test.Take array:string:?,?"
+    );
+    // qdbus: count 2, two missing elements → two quoted `?` positional args
+    // (`?` is a shell glob, so each element is quoted).
+    assert_eq!(
+        cmd(&op, Tool::Qdbus),
+        "qdbus org.busx.Test /o org.busx.Test.Take \"?\" \"?\""
+    );
+    // gdbus: count 2, two missing elements → ["?","?"].
+    assert_eq!(
+        cmd(&op, Tool::Gdbus),
+        "gdbus call --session --dest org.busx.Test --object-path /o \
+         --method org.busx.Test.Take [\"?\",\"?\"]"
+    );
 }
 
 // --- property get: all four ---
@@ -258,11 +524,12 @@ fn set_qdbus() {
 #[test]
 fn set_gdbus() {
     // PINNED: gdbus Properties.Set takes interface, property, and a GVariant
-    // value (the property value). For a string property the value is `"hi"`.
+    // value. Properties.Set's last arg is a variant (`ssv`), so the value is a
+    // GVariant variant literal `<"hi">` (per `man gdbus`: "serialized GVariant").
     assert_eq!(
         cmd(&set_op(), Tool::Gdbus),
         "gdbus call --session --dest org.busx.Test --object-path /o \
-         --method org.freedesktop.DBus.Properties.Set \"org.busx.Test\" \"Name\" \"hi\""
+         --method org.freedesktop.DBus.Properties.Set \"org.busx.Test\" \"Name\" <\"hi\">"
     );
 }
 
@@ -278,17 +545,59 @@ fn set_uint_gdbus_bare_number() {
         signature: "u".into(),
         value: vec!["7".into()],
     };
-    // gdbus emits the uint32 value as a bare number (best-effort: no `@u`
-    // annotation — gdbus infers the property type from introspection).
+    // gdbus emits the uint32 value as a bare number, wrapped in a GVariant
+    // variant `<7>` (Properties.Set's last arg is `v`).
     assert_eq!(
         cmd(&op, Tool::Gdbus),
         "gdbus call --session --dest org.busx.Test --object-path /o \
-         --method org.freedesktop.DBus.Properties.Set \"org.busx.Test\" \"Count\" 7"
+         --method org.freedesktop.DBus.Properties.Set \"org.busx.Test\" \"Count\" <7>"
     );
     // busctl is 1:1.
     assert_eq!(
         cmd(&op, Tool::Busctl),
         "busctl set-property org.busx.Test /o org.busx.Test Count u 7"
+    );
+}
+
+// --- property set (complex): gdbus wraps in variant; dbus-send/qdbus honest ---
+
+#[test]
+fn set_array_property_each_tool() {
+    // Set an `as` property to ["a","b"] — busctl value tokens: 2 a b.
+    let op = CopyOp::Set {
+        service: "org.busx.Test".into(),
+        object: "/o".into(),
+        iface: "org.busx.Test".into(),
+        property: "Tags".into(),
+        signature: "as".into(),
+        value: vec!["2".into(), "a".into(), "b".into()],
+    };
+    // busctl: 1:1.
+    assert_eq!(
+        cmd(&op, Tool::Busctl),
+        "busctl set-property org.busx.Test /o org.busx.Test Tags as 2 a b"
+    );
+    // dbus-send Properties.Set: the property value is a variant; dbus-send's
+    // variant inner type must be basic, and `as` is not → honest note.
+    assert_eq!(
+        cmd(&op, Tool::DbusSend),
+        "dbus-send --print-reply --dest=org.busx.Test /o \
+         org.freedesktop.DBus.Properties.Set string:org.busx.Test string:Tags\n\
+         # dbus-send cannot express signature \"as\"; use busctl"
+    );
+    // qdbus Properties.Set: array not expressible positionally → note.
+    assert_eq!(
+        cmd(&op, Tool::Qdbus),
+        "qdbus org.busx.Test /o org.freedesktop.DBus.Properties.Set \
+         org.busx.Test Tags\n\
+         # qdbus cannot express signature \"as\" positionally; use busctl"
+    );
+    // gdbus Properties.Set: array value wrapped in a GVariant variant `<[...]>`.
+    assert_eq!(
+        cmd(&op, Tool::Gdbus),
+        "gdbus call --session --dest org.busx.Test --object-path /o \
+         --method org.freedesktop.DBus.Properties.Set \
+         \"org.busx.Test\" \"Tags\" <[\"a\",\"b\"]>"
     );
 }
 
