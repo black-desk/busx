@@ -55,6 +55,7 @@ SPDX-License-Identifier: MIT
 - `get` / `set` —— 读取（不传属性名走 `GetAll`）/ 写入属性。
 - `monitor` —— 监听总线消息，按 match rule 过滤（`--json` 出 NDJSON，含 `PropertiesChanged` 解码）。
 - `completion` —— 生成动态 shell 补全脚本（实时内省总线补全服务/路径/接口/方法/签名/属性）。
+- **TUI 模式** —— 裸 `busx`（不带子命令）打开全屏交互式浏览器：逐级钻取 service → objects → interfaces → interface（methods / properties / signals）。调用方法、读写属性、监听信号（Esc 停止），并将任意操作一键复制为 `dbus-send` / `busctl` / `qdbus` / `gdbus` 命令。支持鼠标。
 
 ## 安装
 
@@ -72,6 +73,9 @@ cargo install-update -g busx       # 或 `cargo install-update -ag` 升级全部
 ## 用法
 
 ```bash
+# 交互式 TUI（裸 busx 不带子命令）：浏览、调用、监听、copy-as
+busx
+
 # 列服务（默认连 session bus，连不上自动回退 system bus）
 busx list
 
@@ -104,18 +108,12 @@ eval "$(busx completion bash)"     # zsh: eval "$(busx completion zsh)"
 stderr，前缀 `busx:`；退出码 `0` 成功 / `1` 失败。管道到 `less`/`head` 也不会
 panic（SIGPIPE 按常规处理）。
 
-更多设计细节见 [设计文档]。
-
-[设计文档]: docs/superpowers/specs/2026-07-07-busx-design.md
-
 ## 路线图
 
-1. **TUI**：基于本 crate 的模块（加第二个 `[[bin]]` 或届时抽 lib），提供交互式
-   浏览 / call / monitor；支持 `copy as dbus-send / busctl / gdbus`。
-2. `emit`（发信号）、pcapng `capture`。
-3. `--host` / `--machine` 远程与容器总线。
-4. `ay` 的 bytestring 字符串视图等值渲染增强。
-5. 若 `jaq` 将来发布可复用的「flag 解析 + 运行」库入口，重新评估内嵌
+1. `emit`（发信号）、pcapng `capture`。
+2. `--host` / `--machine` 远程与容器总线。
+3. `ay` 的 bytestring 字符串视图等值渲染增强。
+4. 若 `jaq` 将来发布可复用的「flag 解析 + 运行」库入口，重新评估内嵌
    `busx jq` 子命令。
 
 ## 许可证
