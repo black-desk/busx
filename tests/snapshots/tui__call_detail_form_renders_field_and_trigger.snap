@@ -1,11 +1,10 @@
 ---
 source: tests/tui.rs
-assertion_line: 922
 expression: "render_to_string(&state, 40, 8)"
 ---
 "s:/o:i › call Add                       "
 "┌call Add──────────────────────────────┐"
-"│n  u  42                              │"
+"│▶ n  u  42▏                           │"
 "│                                      │"
 "│                                      │"
 "│                [触发]                │" Hidden by multi-width symbols: [(19, " "), (21, " ")]

@@ -7,7 +7,7 @@
 
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
@@ -381,7 +381,6 @@ fn render_detail(
         if i as u16 >= fields_area.height {
             break;
         }
-        let value = d.inputs.get(i).map(|v| v.value()).unwrap_or("");
         let focused = d.focus == DetailFocus::Field && i == d.field_selected;
         let row_area = Rect {
             x: fields_area.x,
@@ -389,14 +388,26 @@ fn render_detail(
             width: fields_area.width,
             height: 1,
         };
-        let mut style = Style::default();
-        if focused {
-            style = style.add_modifier(Modifier::REVERSED);
-        }
-        frame.render_widget(
-            Paragraph::new(format!("{label}  {value}")).style(style),
-            row_area,
-        );
+        let input = d.inputs.get(i);
+        let value = input.map(|v| v.value()).unwrap_or("");
+        // Focused field: a `▶` marker (which arg is active) + the value REVERSED
+        // with a `▏` cursor at the input position (where typing lands). The label
+        // stays normal so the arg name is readable. Unfocused: plain, indented to
+        // align with the `▶`.
+        let line = if focused {
+            let cursor = input.map(|v| v.cursor()).unwrap_or(0).min(value.len());
+            let (before, after) = value.split_at(cursor);
+            Line::from(vec![
+                Span::styled("▶ ", Style::default().fg(Color::Yellow)),
+                Span::raw(format!("{label}  ")),
+                Span::styled(before.to_string(), Style::default().add_modifier(Modifier::REVERSED)),
+                Span::styled("▏", Style::default().fg(Color::Yellow)),
+                Span::styled(after.to_string(), Style::default().add_modifier(Modifier::REVERSED)),
+            ])
+        } else {
+            Line::raw(format!("  {label}  {value}"))
+        };
+        frame.render_widget(Paragraph::new(line), row_area);
         targets.push((row_area, ClickTarget::DetailField(i)));
     }
 
