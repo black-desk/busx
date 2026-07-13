@@ -362,10 +362,11 @@ impl Iterator for CrosstermSource {
             match event::poll(Duration::from_millis(50)) {
                 Ok(false) => continue, // timeout: re-drain the channel
                 Ok(true) => {}
-                Err(e) => {
-                    eprintln!("busx: warning: input poll failed: {e}");
-                    return None; // can't read input — exit cleanly
-                }
+                // Input poll failed (e.g. terminal gone). Don't print — we're
+                // still in raw mode + the alternate screen, so any write would
+                // corrupt the display. Just exit the loop; `restore_terminal`
+                // runs next, then the process exits.
+                Err(_) => return None,
             }
             if let Ok(ev) = event::read() {
                 if let Some(msg) = non_mouse(ev) {
