@@ -208,15 +208,20 @@ pub struct ResultScreen {
 #[derive(Clone, Debug)]
 pub enum ActionResult {
     Call(Vec<String>), // each reply value, pretty-printed
-    Get(String), // the property value, pretty-printed
-    Set, // success
+    Get(String),       // the property value, pretty-printed
+    Set,               // success
 }
 
 impl State {
     /// A Service screen in the loading state (the TUI's initial screen).
     pub fn loading_service() -> Self {
         State {
-            screens: vec![Screen::Service(ServiceScreen { services: vec![], selected: 0, loading: true, error: None })],
+            screens: vec![Screen::Service(ServiceScreen {
+                services: vec![],
+                selected: 0,
+                loading: true,
+                error: None,
+            })],
             quit: false,
             popup: None,
             click_targets: Vec::new(),
@@ -227,7 +232,12 @@ impl State {
     /// Build a State with a single populated Service screen (tests / default).
     pub fn service(services: Vec<ServiceInfo>) -> Self {
         State {
-            screens: vec![Screen::Service(ServiceScreen { services, selected: 0, loading: false, error: None })],
+            screens: vec![Screen::Service(ServiceScreen {
+                services,
+                selected: 0,
+                loading: false,
+                error: None,
+            })],
             quit: false,
             popup: None,
             click_targets: Vec::new(),

@@ -37,7 +37,10 @@ fn getall_returns_tagged_json() {
         v["counts"]
     );
     for entry in v["counts"]["data"].as_array().unwrap() {
-        assert!(entry.is_object(), "each counts entry is a {{key,value}} pair");
+        assert!(
+            entry.is_object(),
+            "each counts entry is a {{key,value}} pair"
+        );
         assert_eq!(entry["key"]["type"], "u", "counts key is a native u32");
         assert_eq!(entry["value"]["type"], "u", "counts value is a native u32");
         // Keys must be numbers, not stringified.

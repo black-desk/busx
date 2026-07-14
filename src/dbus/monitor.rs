@@ -9,9 +9,9 @@
 //! the TUI monitor phase.
 
 use crate::error::{Error, Result};
+use zbus::MatchRule;
 use zbus::fdo::MonitoringProxy;
 use zbus::message::Type;
-use zbus::MatchRule;
 use zvariant::Structure;
 
 /// Assemble the match rule from the convenience fields. `msg_type`, if given,
@@ -101,7 +101,9 @@ pub fn format_message(m: &zbus::Message) -> String {
         s.push_str(&format!("  path={path}"));
     }
     s.push('\n');
-    s.push_str(&format!("  interface={iface}  member={member}  serial={serial}"));
+    s.push_str(&format!(
+        "  interface={iface}  member={member}  serial={serial}"
+    ));
     if let Some(rs) = reply_serial {
         s.push_str(&format!("  reply_serial={rs}"));
     }

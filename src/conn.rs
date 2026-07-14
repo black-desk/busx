@@ -14,7 +14,12 @@ use zbus::blocking::connection::Builder;
 /// - neither `--user` nor `--system` (default) → try session, on failure fall
 ///   back to the system bus. The fallback is silent unless `verbose` is set,
 ///   in which case a warning is printed to stderr.
-pub fn connect(user: bool, system: bool, address: Option<&str>, verbose: bool) -> Result<Connection> {
+pub fn connect(
+    user: bool,
+    system: bool,
+    address: Option<&str>,
+    verbose: bool,
+) -> Result<Connection> {
     if let Some(addr) = address {
         return Ok(Builder::address(addr)?.build()?);
     }
@@ -29,7 +34,9 @@ pub fn connect(user: bool, system: bool, address: Option<&str>, verbose: bool) -
         ))),
         Err(e) => {
             if verbose {
-                eprintln!("busx: warning: session bus unavailable ({e}); falling back to system bus");
+                eprintln!(
+                    "busx: warning: session bus unavailable ({e}); falling back to system bus"
+                );
             }
             Ok(Connection::system()?)
         }

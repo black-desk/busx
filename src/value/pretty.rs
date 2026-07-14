@@ -43,9 +43,12 @@ pub fn pretty(v: &Value<'_>) -> String {
         Value::Value(inner) => format!("<{} {}>", inner.value_signature(), pretty(inner)),
         Value::Array(a) => bracket('[', ']', a.inner().iter().map(pretty)),
         Value::Structure(s) => bracket('(', ')', s.fields().iter().map(pretty)),
-        Value::Dict(d) => {
-            bracket('{', '}', d.iter().map(|(k, v)| format!("{}: {}", pretty(k), pretty(v))))
-        }
+        Value::Dict(d) => bracket(
+            '{',
+            '}',
+            d.iter()
+                .map(|(k, v)| format!("{}: {}", pretty(k), pretty(v))),
+        ),
         // Optional/platform variants: Fd (cfg(unix)), Maybe (gvariant feature).
         // Render a clear placeholder rather than crashing on an unfamiliar type.
         other => format!("unsupported value: {other:?}"),

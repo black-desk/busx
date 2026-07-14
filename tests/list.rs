@@ -42,7 +42,10 @@ fn list_human_shows_table_with_test_service() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("NAME"), "missing NAME header:\n{stdout}");
     assert!(stdout.contains("PID"), "missing PID header:\n{stdout}");
-    assert!(stdout.contains("PROCESS"), "missing PROCESS header:\n{stdout}");
+    assert!(
+        stdout.contains("PROCESS"),
+        "missing PROCESS header:\n{stdout}"
+    );
     assert!(
         stdout.contains("org.busx.Test"),
         "missing test service row:\n{stdout}"
@@ -64,7 +67,10 @@ fn list_orders_well_known_before_unique() {
     let first_unique = arr.iter().position(is_unique);
     let last_well_known = arr.iter().rposition(|e| !is_unique(e));
     if let (Some(first_unique), Some(last_well_known)) = (first_unique, last_well_known) {
-        assert!(last_well_known < first_unique, "well-known must precede unique:\n{v}");
+        assert!(
+            last_well_known < first_unique,
+            "well-known must precede unique:\n{v}"
+        );
     }
 }
 

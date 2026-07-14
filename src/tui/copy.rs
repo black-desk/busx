@@ -93,15 +93,28 @@ impl Tool {
 /// where a tool can't fully express a signature.
 pub fn generate(op: &CopyOp, tool: Tool) -> Option<String> {
     match op {
-        CopyOp::Call { service, object, iface, method, signature, args } => {
-            call(service, object, iface, method, signature, args, tool)
-        }
-        CopyOp::Get { service, object, iface, property } => {
-            Some(get(service, object, iface, property, tool))
-        }
-        CopyOp::Set { service, object, iface, property, signature, value } => {
-            set(service, object, iface, property, signature, value, tool)
-        }
+        CopyOp::Call {
+            service,
+            object,
+            iface,
+            method,
+            signature,
+            args,
+        } => call(service, object, iface, method, signature, args, tool),
+        CopyOp::Get {
+            service,
+            object,
+            iface,
+            property,
+        } => Some(get(service, object, iface, property, tool)),
+        CopyOp::Set {
+            service,
+            object,
+            iface,
+            property,
+            signature,
+            value,
+        } => set(service, object, iface, property, signature, value, tool),
         CopyOp::Listen { rule } => listen(rule, tool),
     }
 }
@@ -138,9 +151,8 @@ fn call(
             Some(parts.join(" "))
         }
         Tool::DbusSend => {
-            let mut out = format!(
-                "dbus-send --print-reply --dest={service} {object} {iface}.{method}"
-            );
+            let mut out =
+                format!("dbus-send --print-reply --dest={service} {object} {iface}.{method}");
             let (rendered, notes) = render_args(signature, args, tool);
             for r in &rendered {
                 if r.unsupported.is_none() && !(r.quoted && r.text.is_empty()) {
@@ -233,7 +245,10 @@ fn set(
         }
         Tool::DbusSend => {
             // dbus-send Properties.Set variant inner type must be basic.
-            let mut tok = Tok { toks: value, pos: 0 };
+            let mut tok = Tok {
+                toks: value,
+                pos: 0,
+            };
             match dbus_send_basic_tag(signature) {
                 Some(tag) => {
                     let val = tok.next();
@@ -251,7 +266,10 @@ fn set(
         }
         // qdbus Properties.Set: `variant:` takes a single basic value.
         Tool::Qdbus => {
-            let mut tok = Tok { toks: value, pos: 0 };
+            let mut tok = Tok {
+                toks: value,
+                pos: 0,
+            };
             if dbus_send_basic_literal_kind(signature).is_some() {
                 let val = tok.next();
                 Some(format!(
@@ -265,7 +283,10 @@ fn set(
         }
         // gdbus Properties.Set: GVariant variant value. gdbus can express every type.
         Tool::Gdbus => {
-            let mut tok = Tok { toks: value, pos: 0 };
+            let mut tok = Tok {
+                toks: value,
+                pos: 0,
+            };
             let inner = gdbus_value(signature, &mut tok).text;
             let gv = format!("<{inner}>");
             Some(format!(
@@ -333,7 +354,11 @@ struct Tok<'a> {
 
 impl<'a> Tok<'a> {
     fn next(&mut self) -> &'a str {
-        let t = self.toks.get(self.pos).map(String::as_str).unwrap_or(MISSING);
+        let t = self
+            .toks
+            .get(self.pos)
+            .map(String::as_str)
+            .unwrap_or(MISSING);
         if self.pos < self.toks.len() {
             self.pos += 1;
         }
@@ -364,10 +389,18 @@ struct Rendered {
 
 impl Rendered {
     fn ok(text: String) -> Self {
-        Self { text, quoted: false, unsupported: None }
+        Self {
+            text,
+            quoted: false,
+            unsupported: None,
+        }
     }
     fn unsupported(sig: impl Into<String>) -> Self {
-        Self { text: MISSING.into(), quoted: false, unsupported: Some(sig.into()) }
+        Self {
+            text: MISSING.into(),
+            quoted: false,
+            unsupported: Some(sig.into()),
+        }
     }
 }
 
@@ -756,7 +789,23 @@ fn gdbus_value(ty: &str, tok: &mut Tok<'_>) -> Rendered {
 fn quote(s: &str) -> String {
     let needs = s.is_empty()
         || s.chars().any(|c| {
-            c.is_whitespace() || matches!(c, '"' | '\\' | '\'' | '$' | '`' | '<' | '>' | '&' | ';' | '|' | '*' | '?' | '(' | ')')
+            c.is_whitespace()
+                || matches!(
+                    c,
+                    '"' | '\\'
+                        | '\''
+                        | '$'
+                        | '`'
+                        | '<'
+                        | '>'
+                        | '&'
+                        | ';'
+                        | '|'
+                        | '*'
+                        | '?'
+                        | '('
+                        | ')'
+                )
         });
     if !needs {
         return s.into();

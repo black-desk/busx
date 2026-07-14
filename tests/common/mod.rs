@@ -4,8 +4,8 @@
 
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
-use zbus::blocking::connection::Builder;
 use zbus::blocking::Connection;
+use zbus::blocking::connection::Builder;
 use zbus::interface;
 
 /// Test service. Methods/properties are chosen to exercise every busx feature:

@@ -5,17 +5,19 @@
 //! Pure state machine. Returns an `Option<Effect>` so it stays
 //! IO-free: pushing/loading a screen requests a fetch the loop performs.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use zbus_xml::{ArgDirection, Node, PropertyAccess, Signature};
 use zvariant::OwnedValue;
 
 use crate::dbus::types::{ObjectNode, ServiceInfo};
-use crate::tui::copy::{generate, CopyOp, Tool};
+use crate::tui::copy::{CopyOp, Tool, generate};
 use crate::tui::msg::{Effect, Msg};
 use crate::tui::state::{
-    flatten_paths, ActionKind, ActionResult, ClickTarget, CopyAsPopup, DetailFocus, DetailScreen,
-    InterfaceFocus, InterfaceScreen, InterfacesScreen, ListenTarget, MethodMember, ObjectsScreen,
-    ResultScreen, Screen, ServiceScreen, State,
+    ActionKind, ActionResult, ClickTarget, CopyAsPopup, DetailFocus, DetailScreen, InterfaceFocus,
+    InterfaceScreen, InterfacesScreen, ListenTarget, MethodMember, ObjectsScreen, ResultScreen,
+    Screen, ServiceScreen, State, flatten_paths,
 };
 use tui_input::backend::crossterm::EventHandler;
 
@@ -307,7 +309,11 @@ fn apply_click(state: &mut State, t: ClickTarget) -> Option<Effect> {
             if let Some(p) = state.popup.as_mut() {
                 p.selected = i;
             }
-            if already { state.popup.as_mut().and_then(copy_selected_tool) } else { None }
+            if already {
+                state.popup.as_mut().and_then(copy_selected_tool)
+            } else {
+                None
+            }
         }
     }
 }
@@ -320,7 +326,10 @@ fn copy_selected_tool(popup: &mut crate::tui::state::CopyAsPopup) -> Option<Effe
     if popup.status.is_some() {
         return None;
     }
-    let cmd = popup.commands.get(popup.selected).and_then(|(_, c)| c.clone());
+    let cmd = popup
+        .commands
+        .get(popup.selected)
+        .and_then(|(_, c)| c.clone());
     match cmd {
         Some(cmd) => {
             popup.status = Some("copying…".to_string());
@@ -390,7 +399,11 @@ fn copy_op_from_detail(d: &DetailScreen) -> CopyOp {
             iface: d.interface.clone(),
             method: method.clone(),
             signature: signature.clone(),
-            args: d.inputs.iter().flat_map(|i| shell_split(i.value())).collect(),
+            args: d
+                .inputs
+                .iter()
+                .flat_map(|i| shell_split(i.value()))
+                .collect(),
         },
         ActionKind::Get { property } => CopyOp::Get {
             service: d.service.clone(),
@@ -398,13 +411,21 @@ fn copy_op_from_detail(d: &DetailScreen) -> CopyOp {
             iface: d.interface.clone(),
             property: property.clone(),
         },
-        ActionKind::Set { property, signature } => CopyOp::Set {
+        ActionKind::Set {
+            property,
+            signature,
+        } => CopyOp::Set {
             service: d.service.clone(),
             object: d.object.clone(),
             iface: d.interface.clone(),
             property: property.clone(),
             signature: signature.clone(),
-            value: vec![d.inputs.first().map(|i| i.value().to_string()).unwrap_or_default()],
+            value: vec![
+                d.inputs
+                    .first()
+                    .map(|i| i.value().to_string())
+                    .unwrap_or_default(),
+            ],
         },
         ActionKind::Listen { target } => {
             // Reuse the same match-rule helper the live listen uses; on a rule
@@ -421,7 +442,12 @@ fn copy_op_from_detail(d: &DetailScreen) -> CopyOp {
 /// Precompute each tool's command for `op` and open the popup focused on row 0.
 fn open_copy_as_popup(state: &mut State, op: CopyOp) {
     let commands = Tool::ALL.map(|t| (t, generate(&op, t)));
-    state.popup = Some(CopyAsPopup { op, commands, selected: 0, status: None });
+    state.popup = Some(CopyAsPopup {
+        op,
+        commands,
+        selected: 0,
+        status: None,
+    });
 }
 
 /// Key handling for the open copy-as popup. The flow keeps the popup open so the
@@ -513,7 +539,9 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                             signature: m.signature.clone(),
                         },
                         "监听" => ActionKind::Listen {
-                            target: ListenTarget::Method { member: m.name.clone() },
+                            target: ListenTarget::Method {
+                                member: m.name.clone(),
+                            },
                         },
                         _ => return None,
                     }
@@ -521,10 +549,17 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                 InterfaceFocus::Properties => {
                     let (name, sig, _access) = i.properties.get(i.selected[1])?;
                     match action {
-                        "读取" => ActionKind::Get { property: name.clone() },
-                        "设置" => ActionKind::Set { property: name.clone(), signature: sig.clone() },
+                        "读取" => ActionKind::Get {
+                            property: name.clone(),
+                        },
+                        "设置" => ActionKind::Set {
+                            property: name.clone(),
+                            signature: sig.clone(),
+                        },
                         "监听" => ActionKind::Listen {
-                            target: ListenTarget::Property { property: name.clone() },
+                            target: ListenTarget::Property {
+                                property: name.clone(),
+                            },
                         },
                         _ => return None,
                     }
@@ -533,7 +568,9 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                     let (name, _sig) = i.signals.get(i.selected[2])?;
                     match action {
                         "监听" => ActionKind::Listen {
-                            target: ListenTarget::Signal { member: name.clone() },
+                            target: ListenTarget::Signal {
+                                member: name.clone(),
+                            },
                         },
                         _ => return None,
                     }
@@ -556,7 +593,10 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                 ActionKind::Get { .. } => (vec![], vec![]),
                 ActionKind::Listen { target } => {
                     let rule = listen_rule(&iface, &obj, target).map(|r| r.to_string());
-                    (vec![], vec![rule.unwrap_or_else(|e| format!("invalid match rule: {e}"))])
+                    (
+                        vec![],
+                        vec![rule.unwrap_or_else(|e| format!("invalid match rule: {e}"))],
+                    )
                 }
             };
             push_detail(state, svc, obj, iface, kind, inputs, field_labels);
@@ -573,8 +613,11 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
             let copy_op = copy_op_from_detail(d);
             let (title, effect) = match &d.kind {
                 ActionKind::Call { method, signature } => {
-                    let args: Vec<String> =
-                        d.inputs.iter().flat_map(|i| shell_split(i.value())).collect();
+                    let args: Vec<String> = d
+                        .inputs
+                        .iter()
+                        .flat_map(|i| shell_split(i.value()))
+                        .collect();
                     (
                         format!("{}.{}", d.interface, method),
                         Effect::CallMethod {
@@ -596,9 +639,15 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                         property: property.clone(),
                     },
                 ),
-                ActionKind::Set { property, signature } => {
-                    let value =
-                        d.inputs.first().map(|i| i.value().to_string()).unwrap_or_default();
+                ActionKind::Set {
+                    property,
+                    signature,
+                } => {
+                    let value = d
+                        .inputs
+                        .first()
+                        .map(|i| i.value().to_string())
+                        .unwrap_or_default();
                     (
                         property.clone(),
                         Effect::SetProperty {
@@ -614,8 +663,9 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                 ActionKind::Listen { target } => {
                     // Listen targets a member/property; title surfaces which.
                     let member_or_prop = match target {
-                        ListenTarget::Signal { member }
-                        | ListenTarget::Method { member } => member.clone(),
+                        ListenTarget::Signal { member } | ListenTarget::Method { member } => {
+                            member.clone()
+                        }
                         ListenTarget::Property { property } => property.clone(),
                     };
                     (
@@ -922,7 +972,10 @@ fn load_interfaces(
 }
 
 /// Populate the top Interface screen's property-value snapshot from a GetAll result.
-fn load_properties(state: &mut State, res: Result<Vec<(String, OwnedValue)>, String>) -> Option<Effect> {
+fn load_properties(
+    state: &mut State,
+    res: Result<Vec<(String, OwnedValue)>, String>,
+) -> Option<Effect> {
     if let Screen::Interface(i) = state.top_mut() {
         i.loading = false;
         match res {
@@ -949,7 +1002,11 @@ type Signals = Vec<(String, String)>;
 /// node, mirroring `ops::introspect`'s formatting. Method signature = the
 /// concatenated IN-arg signatures; signal signature = all args; property = (name, type, access).
 fn members_of(node: &Node, iface_name: &str) -> (Methods, Properties, Signals) {
-    let Some(iface) = node.interfaces().iter().find(|i| i.name().as_ref() == iface_name) else {
+    let Some(iface) = node
+        .interfaces()
+        .iter()
+        .find(|i| i.name().as_ref() == iface_name)
+    else {
         return (vec![], vec![], vec![]);
     };
     let methods = iface
@@ -963,13 +1020,23 @@ fn members_of(node: &Node, iface_name: &str) -> (Methods, Properties, Signals) {
                 .map(|a| (a.name().unwrap_or("").to_string(), sig_str(a.ty())))
                 .collect();
             let in_sig: String = in_args.iter().map(|(_, s)| s.clone()).collect();
-            MethodMember { name: m.name().to_string(), signature: in_sig, args: in_args }
+            MethodMember {
+                name: m.name().to_string(),
+                signature: in_sig,
+                args: in_args,
+            }
         })
         .collect();
     let properties = iface
         .properties()
         .iter()
-        .map(|p| (p.name().to_string(), sig_str(p.ty()), access_str(p.access()).to_string()))
+        .map(|p| {
+            (
+                p.name().to_string(),
+                sig_str(p.ty()),
+                access_str(p.access()).to_string(),
+            )
+        })
         .collect();
     let signals = iface
         .signals()
@@ -1055,7 +1122,13 @@ fn push_interface(
 fn call_fields(args: &[(String, String)]) -> (Vec<tui_input::Input>, Vec<String>) {
     let labels = args
         .iter()
-        .map(|(name, sig)| if name.is_empty() { sig.clone() } else { format!("{name}  {sig}") })
+        .map(|(name, sig)| {
+            if name.is_empty() {
+                sig.clone()
+            } else {
+                format!("{name}  {sig}")
+            }
+        })
         .collect();
     let inputs = args.iter().map(|_| tui_input::Input::default()).collect();
     (inputs, labels)

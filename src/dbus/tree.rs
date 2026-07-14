@@ -11,7 +11,11 @@ use zbus_xml::Node;
 const INTROSPECTABLE: &str = "org.freedesktop.DBus.Introspectable";
 
 pub async fn object_tree(conn: &zbus::Connection, service: &str) -> Result<ObjectNode> {
-    let mut root = ObjectNode { path: "/".to_string(), interfaces: 0, children: vec![] };
+    let mut root = ObjectNode {
+        path: "/".to_string(),
+        interfaces: 0,
+        children: vec![],
+    };
     let mut visited = std::collections::HashSet::from(["/".to_string()]);
     // Best-effort: a service that refuses introspection (e.g. at `/`) yields the
     // paths gathered so far rather than aborting — matches the prior CLI behaviour.
@@ -26,7 +30,11 @@ async fn walk(
     visited: &mut std::collections::HashSet<String>,
 ) -> Result<()> {
     let proxy = zbus::Proxy::new(conn, service, &node.path[..], INTROSPECTABLE).await?;
-    let xml: String = proxy.call_method("Introspect", &()).await?.body().deserialize()?;
+    let xml: String = proxy
+        .call_method("Introspect", &())
+        .await?
+        .body()
+        .deserialize()?;
     let parsed = Node::from_reader(xml.as_bytes())
         .map_err(|e| Error::Msg(format!("parse introspection XML: {e}")))?;
     // How many interfaces this object exposes. 0 ⇒ a pure container path (exists
@@ -44,7 +52,11 @@ async fn walk(
         if !visited.insert(child_path.clone()) {
             continue;
         }
-        let mut child_node = ObjectNode { path: child_path, interfaces: 0, children: vec![] };
+        let mut child_node = ObjectNode {
+            path: child_path,
+            interfaces: 0,
+            children: vec![],
+        };
         // `Box::pin` is required: a recursive `async fn` call would otherwise grow
         // an infinitely sized future (E0733).
         Box::pin(walk(conn, service, &mut child_node, visited)).await?;

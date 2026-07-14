@@ -9,7 +9,12 @@
 use crate::error::{Error, Result};
 use zbus::Connection;
 
-pub async fn connect(user: bool, system: bool, address: Option<&str>, verbose: bool) -> Result<Connection> {
+pub async fn connect(
+    user: bool,
+    system: bool,
+    address: Option<&str>,
+    verbose: bool,
+) -> Result<Connection> {
     if let Some(addr) = address {
         return Ok(zbus::connection::Builder::address(addr)?.build().await?);
     }
@@ -21,7 +26,9 @@ pub async fn connect(user: bool, system: bool, address: Option<&str>, verbose: b
         Err(e) if user => Err(Error::Msg(format!("cannot connect to session bus: {e}"))),
         Err(e) => {
             if verbose {
-                eprintln!("busx: warning: session bus unavailable ({e}); falling back to system bus");
+                eprintln!(
+                    "busx: warning: session bus unavailable ({e}); falling back to system bus"
+                );
             }
             Ok(Connection::system().await?)
         }

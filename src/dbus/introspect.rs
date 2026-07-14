@@ -16,10 +16,19 @@ const INTROSPECTABLE: &str = "org.freedesktop.DBus.Introspectable";
 ///
 /// `zbus_xml`'s parser builds a tree that owns all of its data (it does not
 /// borrow the input document), so the result is usable as `Node<'static>`.
-pub async fn introspect(conn: &zbus::Connection, service: &str, object: &str) -> Result<Node<'static>> {
+pub async fn introspect(
+    conn: &zbus::Connection,
+    service: &str,
+    object: &str,
+) -> Result<Node<'static>> {
     let proxy = zbus::Proxy::new(conn, service, object, INTROSPECTABLE).await?;
-    let xml: String = proxy.call_method("Introspect", &()).await?.body().deserialize()?;
+    let xml: String = proxy
+        .call_method("Introspect", &())
+        .await?
+        .body()
+        .deserialize()?;
     // `zbus_xml::Error` has no `From` impl in `crate::error::Error`, so stringify it
     // and carry it via the generic message variant (the tree itself is owned/static).
-    Node::from_reader(xml.as_bytes()).map_err(|e| Error::Msg(format!("parse introspection XML: {e}")))
+    Node::from_reader(xml.as_bytes())
+        .map_err(|e| Error::Msg(format!("parse introspection XML: {e}")))
 }

@@ -5,7 +5,7 @@
 //! Direct tests for `busx::tui::copy::generate` (spec §10 copy-as generation).
 //! Pin the exact command each tool produces for representative operations.
 
-use busx::tui::copy::{generate, CopyOp, Tool};
+use busx::tui::copy::{CopyOp, Tool, generate};
 
 /// Helper: render `op` for `tool`, unwrapping the `Some(command)`.
 fn cmd(op: &CopyOp, tool: Tool) -> String {
@@ -126,7 +126,10 @@ fn call_zero_args_busctl_omits_signature() {
         cmd(&op, Tool::DbusSend),
         "dbus-send --print-reply --dest=org.busx.Test /o org.busx.Test.Ping"
     );
-    assert_eq!(cmd(&op, Tool::Qdbus), "qdbus org.busx.Test /o org.busx.Test.Ping");
+    assert_eq!(
+        cmd(&op, Tool::Qdbus),
+        "qdbus org.busx.Test /o org.busx.Test.Ping"
+    );
     assert_eq!(
         cmd(&op, Tool::Gdbus),
         "gdbus call --session --dest org.busx.Test --object-path /o --method org.busx.Test.Ping"
@@ -350,7 +353,10 @@ fn call_empty_containers_each_tool() {
     // dbus-send: empty array is forbidden → can't express (None).
     assert!(generate(&op, Tool::DbusSend).is_none());
     // qdbus: empty array expands to zero positional args (no note).
-    assert_eq!(cmd(&op, Tool::Qdbus), "qdbus org.busx.Test /o org.busx.Test.Take");
+    assert_eq!(
+        cmd(&op, Tool::Qdbus),
+        "qdbus org.busx.Test /o org.busx.Test.Take"
+    );
     // gdbus: empty array literal [].
     assert_eq!(
         cmd(&op, Tool::Gdbus),
@@ -559,17 +565,25 @@ fn set_array_property_each_tool() {
 // --- listen: match rule across all four ---
 
 fn listen_op() -> CopyOp {
-    CopyOp::Listen { rule: "type='signal'".into() }
+    CopyOp::Listen {
+        rule: "type='signal'".into(),
+    }
 }
 
 #[test]
 fn listen_dbus_send_is_dbus_monitor() {
-    assert_eq!(cmd(&listen_op(), Tool::DbusSend), "dbus-monitor \"type='signal'\"");
+    assert_eq!(
+        cmd(&listen_op(), Tool::DbusSend),
+        "dbus-monitor \"type='signal'\""
+    );
 }
 
 #[test]
 fn listen_busctl_is_busctl_monitor() {
-    assert_eq!(cmd(&listen_op(), Tool::Busctl), "busctl monitor \"type='signal'\"");
+    assert_eq!(
+        cmd(&listen_op(), Tool::Busctl),
+        "busctl monitor \"type='signal'\""
+    );
 }
 
 #[test]

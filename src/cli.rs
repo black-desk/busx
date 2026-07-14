@@ -5,20 +5,35 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "busx", version, about = "D-Bus CLI (dbus-send/busctl/qdbus replacement)")]
+#[command(
+    name = "busx",
+    version,
+    about = "D-Bus CLI (dbus-send/busctl/qdbus replacement)"
+)]
 pub struct Cli {
-    #[arg(long, help = "Connect to the session bus; if that fails, fall back to the system bus (default)")]
+    #[arg(
+        long,
+        help = "Connect to the session bus; if that fails, fall back to the system bus (default)"
+    )]
     pub user: bool,
     #[arg(long, help = "Connect to the system bus")]
     pub system: bool,
-    #[arg(long, value_name = "ADDRESS", help = "Connect to the bus at ADDRESS (e.g. unix:path=...)")]
+    #[arg(
+        long,
+        value_name = "ADDRESS",
+        help = "Connect to the bus at ADDRESS (e.g. unix:path=...)"
+    )]
     pub address: Option<String>,
     #[arg(long, help = "Verbose diagnostics on stderr")]
     pub verbose: bool,
     /// Emit machine-readable type-tagged JSON instead of human-friendly text.
     /// Global: applies to every subcommand. For `monitor` the JSON form is NDJSON
     /// (one object per message).
-    #[arg(long, global = true, help = "Emit type-tagged JSON (default: human text)")]
+    #[arg(
+        long,
+        global = true,
+        help = "Emit type-tagged JSON (default: human text)"
+    )]
     pub json: bool,
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -27,11 +42,22 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// List service names on the bus.
-    List { #[arg(long)] unique: bool, #[arg(long)] acquired: bool, #[arg(long)] activatable: bool },
+    List {
+        #[arg(long)]
+        unique: bool,
+        #[arg(long)]
+        acquired: bool,
+        #[arg(long)]
+        activatable: bool,
+    },
     /// Show the object path tree of a service.
     Tree { service: String },
     /// Show interfaces/methods/signals/properties of an object.
-    Introspect { service: String, object: String, interface: Option<String> },
+    Introspect {
+        service: String,
+        object: String,
+        interface: Option<String>,
+    },
     /// Call a method.
     Call {
         service: String,
@@ -42,20 +68,40 @@ pub enum Command {
         args: Vec<String>,
     },
     /// Get properties (no property names => GetAll).
-    Get { service: String, object: String, interface: Option<String>, props: Vec<String> },
+    Get {
+        service: String,
+        object: String,
+        interface: Option<String>,
+        props: Vec<String>,
+    },
     /// Set a property.
-    Set { service: String, object: String, interface: String, property: String, signature: String, value: Vec<String> },
+    Set {
+        service: String,
+        object: String,
+        interface: String,
+        property: String,
+        signature: String,
+        value: Vec<String>,
+    },
     /// Monitor bus messages.
     Monitor {
         services: Vec<String>,
-        #[arg(long)] interface: Option<String>,
-        #[arg(long)] member: Option<String>,
-        #[arg(long)] path: Option<String>,
-        #[arg(long)] sender: Option<String>,
-        #[arg(long, value_name = "MATCH")] r#match: Option<String>,
-        #[arg(long)] signals: bool,
-        #[arg(long, value_name = "N")] limit_messages: Option<u64>,
-        #[arg(long, value_name = "DUR")] timeout: Option<String>,
+        #[arg(long)]
+        interface: Option<String>,
+        #[arg(long)]
+        member: Option<String>,
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long)]
+        sender: Option<String>,
+        #[arg(long, value_name = "MATCH")]
+        r#match: Option<String>,
+        #[arg(long)]
+        signals: bool,
+        #[arg(long, value_name = "N")]
+        limit_messages: Option<u64>,
+        #[arg(long, value_name = "DUR")]
+        timeout: Option<String>,
     },
     /// Generate shell completion script.
     Completion { shell: clap_complete::Shell },
