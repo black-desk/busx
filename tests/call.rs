@@ -124,3 +124,103 @@ fn call_human_prints_type_and_pretty_value() {
         "expected `s  \"a-b-c\"` in human output:\n{stdout}"
     );
 }
+
+// --- negative encode paths (busctl-style input is validated before the bus) ---
+//
+// Each of these fails during `value::encode::parse`, before any D-Bus call, so
+// the process exits 1 with a `busx:` diagnostic on stderr. They pin the four
+// encoder error paths so a regression (e.g. silently truncating/accepting bad
+// input) is caught.
+
+/// An unsupported type code in the signature is rejected.
+#[test]
+fn call_rejects_unknown_type_code() {
+    let addr = common::bus().address.clone();
+    Command::cargo_bin("busx")
+        .unwrap()
+        .args([
+            "--address",
+            &addr,
+            "call",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "Join",
+            "z",
+            "1",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("unsupported type code"));
+}
+
+/// Too few value tokens for the declared signature (`as 1` declares one element
+/// but provides none).
+#[test]
+fn call_rejects_too_few_args() {
+    let addr = common::bus().address.clone();
+    Command::cargo_bin("busx")
+        .unwrap()
+        .args([
+            "--address",
+            &addr,
+            "call",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "Join",
+            "as",
+            "1",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("not enough arguments"));
+}
+
+/// More value tokens than the declared signature consumes (`as 1 a b` declares
+/// one element but provides two).
+#[test]
+fn call_rejects_extra_args() {
+    let addr = common::bus().address.clone();
+    Command::cargo_bin("busx")
+        .unwrap()
+        .args([
+            "--address",
+            &addr,
+            "call",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "Join",
+            "as",
+            "1",
+            "a",
+            "b",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("extra argument"));
+}
+
+/// A non-numeric element count is rejected.
+#[test]
+fn call_rejects_bad_element_count() {
+    let addr = common::bus().address.clone();
+    Command::cargo_bin("busx")
+        .unwrap()
+        .args([
+            "--address",
+            &addr,
+            "call",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "Join",
+            "as",
+            "x",
+            "a",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("invalid element count"));
+}
