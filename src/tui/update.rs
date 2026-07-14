@@ -534,11 +534,11 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                 InterfaceFocus::Methods => {
                     let m = i.methods.get(i.selected[0])?;
                     match action {
-                        "调用" => ActionKind::Call {
+                        "Call" => ActionKind::Call {
                             method: m.name.clone(),
                             signature: m.signature.clone(),
                         },
-                        "监听" => ActionKind::Listen {
+                        "Listen" => ActionKind::Listen {
                             target: ListenTarget::Method {
                                 member: m.name.clone(),
                             },
@@ -549,14 +549,14 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                 InterfaceFocus::Properties => {
                     let (name, sig, _access) = i.properties.get(i.selected[1])?;
                     match action {
-                        "读取" => ActionKind::Get {
+                        "Get" => ActionKind::Get {
                             property: name.clone(),
                         },
-                        "设置" => ActionKind::Set {
+                        "Set" => ActionKind::Set {
                             property: name.clone(),
                             signature: sig.clone(),
                         },
-                        "监听" => ActionKind::Listen {
+                        "Listen" => ActionKind::Listen {
                             target: ListenTarget::Property {
                                 property: name.clone(),
                             },
@@ -567,7 +567,7 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                 InterfaceFocus::Signals => {
                     let (name, _sig) = i.signals.get(i.selected[2])?;
                     match action {
-                        "监听" => ActionKind::Listen {
+                        "Listen" => ActionKind::Listen {
                             target: ListenTarget::Signal {
                                 member: name.clone(),
                             },
@@ -603,7 +603,7 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
             None
         }
         Screen::Detail(d) => {
-            // `[触发]` Enter: only fires when the trigger button is focused.
+            // `[Trigger]` Enter: only fires when the trigger button is focused.
             // Extract owned (title, Effect, CopyOp) data for Call/Get/Set while
             // holding the immutable borrow, then push one Result screen carrying
             // the CopyOp (so `c` on the Result can copy-as it) and return it.
@@ -848,12 +848,12 @@ fn column_len(i: &InterfaceScreen, idx: usize) -> usize {
 }
 
 /// The action buttons offered for a given column. Each column carries a
-/// `监听` (listen) button; methods also `调用`, properties `读取`/`设置`.
+/// `Listen` (listen) button; methods also `Call`, properties `Get`/`Set`.
 fn buttons_for(column: InterfaceFocus) -> &'static [&'static str] {
     match column {
-        InterfaceFocus::Methods => &["调用", "监听"],
-        InterfaceFocus::Properties => &["读取", "设置", "监听"],
-        InterfaceFocus::Signals => &["监听"],
+        InterfaceFocus::Methods => &["Call", "Listen"],
+        InterfaceFocus::Properties => &["Get", "Set", "Listen"],
+        InterfaceFocus::Signals => &["Listen"],
     }
 }
 
@@ -1118,7 +1118,7 @@ fn push_interface(
 
 /// Build the form fields for a method call: one `tui-input` per IN-arg, labeled
 /// "name  sig" (or just `sig` when the arg name is empty). Zero-arg methods yield
-/// zero fields — the Detail is just the `[触发]` button.
+/// zero fields — the Detail is just the `[Trigger]` button.
 fn call_fields(args: &[(String, String)]) -> (Vec<tui_input::Input>, Vec<String>) {
     let labels = args
         .iter()
