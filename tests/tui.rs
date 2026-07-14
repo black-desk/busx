@@ -774,10 +774,10 @@ fn interface_enter_drills_then_fires_and_esc_backs_out() {
         "Esc from the button bar does not pop"
     );
 
-    // Re-enter the button bar, then a second Enter fires `调用` → pushes Detail.
+    // Re-enter the button bar, then a second Enter fires `Call` → pushes Detail.
     update(&mut state, key(KeyCode::Enter)); // drill in
     assert!(top_in_buttons(&state));
-    update(&mut state, key(KeyCode::Enter)); // fire 调用 (button_selected 0, m1)
+    update(&mut state, key(KeyCode::Enter)); // fire Call (button_selected 0, m1)
     assert_eq!(state.screens.len(), 2, "fire-Enter pushed a Detail screen");
     assert!(matches!(state.top(), Screen::Detail(_)));
 }
@@ -813,7 +813,7 @@ fn interface_esc_from_column_pops_screen() {
 #[test]
 fn interface_arrows_in_buttons_move_button_selected() {
     let mut screen = interface_screen();
-    // Properties column has three buttons: 读取/设置/监听.
+    // Properties column has three buttons: Get/Set/Listen.
     screen.focus = InterfaceFocus::Properties;
     screen.in_buttons = true;
     screen.button_selected = 0;
@@ -921,7 +921,7 @@ fn drill_down_auto_skips_service_to_interface() {
 #[test]
 fn interface_button_enter_pushes_call_detail() {
     // Methods column, already in the button bar (Enter drilled in earlier),
-    // button_selected on `调用`.
+    // button_selected on `Call`.
     let mut screen = interface_screen();
     screen.focus = InterfaceFocus::Methods;
     screen.in_buttons = true;
@@ -960,7 +960,7 @@ fn interface_button_enter_pushes_call_detail() {
 
 #[test]
 fn interface_button_enter_pushes_get_detail() {
-    // Properties column, already in the button bar, `读取` button (index 0) on p1.
+    // Properties column, already in the button bar, `Get` button (index 0) on p1.
     let mut screen = interface_screen();
     screen.focus = InterfaceFocus::Properties;
     screen.in_buttons = true;
@@ -985,11 +985,11 @@ fn interface_button_enter_pushes_get_detail() {
 
 #[test]
 fn interface_button_enter_pushes_set_detail() {
-    // Properties column, already in the button bar, `设置` button (index 1) on p1.
+    // Properties column, already in the button bar, `Set` button (index 1) on p1.
     let mut screen = interface_screen();
     screen.focus = InterfaceFocus::Properties;
     screen.in_buttons = true;
-    screen.button_selected = 1; // 设置
+    screen.button_selected = 1; // Set
     screen.selected = [0, 0, 0];
     let mut state = busx::tui::State {
         screens: vec![Screen::Interface(screen)],
@@ -1017,7 +1017,7 @@ fn interface_button_enter_pushes_set_detail() {
 #[test]
 fn interface_renders_action_button_bar() {
     // Methods column with a method selected, focus in the button bar
-    // (`in_buttons = true`) → the right panel shows the buttons with `调用`
+    // (`in_buttons = true`) → the right panel shows the buttons with `Call`
     // highlighted.
     let state = busx::tui::State {
         screens: vec![busx::tui::Screen::Interface(
@@ -1313,7 +1313,7 @@ fn action_result_populates_result_screen() {
 
 #[test]
 fn call_detail_form_renders_field_and_trigger() {
-    // The 1-arg call Detail, with the field focused: the field row + `[触发]`.
+    // The 1-arg call Detail, with the field focused: the field row + `[Trigger]`.
     let state = busx::tui::State {
         screens: vec![busx::tui::Screen::Detail(DetailScreen {
             service: "s".into(),
@@ -1364,7 +1364,7 @@ fn call_result_renders_reply_value() {
 
 /// An Interface screen whose Properties column has one property (name, sig,
 /// access) and is focused on the button bar with `button_selected` on the given
-/// action (`读取`=0 / `设置`=1).
+/// action (`Get`=0 / `Set`=1).
 fn interface_on_prop_button(button: usize, sig: &str) -> busx::tui::State {
     let screen = busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
         service: "s".into(),
@@ -1392,7 +1392,7 @@ fn interface_on_prop_button(button: usize, sig: &str) -> busx::tui::State {
 
 #[test]
 fn get_button_pushes_detail_with_no_inputs() {
-    // `读取` on p1 → a Get Detail with zero inputs and zero labels.
+    // `Get` on p1 → a Get Detail with zero inputs and zero labels.
     let mut state = interface_on_prop_button(0, "d");
     update(&mut state, key(KeyCode::Enter));
     match state.top() {
@@ -1452,7 +1452,7 @@ fn get_trigger_pushes_result_and_requests_get() {
 
 #[test]
 fn set_button_pushes_detail_with_one_input_labeled_by_signature() {
-    // `设置` on p1 (signature "s") → a Set Detail with one input, label "s".
+    // `Set` on p1 (signature "s") → a Set Detail with one input, label "s".
     let mut state = interface_on_prop_button(1, "s");
     update(&mut state, key(KeyCode::Enter));
     match state.top() {
@@ -1580,7 +1580,7 @@ fn get_result_renders_value() {
 // --- Phase 3 Task 4: capstone loop test (full call through run_loop) ---
 
 /// Drive a full method call through `run_loop`: Interface (Methods column) →
-/// Enter drills into the button bar → Enter (`调用`) pushes the Detail →
+/// Enter drills into the button bar → Enter (`Call`) pushes the Detail →
 /// type "42" → Tab to the trigger → Enter pushes the Result (loading) +
 /// a `CallMethod` Effect (no-op'd by the bus-free handler) → a scripted
 /// `ActionResult::Call` reply lands in the Result screen. Snapshots the final
@@ -1600,7 +1600,7 @@ fn call_action_flows_interface_to_result() {
                 prop_values: vec![],
                 focus: InterfaceFocus::Methods,
                 in_buttons: false,
-                button_selected: 0,  // 调用
+                button_selected: 0,  // Call
                 selected: [0, 0, 0], // Add
                 loading: false,
                 error: None,
@@ -1613,7 +1613,7 @@ fn call_action_flows_interface_to_result() {
     };
     let events = vec![
         key(KeyCode::Enter),     // Methods column → drill into the button bar
-        key(KeyCode::Enter),     // 调用 → push Call Detail (1 input)
+        key(KeyCode::Enter),     // Call → push Call Detail (1 input)
         key(KeyCode::Char('4')), // type into the field
         key(KeyCode::Char('2')),
         key(KeyCode::Tab),   // Field → Trigger
@@ -1641,7 +1641,7 @@ fn call_action_flows_interface_to_result() {
 // --- Phase 4 Task 2: signal/property listen — Listen Detail + streaming Result ---
 
 /// An Interface screen whose Signals column has one signal and is focused on the
-/// button bar with `button_selected` on `监听` (the only signal button). Uses a
+/// button bar with `button_selected` on `Listen` (the only signal button). Uses a
 /// valid D-Bus interface name so the match-rule preview parses cleanly.
 fn interface_on_signal_button() -> busx::tui::State {
     let screen = busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
@@ -1654,7 +1654,7 @@ fn interface_on_signal_button() -> busx::tui::State {
         prop_values: vec![],
         focus: InterfaceFocus::Signals,
         in_buttons: true,
-        button_selected: 0, // 监听
+        button_selected: 0, // Listen
         selected: [0, 0, 0],
         loading: false,
         error: None,
@@ -1670,7 +1670,7 @@ fn interface_on_signal_button() -> busx::tui::State {
 
 #[test]
 fn signal_listen_button_pushes_detail_with_match_rule_preview() {
-    // Signals column, `监听` button → a Listen Detail whose single label is the
+    // Signals column, `Listen` button → a Listen Detail whose single label is the
     // match-rule preview (no inputs).
     let mut state = interface_on_signal_button();
     let effect = update(&mut state, key(KeyCode::Enter));
@@ -1705,7 +1705,7 @@ fn signal_listen_button_pushes_detail_with_match_rule_preview() {
 
 #[test]
 fn property_listen_button_targets_propertieschanged_rule() {
-    // Properties column, `监听` button (index 2) → the preview subscribes the
+    // Properties column, `Listen` button (index 2) → the preview subscribes the
     // shared PropertiesChanged signal on the object.
     let screen = busx::tui::state::InterfaceScreen {
         service: "s".into(),
@@ -1717,7 +1717,7 @@ fn property_listen_button_targets_propertieschanged_rule() {
         prop_values: vec![],
         focus: InterfaceFocus::Properties,
         in_buttons: true,
-        button_selected: 2, // 监听
+        button_selected: 2, // Listen
         selected: [0, 0, 0],
         loading: false,
         error: None,
@@ -1875,7 +1875,7 @@ fn listen_result_renders_streaming_messages() {
 
 #[test]
 fn method_listen_button_and_trigger_target_method() {
-    // Methods column, `监听` button → a Listen Detail targeting a Method (Task 3).
+    // Methods column, `Listen` button → a Listen Detail targeting a Method (Task 3).
     // The preview is a `type='method_call'` match rule; the trigger pushes a
     // Result and requests `Effect::Listen { target: Method }` (no real spawn —
     // the no-op `|_| {}` handler is used, so nothing touches the bus here).
@@ -1889,7 +1889,7 @@ fn method_listen_button_and_trigger_target_method() {
         prop_values: vec![],
         focus: InterfaceFocus::Methods,
         in_buttons: true,
-        button_selected: 1, // 监听
+        button_selected: 1, // Listen
         selected: [0, 0, 0],
         loading: false,
         error: None,
@@ -1942,7 +1942,7 @@ fn method_listen_button_and_trigger_target_method() {
 // --- Phase 4 Task 4: listen capstone loop test (full signal listen through run_loop) ---
 
 /// Drive a full signal listen through `run_loop`: Interface (Signals column) →
-/// Enter drills into the button bar → Enter (`监听`) pushes the Listen Detail →
+/// Enter drills into the button bar → Enter (`Listen`) pushes the Listen Detail →
 /// Tab to the trigger → Enter pushes the streaming Result (loading) +
 /// `Effect::Listen` (no-op'd by the bus-free handler) → a scripted
 /// `ListenStarted` arms the cancel + clears loading → two `ListenMessage`s
@@ -1950,9 +1950,9 @@ fn method_listen_button_and_trigger_target_method() {
 /// the matching receiver sees `Canceled` (the listen task would exit).
 /// Snapshots the streaming Result frame (two message blocks) *before* the Esc.
 ///
-/// Focus sequence to reach the signal's `监听` button: start on the Signals
+/// Focus sequence to reach the signal's `Listen` button: start on the Signals
 /// column (`focus == Signals`, one signal `Changed`), then `Enter` drills into
-/// the button bar (Signals offers only `监听`, so `button_selected` 0 is
+/// the button bar (Signals offers only `Listen`, so `button_selected` 0 is
 /// already on it), then a second `Enter` fires it.
 #[test]
 fn listen_action_flows_interface_to_streaming_result() {
@@ -1968,7 +1968,7 @@ fn listen_action_flows_interface_to_streaming_result() {
         prop_values: vec![],
         focus: InterfaceFocus::Signals,
         in_buttons: false,
-        button_selected: 0, // 监听 (Signals offers only one button)
+        button_selected: 0, // Listen (Signals offers only one button)
         selected: [0, 0, 0],
         loading: false,
         error: None,
@@ -1990,7 +1990,7 @@ fn listen_action_flows_interface_to_streaming_result() {
     // with two message blocks when this list is exhausted.
     let events = vec![
         key(KeyCode::Enter),           // Signals column → drill into the button bar
-        key(KeyCode::Enter),           // 监听 → push Listen Detail (0 inputs)
+        key(KeyCode::Enter),           // Listen → push Listen Detail (0 inputs)
         key(KeyCode::Tab),             // 0 inputs → Trigger
         key(KeyCode::Enter),           // push Result (loading) + Effect::Listen (no-op'd)
         Msg::ListenStarted(cancel_tx), // store cancel, clear loading
@@ -2459,7 +2459,7 @@ fn copy_as_capstone_loop_closes_popup_over_result() {
                 prop_values: vec![],
                 focus: InterfaceFocus::Methods,
                 in_buttons: false,
-                button_selected: 0, // 调用
+                button_selected: 0, // Call
                 selected: [0, 0, 0],
                 loading: false,
                 error: None,
@@ -2472,7 +2472,7 @@ fn copy_as_capstone_loop_closes_popup_over_result() {
     };
     let events = vec![
         key(KeyCode::Enter),     // Methods column → drill into the button bar
-        key(KeyCode::Enter),     // 调用 → push Call Detail (1 input)
+        key(KeyCode::Enter),     // Call → push Call Detail (1 input)
         key(KeyCode::Char('4')), // type "4" then "2"
         key(KeyCode::Char('2')),
         key(KeyCode::Tab),   // Field → Trigger
@@ -2532,7 +2532,7 @@ fn copy_as_capstone_copies_busctl_command() {
         help_open: false,
     };
     update(&mut state, key(KeyCode::Enter)); // Methods column → drill into the button bar
-    update(&mut state, key(KeyCode::Enter)); // 调用 → push the Call Detail
+    update(&mut state, key(KeyCode::Enter)); // Call → push the Call Detail
     update(&mut state, key(KeyCode::Char('4')));
     update(&mut state, key(KeyCode::Char('2')));
     update(&mut state, key(KeyCode::Tab)); // → trigger
@@ -2925,7 +2925,7 @@ fn mouse_click_on_interface_method_row_switches_focus() {
 
 #[test]
 fn mouse_click_on_action_button_fires() {
-    // An Interface with a method. Clicking ActionButton(0) (the 调用 button)
+    // An Interface with a method. Clicking ActionButton(0) (the Call button)
     // selects + fires it — reusing the Enter "fire button" path, which builds
     // the Call ActionKind and pushes a Detail. Assert the stack grew.
     let mut state = busx::tui::State {
@@ -2944,7 +2944,7 @@ fn mouse_click_on_action_button_fires() {
     );
     match state.top() {
         Screen::Detail(d) => {
-            // 调用 on the selected method m1 → a Call kind for "m1".
+            // Call on the selected method m1 → a Call kind for "m1".
             assert!(
                 matches!(d.kind, ActionKind::Call { .. }),
                 "fired the call button"

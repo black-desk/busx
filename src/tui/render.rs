@@ -387,13 +387,13 @@ fn push_list_rows(
 /// The action buttons offered for a given column (mirrors `update`).
 fn action_buttons(column: InterfaceFocus) -> &'static [&'static str] {
     match column {
-        InterfaceFocus::Methods => &["调用", "监听"],
-        InterfaceFocus::Properties => &["读取", "设置", "监听"],
-        InterfaceFocus::Signals => &["监听"],
+        InterfaceFocus::Methods => &["Call", "Listen"],
+        InterfaceFocus::Properties => &["Get", "Set", "Listen"],
+        InterfaceFocus::Signals => &["Listen"],
     }
 }
 
-/// The action form: one row per input field (label + value), then a `[触发]`
+/// The action form: one row per input field (label + value), then a `[Trigger]`
 /// trigger button. The focused field / trigger is REVERSED (trigger is BOLD too).
 /// Zero-arg calls render just the trigger row.
 fn render_detail(
@@ -479,7 +479,7 @@ fn render_detail(
         style = style.add_modifier(Modifier::BOLD | Modifier::REVERSED);
     }
     frame.render_widget(
-        Paragraph::new("[触发]")
+        Paragraph::new("[Trigger]")
             .style(style)
             .alignment(Alignment::Center),
         trigger_area,
