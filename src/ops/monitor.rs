@@ -2,8 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! `busx monitor` — stream bus messages as NDJSON, with match-rule filtering
-//!.
+//! `busx monitor` — stream bus messages as NDJSON, with match-rule filtering.
 //!
 //! Each message is rendered as one JSON object per line:
 //!
