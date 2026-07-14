@@ -33,6 +33,19 @@ jobs:
     steps:
       - uses: black-desk/workflows/rust@master
 
+  # Verify the project still builds and tests pass on its declared minimum
+  # supported Rust (Cargo.toml's `rust-version`). Reuses the rust action at that
+  # toolchain — same clippy + test + coverage, just on 1.87.
+  msrv:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: black-desk/workflows/rust@master
+        with:
+          toolchain: "1.87"
+
   pass:
     name: pass
     if: always()
@@ -40,6 +53,7 @@ jobs:
       - generic
       - format
       - rust
+      - msrv
     runs-on: ubuntu-latest
     steps:
       - name: Decide whether the needed jobs succeeded or failed
