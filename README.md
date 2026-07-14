@@ -7,6 +7,7 @@ SPDX-License-Identifier: MIT
 # busx
 
 [![checks][badge-shields-io-checks]][actions]
+[![codecov][badge-shields-io-codecov]][codecov]
 [![commit activity][badge-shields-io-commit-activity]][commits]
 [![contributors][badge-shields-io-contributors]][contributors]
 [![release date][badge-shields-io-release-date]][releases]
@@ -26,6 +27,9 @@ SPDX-License-Identifier: MIT
 [releases]: https://github.com/black-desk/busx/releases
 [badge-shields-io-commits-since-release]:
   https://img.shields.io/github/commits-since/black-desk/busx/latest
+[badge-shields-io-codecov]:
+  https://codecov.io/github/black-desk/busx/graph/badge.svg?token=9DDJPR1SVE
+[codecov]: https://codecov.io/github/black-desk/busx
 
 en | [zh_CN](README.zh_CN.md)
 
