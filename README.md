@@ -47,7 +47,8 @@ once:
   supports nesting and empty containers** — closing `dbus-send`'s hard gap;
 - Output is **human-friendly text by default**; `--json` switches to
   **type-tagged JSON** (every value is `{"type":..,"data":..}`, and monitoring
-  is NDJSON — one object per line), script-friendly and pipeable to `jq` / python;
+  is NDJSON — one object per line), script-friendly and pipeable to `jq` /
+  python;
 - **It does not repeat sd-bus's mistake**: dicts with non-string keys (e.g.
   `a{uu}`) render as `[{"key":..,"value":..}]` instead of crashing (cf.
   systemd#32904);
@@ -58,14 +59,22 @@ once:
 
 ## Features
 
-- `list` — list service names + PID + process (human table, or `--json` array of objects).
+- `list` — list service names + PID + process (human table, or `--json` array of
+  objects).
 - `tree SVC` — draw the object-path tree of a single service.
 - `introspect` — list an object's interfaces / methods / signals / properties.
-- `call SVC OBJ IFACE METHOD SIG ARGS...` — call a method (SIG is a distinct, completable required arg; busctl-style input, arbitrary nesting supported).
+- `call SVC OBJ IFACE METHOD SIG ARGS...` — call a method (SIG is a distinct,
+  completable required arg; busctl-style input, arbitrary nesting supported).
 - `get` / `set` — read (no property names = `GetAll`) / write properties.
-- `monitor` — monitor bus messages, filter by match rule (`--json` emits NDJSON with `PropertiesChanged` decoded).
-- `completion` — generate a dynamic shell-completion script (live-completes services/paths/interfaces/methods/signature/properties).
-- **TUI mode** — bare `busx` (no subcommand) opens a full-screen interactive browser: drill down service → objects → interfaces → interface (methods / properties / signals). Call methods, get/set properties, listen to signals (Esc stops), and copy any operation as a `dbus-send` / `busctl` / `qdbus` / `gdbus` command. Mouse supported.
+- `monitor` — monitor bus messages, filter by match rule (`--json` emits NDJSON
+  with `PropertiesChanged` decoded).
+- `completion` — generate a dynamic shell-completion script (live-completes
+  services/paths/interfaces/methods/signature/properties).
+- **TUI mode** — bare `busx` (no subcommand) opens a full-screen interactive
+  browser: drill down service → objects → interfaces → interface (methods /
+  properties / signals). Call methods, get/set properties, listen to signals
+  (Esc stops), and copy any operation as a `dbus-send` / `busctl` / `qdbus` /
+  `gdbus` command. Mouse supported.
 
 ## Install
 

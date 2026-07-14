@@ -36,9 +36,11 @@ SPDX-License-Identifier: MIT
 `busx` 是一个用 Rust（基于 [zbus]）实现的 D-Bus 命令行工具，目标是替代
 `dbus-send` / `busctl` / `qdbus` 三件套，把它们各自的痛点一次性补齐：
 
-- 入参采用 `busctl` 风格（签名串 + 位置参数），**完整支持嵌套与空容器**
-  ——补齐 `dbus-send` 的硬伤；
-- 默认输出**人类可读文本**；加 `--json` 切到**带类型标签的 JSON**（值 `{"type":..,"data":..}`，监听为每行一个对象的 NDJSON），对脚本友好、可管道到 `jq` / python；
+- 入参采用 `busctl` 风格（签名串 + 位置参数），**完整支持嵌套与空容器** ——补齐
+  `dbus-send` 的硬伤；
+- 默认输出**人类可读文本**；加 `--json` 切到**带类型标签的 JSON**（值
+  `{"type":..,"data":..}`，监听为每行一个对象的 NDJSON），对脚本友好、可管道到
+  `jq` / python；
 - **不会重蹈 sd-bus 的覆辙**：非 string 键的 dict（如 `a{uu}`）正常渲染成
   `[{"key":..,"value":..}]`，绝不崩溃（对比 systemd#32904）；
 - 自带**动态 shell 补全**（bash/zsh），实时内省总线；
@@ -51,11 +53,17 @@ SPDX-License-Identifier: MIT
 - `list` —— 列出服务名 + PID + 进程名（人类为表，`--json` 为对象数组）。
 - `tree SVC` —— 画单个服务的对象路径树。
 - `introspect` —— 列出对象的接口 / 方法 / 信号 / 属性。
-- `call SVC OBJ IFACE METHOD SIG ARGS...` —— 调用方法（SIG 独立必填、可补全；入参 busctl 风格，支持任意嵌套）。
+- `call SVC OBJ IFACE METHOD SIG ARGS...`
+  —— 调用方法（SIG 独立必填、可补全；入参 busctl 风格，支持任意嵌套）。
 - `get` / `set` —— 读取（不传属性名走 `GetAll`）/ 写入属性。
-- `monitor` —— 监听总线消息，按 match rule 过滤（`--json` 出 NDJSON，含 `PropertiesChanged` 解码）。
-- `completion` —— 生成动态 shell 补全脚本（实时内省总线补全服务/路径/接口/方法/签名/属性）。
-- **TUI 模式** —— 裸 `busx`（不带子命令）打开全屏交互式浏览器：逐级钻取 service → objects → interfaces → interface（methods / properties / signals）。调用方法、读写属性、监听信号（Esc 停止），并将任意操作一键复制为 `dbus-send` / `busctl` / `qdbus` / `gdbus` 命令。支持鼠标。
+- `monitor` —— 监听总线消息，按 match rule 过滤（`--json` 出 NDJSON，含
+  `PropertiesChanged` 解码）。
+- `completion`
+  —— 生成动态 shell 补全脚本（实时内省总线补全服务/路径/接口/方法/签名/属性）。
+- **TUI 模式** —— 裸 `busx`（不带子命令）打开全屏交互式浏览器：逐级钻取 service
+  → objects → interfaces → interface（methods / properties /
+  signals）。调用方法、读写属性、监听信号（Esc 停止），并将任意操作一键复制为
+  `dbus-send` / `busctl` / `qdbus` / `gdbus` 命令。支持鼠标。
 
 ## 安装
 
@@ -103,23 +111,22 @@ busx --json monitor --signals --interface org.freedesktop.DBus.Properties \
 eval "$(busx completion bash)"     # zsh: eval "$(busx completion zsh)"
 ```
 
-默认输出人类可读文本；`--json` 切到 type-tagged JSON（`monitor` 为 NDJSON），
-需要缩进美化或字段变换时管道到外部 `jq` / python。所有诊断（错误、警告）打到
-stderr，前缀 `busx:`；退出码 `0` 成功 / `1` 失败。管道到 `less`/`head` 也不会
-panic（SIGPIPE 按常规处理）。
+默认输出人类可读文本；`--json` 切到 type-tagged JSON（`monitor`
+为 NDJSON），需要缩进美化或字段变换时管道到外部 `jq` /
+python。所有诊断（错误、警告）打到stderr，前缀 `busx:`；退出码 `0` 成功 / `1`
+失败。管道到 `less`/`head` 也不会 panic（SIGPIPE 按常规处理）。
 
 ## 路线图
 
 1. `emit`（发信号）、pcapng `capture`。
 2. `--host` / `--machine` 远程与容器总线。
 3. `ay` 的 bytestring 字符串视图等值渲染增强。
-4. 若 `jaq` 将来发布可复用的「flag 解析 + 运行」库入口，重新评估内嵌
-   `busx jq` 子命令。
+4. 若 `jaq` 将来发布可复用的「flag 解析 + 运行」库入口，重新评估内嵌 `busx jq`
+   子命令。
 
 ## 许可证
 
-如无特殊说明，该项目的代码以 GNU 通用公共许可协议第三版或任何更新的版本
-开源，文档、配置文件以及开发维护过程中使用的脚本等以 MIT 许可证开源。
+如无特殊说明，该项目的代码以 GNU 通用公共许可协议第三版或任何更新的版本开源，文档、配置文件以及开发维护过程中使用的脚本等以 MIT 许可证开源。
 
 该项目遵守 [REUSE 规范]。你可以使用
 [reuse-tool](https://github.com/fsfe/reuse-tool) 生成这个项目的 SPDX 列表：
