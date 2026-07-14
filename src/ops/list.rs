@@ -64,9 +64,25 @@ pub fn run(
                 widths[i] = widths[i].max(cell.chars().count());
             }
         }
-        println!("{:<w0$}  {:<w1$}  {:<w2$}", cols[0], cols[1], cols[2], w0 = widths[0], w1 = widths[1], w2 = widths[2]);
+        println!(
+            "{:<w0$}  {:<w1$}  {:<w2$}",
+            cols[0],
+            cols[1],
+            cols[2],
+            w0 = widths[0],
+            w1 = widths[1],
+            w2 = widths[2]
+        );
         for r in &rows {
-            println!("{:<w0$}  {:<w1$}  {:<w2$}", r[0], r[1], r[2], w0 = widths[0], w1 = widths[1], w2 = widths[2]);
+            println!(
+                "{:<w0$}  {:<w1$}  {:<w2$}",
+                r[0],
+                r[1],
+                r[2],
+                w0 = widths[0],
+                w1 = widths[1],
+                w2 = widths[2]
+            );
         }
     }
     Ok(())

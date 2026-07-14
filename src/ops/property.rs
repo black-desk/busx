@@ -58,11 +58,18 @@ pub fn get(
                     Ok::<_, Error>(vs)
                 })?;
                 if json {
-                    let arr: Vec<_> = values.iter().map(|v| crate::value::decode::to_tagged(v)).collect();
+                    let arr: Vec<_> = values
+                        .iter()
+                        .map(|v| crate::value::decode::to_tagged(v))
+                        .collect();
                     crate::out::print_json(&json!(arr));
                 } else {
                     for v in &values {
-                        println!("{}  {}", v.value_signature(), crate::value::pretty::pretty(v));
+                        println!(
+                            "{}  {}",
+                            v.value_signature(),
+                            crate::value::pretty::pretty(v)
+                        );
                     }
                 }
                 Ok(())
@@ -89,7 +96,10 @@ pub fn set(
 ) -> Result<()> {
     async_global_executor::block_on(async {
         let conn = dbus::conn::connect(user, system, address, verbose).await?;
-        dbus::property::set(&conn, service, object, interface, property, signature, value).await
+        dbus::property::set(
+            &conn, service, object, interface, property, signature, value,
+        )
+        .await
     })
 }
 
@@ -106,7 +116,12 @@ fn print_map(map: &[(String, OwnedValue)], json: bool) -> Result<()> {
         let mut entries: Vec<_> = map.iter().collect();
         entries.sort_by(|a, b| a.0.cmp(&b.0));
         for (k, v) in entries {
-            println!("{}  {}  {}", k, v.value_signature(), crate::value::pretty::pretty(v));
+            println!(
+                "{}  {}  {}",
+                k,
+                v.value_signature(),
+                crate::value::pretty::pretty(v)
+            );
         }
     }
     Ok(())

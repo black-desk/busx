@@ -56,7 +56,10 @@ fn array_of_pairs(d: &Dict, sig: &str) -> Json {
 /// Whether a dict-key signature is one of the D-Bus string-like types that maps
 /// naturally to a JSON object key (`s`, `o`, `g`).
 fn is_string_key(key: &Signature) -> bool {
-    matches!(key, Signature::Str | Signature::ObjectPath | Signature::Signature)
+    matches!(
+        key,
+        Signature::Str | Signature::ObjectPath | Signature::Signature
+    )
 }
 
 /// Extract a `String` key from a string-like [`Value`]. Returns `None` for any

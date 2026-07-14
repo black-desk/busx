@@ -82,8 +82,7 @@ fn monitor_emits_propertieschanged() {
         "expected PropertiesChanged:\n{stdout}"
     );
     assert_eq!(
-        first["interface"],
-        "org.freedesktop.DBus.Properties",
+        first["interface"], "org.freedesktop.DBus.Properties",
         "wrong interface:\n{stdout}"
     );
     // The receipt timestamp must be an epoch-seconds float.

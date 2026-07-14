@@ -33,7 +33,11 @@ pub async fn list_names(
     }
     // Well-known names first (alphabetical), then unique (`:1.x`) names — the
     // meaningful service names lead, the bus-driver plumbing trails.
-    names.sort_by(|a, b| a.starts_with(':').cmp(&b.starts_with(':')).then_with(|| a.cmp(b)));
+    names.sort_by(|a, b| {
+        a.starts_with(':')
+            .cmp(&b.starts_with(':'))
+            .then_with(|| a.cmp(b))
+    });
 
     let mut out = Vec::with_capacity(names.len());
     for n in &names {
@@ -45,7 +49,11 @@ pub async fn list_names(
 /// PID via `GetConnectionUnixProcessID`, process via `/proc/<pid>/comm`. Any
 /// failure (bus driver has no PID; non-Linux) degrades to `None`s.
 async fn proc_info(dbus: &DBusProxy<'_>, name: &str) -> ServiceInfo {
-    let empty = ServiceInfo { name: name.to_string(), pid: None, process: None };
+    let empty = ServiceInfo {
+        name: name.to_string(),
+        pid: None,
+        process: None,
+    };
     let bus_name = match BusName::try_from(name) {
         Ok(b) => b,
         Err(_) => return empty,
@@ -57,5 +65,9 @@ async fn proc_info(dbus: &DBusProxy<'_>, name: &str) -> ServiceInfo {
     let process = std::fs::read_to_string(format!("/proc/{pid}/comm"))
         .ok()
         .map(|s| s.trim_end_matches('\n').to_string());
-    ServiceInfo { name: name.to_string(), pid: Some(pid), process }
+    ServiceInfo {
+        name: name.to_string(),
+        pid: Some(pid),
+        process,
+    }
 }

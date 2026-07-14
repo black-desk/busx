@@ -29,11 +29,18 @@ pub fn run(
     })?;
 
     if json {
-        let out: Vec<_> = fields.iter().map(|f| crate::value::decode::to_tagged(f)).collect();
+        let out: Vec<_> = fields
+            .iter()
+            .map(|f| crate::value::decode::to_tagged(f))
+            .collect();
         crate::out::print_json(&json!(out));
     } else {
         for f in &fields {
-            println!("{}  {}", f.value_signature(), crate::value::pretty::pretty(f));
+            println!(
+                "{}  {}",
+                f.value_signature(),
+                crate::value::pretty::pretty(f)
+            );
         }
     }
     Ok(())

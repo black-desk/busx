@@ -60,18 +60,21 @@ impl<'a> Cur<'a> {
 /// are the positional value tokens laid out per busctl rules.
 pub fn parse(signature: &str, values: &[String]) -> Result<Vec<Value<'static>>> {
     let sig: Vec<char> = signature.chars().collect();
-    let mut cur = Cur { toks: values, pos: 0 };
-    let mut st = SigStream { chars: &sig, pos: 0 };
+    let mut cur = Cur {
+        toks: values,
+        pos: 0,
+    };
+    let mut st = SigStream {
+        chars: &sig,
+        pos: 0,
+    };
 
     let mut out = Vec::new();
     while !st.done() {
         out.push(parse_type(&mut st, &mut cur)?);
     }
     if cur.remaining() != 0 {
-        return Err(Error::Msg(format!(
-            "{} extra argument(s)",
-            cur.remaining()
-        )));
+        return Err(Error::Msg(format!("{} extra argument(s)", cur.remaining())));
     }
     Ok(out)
 }
@@ -115,7 +118,9 @@ impl<'a> SigStream<'a> {
 
 /// Parse one complete type out of the signature, consuming its value tokens.
 fn parse_type(st: &mut SigStream<'_>, cur: &mut Cur<'_>) -> Result<Value<'static>> {
-    let c = st.next().ok_or_else(|| Error::Msg("truncated signature".into()))?;
+    let c = st
+        .next()
+        .ok_or_else(|| Error::Msg("truncated signature".into()))?;
     Ok(match c {
         // --- basic types ---
         'y' => Value::U8(parse_num(cur.next()?, "byte")?),
@@ -143,7 +148,10 @@ fn parse_type(st: &mut SigStream<'_>, cur: &mut Cur<'_>) -> Result<Value<'static
             // Validate the inner signature and re-derive as a char slice we own.
             parse_signature(inner_sig)?;
             let inner: Vec<char> = inner_sig.chars().collect();
-            let mut ist = SigStream { chars: &inner, pos: 0 };
+            let mut ist = SigStream {
+                chars: &inner,
+                pos: 0,
+            };
             let val = parse_type(&mut ist, cur)?;
             if !ist.done() {
                 return Err(Error::Msg(format!(
@@ -173,11 +181,7 @@ fn parse_type(st: &mut SigStream<'_>, cur: &mut Cur<'_>) -> Result<Value<'static
         // --- struct: `(` already consumed; fields follow until `)`.
         '(' => parse_struct(st, cur)?,
 
-        other => {
-            return Err(Error::Msg(format!(
-                "unsupported type code `{other}`"
-            )))
-        }
+        other => return Err(Error::Msg(format!("unsupported type code `{other}`"))),
     })
 }
 
@@ -226,7 +230,10 @@ fn parse_array(elem_sig: &str, cur: &mut Cur<'_>) -> Result<Value<'static>> {
 /// already extracted from the outer stream).
 fn parse_sig_type(sig: &str, cur: &mut Cur<'_>) -> Result<Value<'static>> {
     let chars: Vec<char> = sig.chars().collect();
-    let mut st = SigStream { chars: &chars, pos: 0 };
+    let mut st = SigStream {
+        chars: &chars,
+        pos: 0,
+    };
     let v = parse_type(&mut st, cur)?;
     if !st.done() {
         return Err(Error::Msg(format!(
@@ -298,7 +305,9 @@ fn skip_complete_type(st: &mut SigStream<'_>) -> Result<()> {
 /// `Signature::try_from` error type (`zvariant::signature::Error`) is bridged to
 /// [`zvariant::Error`] (and hence our [`Error`]) via zvariant's own `From` impl.
 fn parse_signature(s: &str) -> Result<Signature> {
-    Signature::try_from(s).map_err(zvariant::Error::from).map_err(Error::from)
+    Signature::try_from(s)
+        .map_err(zvariant::Error::from)
+        .map_err(Error::from)
 }
 
 /// Collect `st[start..end)` into a validated [`Signature`] (the key / value type

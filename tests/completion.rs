@@ -35,7 +35,16 @@ fn complete_bash(words: &[&str], index: usize) -> String {
 #[test]
 fn complete_subcommand_position_lists_subcommands() {
     let out = complete_bash(&["busx", ""], 1);
-    for sub in ["call", "get", "set", "list", "tree", "introspect", "monitor", "completion"] {
+    for sub in [
+        "call",
+        "get",
+        "set",
+        "list",
+        "tree",
+        "introspect",
+        "monitor",
+        "completion",
+    ] {
         assert!(
             out.lines().any(|l| l == sub),
             "subcommand `{sub}` missing from:\n{out}"
@@ -92,7 +101,13 @@ fn complete_service_uses_address_bus() {
 #[test]
 fn complete_service_dead_address_yields_no_services() {
     let out = complete_bash(
-        &["busx", "--address", "unix:path=/nonexistent/cmp.sock", "call", ""],
+        &[
+            "busx",
+            "--address",
+            "unix:path=/nonexistent/cmp.sock",
+            "call",
+            "",
+        ],
         4,
     );
     assert!(
@@ -129,7 +144,14 @@ fn complete_service_system_flag_runs() {
 fn complete_path_position_lists_child_paths() {
     let addr = common::bus().address.clone();
     let out = complete_bash(
-        &["busx", "--address", &addr, "introspect", "org.busx.Test", ""],
+        &[
+            "busx",
+            "--address",
+            &addr,
+            "introspect",
+            "org.busx.Test",
+            "",
+        ],
         5,
     );
     assert!(
@@ -266,7 +288,10 @@ fn complete_signature_position_no_arg_method_is_empty() {
     );
     // No real (type-code) signature candidate should be offered for a no-arg
     // method. Flags may legitimately appear; filter them out.
-    let sigs: Vec<&str> = out.lines().filter(|l| !l.is_empty() && !l.starts_with('-')).collect();
+    let sigs: Vec<&str> = out
+        .lines()
+        .filter(|l| !l.is_empty() && !l.starts_with('-'))
+        .collect();
     assert!(
         sigs.is_empty(),
         "unexpected signature candidate(s) for no-arg method:\n{out}"
@@ -367,7 +392,13 @@ fn complete_set_property_position_lists_properties() {
 #[test]
 fn complete_silently_yields_nothing_on_bus_error() {
     let out = complete_bash(
-        &["busx", "--address", "unix:path=/nonexistent/busx.sock", "call", ""],
+        &[
+            "busx",
+            "--address",
+            "unix:path=/nonexistent/busx.sock",
+            "call",
+            "",
+        ],
         4,
     );
     // Global flags may still appear (they're valid at this position), but no

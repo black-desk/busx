@@ -10,10 +10,12 @@ use std::io::{self, Stdout};
 use std::time::Duration;
 
 use crossterm::event::{self, Event};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::execute;
-use ratatui::backend::{Backend, CrosstermBackend};
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 use ratatui::Terminal;
+use ratatui::backend::{Backend, CrosstermBackend};
 use zbus::Connection;
 
 use crate::dbus;
@@ -79,7 +81,8 @@ impl App {
 
 /// Launch the TUI against the real terminal.
 pub fn run(user: bool, system: bool, address: Option<&str>, verbose: bool) -> Result<()> {
-    let conn = async_global_executor::block_on(dbus::conn::connect(user, system, address, verbose))?;
+    let conn =
+        async_global_executor::block_on(dbus::conn::connect(user, system, address, verbose))?;
     let (tx, rx) = flume::unbounded::<Msg>();
     let (user_arg, system_arg, address_arg) = (user, system, address.map(String::from));
     // `CopyToClipboard` is NOT a dbus op — intercept it before `run_effect`,
@@ -93,11 +96,20 @@ pub fn run(user: bool, system: bool, address: Option<&str>, verbose: bool) -> Re
             let res = write_to_clipboard(&s);
             let _ = tx.send(Msg::ClipboardResult(res));
         }
-        other => run_effect(other, conn.clone(), tx.clone(), user_arg, system_arg, address_arg.as_deref()),
+        other => run_effect(
+            other,
+            conn.clone(),
+            tx.clone(),
+            user_arg,
+            system_arg,
+            address_arg.as_deref(),
+        ),
     };
     on_effect(Effect::FetchServices); // initial service-list fetch
 
-    let mut app = App { state: State::loading_service() };
+    let mut app = App {
+        state: State::loading_service(),
+    };
     let mut terminal = setup_terminal()?;
     let result = app.run_loop(&mut terminal, CrosstermSource { rx }, on_effect);
     // Always try to restore the terminal; prefer the loop's result over a
@@ -143,7 +155,9 @@ fn write_to_clipboard(text: &str) -> std::result::Result<(), String> {
     // Last resort: arboard (pure-Rust, but compositor-quirky on some Wayland).
     match arboard::Clipboard::new() {
         Ok(mut cb) => cb.set_text(text).map_err(|e| format!("arboard: {e}")),
-        Err(e) => Err(format!("no wl-copy/xclip/xsel on PATH and arboard unavailable: {e}")),
+        Err(e) => Err(format!(
+            "no wl-copy/xclip/xsel on PATH and arboard unavailable: {e}"
+        )),
     }
 }
 
@@ -178,7 +192,11 @@ fn run_effect(
         Effect::FetchInterfaces(service, object) => {
             async_global_executor::spawn(async move {
                 let res = dbus::introspect::introspect(&conn, &service, &object).await;
-                let _ = tx.send(Msg::InterfacesLoaded(service, object, res.map_err(|e| e.to_string())));
+                let _ = tx.send(Msg::InterfacesLoaded(
+                    service,
+                    object,
+                    res.map_err(|e| e.to_string()),
+                ));
             })
             .detach();
         }
@@ -189,7 +207,14 @@ fn run_effect(
             })
             .detach();
         }
-        Effect::CallMethod { service, object, iface, method, signature, args } => {
+        Effect::CallMethod {
+            service,
+            object,
+            iface,
+            method,
+            signature,
+            args,
+        } => {
             async_global_executor::spawn(async move {
                 let res = dbus::call::call_method(
                     &conn, &service, &object, &iface, &method, &signature, &args,
@@ -202,28 +227,53 @@ fn run_effect(
             })
             .detach();
         }
-        Effect::GetProperty { service, object, iface, property } => {
-            async_global_executor::spawn(async move {
-                let res = dbus::property::get_one(&conn, &service, &object, &iface, &property).await;
-                let _ = tx.send(
-                    Msg::ActionResult(res.map(|v| ActionResult::Get(pretty(&v))).map_err(|e| e.to_string())),
-                );
-            })
-            .detach();
-        }
-        Effect::SetProperty { service, object, iface, property, signature, value } => {
+        Effect::GetProperty {
+            service,
+            object,
+            iface,
+            property,
+        } => {
             async_global_executor::spawn(async move {
                 let res =
-                    dbus::property::set(&conn, &service, &object, &iface, &property, &signature, &[
-                        value,
-                    ])
-                    .await;
-                let _ = tx
-                    .send(Msg::ActionResult(res.map(|_| ActionResult::Set).map_err(|e| e.to_string())));
+                    dbus::property::get_one(&conn, &service, &object, &iface, &property).await;
+                let _ = tx.send(Msg::ActionResult(
+                    res.map(|v| ActionResult::Get(pretty(&v)))
+                        .map_err(|e| e.to_string()),
+                ));
             })
             .detach();
         }
-        Effect::Listen { service: _, object, iface, target } => {
+        Effect::SetProperty {
+            service,
+            object,
+            iface,
+            property,
+            signature,
+            value,
+        } => {
+            async_global_executor::spawn(async move {
+                let res = dbus::property::set(
+                    &conn,
+                    &service,
+                    &object,
+                    &iface,
+                    &property,
+                    &signature,
+                    &[value],
+                )
+                .await;
+                let _ = tx.send(Msg::ActionResult(
+                    res.map(|_| ActionResult::Set).map_err(|e| e.to_string()),
+                ));
+            })
+            .detach();
+        }
+        Effect::Listen {
+            service: _,
+            object,
+            iface,
+            target,
+        } => {
             // `address: Option<&str>` is not `'static`; own it for the spawned task.
             let address_owned = address.map(String::from);
             async_global_executor::spawn(async move {
@@ -244,8 +294,9 @@ fn run_effect(
                         {
                             Ok(c) => c,
                             Err(e) => {
-                                let _ = tx
-                                    .send(Msg::ActionResult(Err(format!("listen: connect failed: {e}"))));
+                                let _ = tx.send(Msg::ActionResult(Err(format!(
+                                    "listen: connect failed: {e}"
+                                ))));
                                 return;
                             }
                         };
@@ -260,7 +311,9 @@ fn run_effect(
                         crate::dbus::monitor::become_monitor(&dedicated, Some(&rule)).await
                     {
                         // Privileged op — some buses refuse it.
-                        let _ = tx.send(Msg::ActionResult(Err(format!("BecomeMonitor refused: {e}"))));
+                        let _ = tx.send(Msg::ActionResult(Err(format!(
+                            "BecomeMonitor refused: {e}"
+                        ))));
                         return;
                     }
                     // The BecomeMonitor rule filters at the bus, so this stream
@@ -292,14 +345,13 @@ fn run_effect(
                         return;
                     }
                 };
-                let stream =
-                    match zbus::MessageStream::for_match_rule(rule, &conn, None).await {
-                        Ok(s) => s.fuse(),
-                        Err(e) => {
-                            let _ = tx.send(Msg::ActionResult(Err(e.to_string())));
-                            return;
-                        }
-                    };
+                let stream = match zbus::MessageStream::for_match_rule(rule, &conn, None).await {
+                    Ok(s) => s.fuse(),
+                    Err(e) => {
+                        let _ = tx.send(Msg::ActionResult(Err(e.to_string())));
+                        return;
+                    }
+                };
                 let mut stream = stream;
                 loop {
                     futures::select! {
@@ -391,13 +443,21 @@ fn non_mouse(ev: Event) -> Option<Msg> {
 fn setup_terminal() -> Result<Tui> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, crossterm::event::EnableMouseCapture)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        crossterm::event::EnableMouseCapture
+    )?;
     Ok(Terminal::new(CrosstermBackend::new(stdout))?)
 }
 
 fn restore_terminal(terminal: &mut Tui) -> Result<()> {
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, crossterm::event::DisableMouseCapture)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        crossterm::event::DisableMouseCapture
+    )?;
     terminal.show_cursor()?;
     Ok(())
 }

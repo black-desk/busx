@@ -2,7 +2,10 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use busx::{cli::{Cli, Command}, complete, error, ops, tui};
+use busx::{
+    cli::{Cli, Command},
+    complete, error, ops, tui,
+};
 use clap::Parser;
 
 fn main() -> std::process::ExitCode {
@@ -29,7 +32,14 @@ fn main() -> std::process::ExitCode {
     }
 
     let cli = Cli::parse();
-    let Cli { user, system, address, verbose, json, command } = cli;
+    let Cli {
+        user,
+        system,
+        address,
+        verbose,
+        json,
+        command,
+    } = cli;
     let result = match command {
         None => tui::run(user, system, address.as_deref(), verbose),
         Some(command) => run_command(user, system, address, verbose, json, command),
@@ -52,7 +62,11 @@ fn run_command(
     command: Command,
 ) -> error::Result<()> {
     match command {
-        Command::List { unique, acquired, activatable } => ops::list::run(
+        Command::List {
+            unique,
+            acquired,
+            activatable,
+        } => ops::list::run(
             user,
             system,
             address.as_deref(),
@@ -62,7 +76,12 @@ fn run_command(
             acquired,
             activatable,
         ),
-        Command::Get { service, object, interface, props } => ops::property::get(
+        Command::Get {
+            service,
+            object,
+            interface,
+            props,
+        } => ops::property::get(
             user,
             system,
             address.as_deref(),
@@ -73,7 +92,14 @@ fn run_command(
             interface.as_deref(),
             &props,
         ),
-        Command::Call { service, object, interface, method, signature, args } => ops::call::run(
+        Command::Call {
+            service,
+            object,
+            interface,
+            method,
+            signature,
+            args,
+        } => ops::call::run(
             user,
             system,
             address.as_deref(),
@@ -86,21 +112,30 @@ fn run_command(
             &signature,
             &args,
         ),
-        Command::Set { service, object, interface, property, signature, value } => {
-            ops::property::set(
-                user,
-                system,
-                address.as_deref(),
-                verbose,
-                &service,
-                &object,
-                &interface,
-                &property,
-                &signature,
-                &value,
-            )
-        }
-        Command::Introspect { service, object, interface } => ops::introspect::run(
+        Command::Set {
+            service,
+            object,
+            interface,
+            property,
+            signature,
+            value,
+        } => ops::property::set(
+            user,
+            system,
+            address.as_deref(),
+            verbose,
+            &service,
+            &object,
+            &interface,
+            &property,
+            &signature,
+            &value,
+        ),
+        Command::Introspect {
+            service,
+            object,
+            interface,
+        } => ops::introspect::run(
             user,
             system,
             address.as_deref(),
@@ -110,14 +145,9 @@ fn run_command(
             &object,
             interface.as_deref(),
         ),
-        Command::Tree { service } => ops::tree::run(
-            user,
-            system,
-            address.as_deref(),
-            verbose,
-            json,
-            &service,
-        ),
+        Command::Tree { service } => {
+            ops::tree::run(user, system, address.as_deref(), verbose, json, &service)
+        }
         Command::Monitor {
             services,
             interface,

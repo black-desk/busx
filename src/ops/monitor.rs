@@ -80,7 +80,12 @@ fn msg_to_json(m: &zbus::Message) -> Json {
     let args: Vec<Json> = m
         .body()
         .deserialize::<Structure>()
-        .map(|s| s.fields().iter().map(crate::value::decode::to_tagged).collect())
+        .map(|s| {
+            s.fields()
+                .iter()
+                .map(crate::value::decode::to_tagged)
+                .collect()
+        })
         .unwrap_or_default();
 
     json!({
@@ -119,23 +124,28 @@ fn matches_service(m: &zbus::Message, services: &[String]) -> bool {
 fn parse_duration(s: &str) -> Result<Duration> {
     let s = s.trim();
     if let Some(num) = s.strip_suffix("us") {
-        return Ok(Duration::from_micros(num.parse().map_err(|_| {
-            Error::Msg(format!("invalid --timeout: {s}"))
-        })?));
+        return Ok(Duration::from_micros(
+            num.parse()
+                .map_err(|_| Error::Msg(format!("invalid --timeout: {s}")))?,
+        ));
     }
     if let Some(num) = s.strip_suffix("ms") {
-        return Ok(Duration::from_millis(num.parse().map_err(|_| {
-            Error::Msg(format!("invalid --timeout: {s}"))
-        })?));
+        return Ok(Duration::from_millis(
+            num.parse()
+                .map_err(|_| Error::Msg(format!("invalid --timeout: {s}")))?,
+        ));
     }
     if let Some(num) = s.strip_suffix('s') {
-        return Ok(Duration::from_secs(num.parse().map_err(|_| {
-            Error::Msg(format!("invalid --timeout: {s}"))
-        })?));
+        return Ok(Duration::from_secs(
+            num.parse()
+                .map_err(|_| Error::Msg(format!("invalid --timeout: {s}")))?,
+        ));
     }
     if let Some(num) = s.strip_suffix('m') {
         return Ok(Duration::from_secs(
-            (num.parse::<u64>().map_err(|_| Error::Msg(format!("invalid --timeout: {s}")))?) * 60,
+            (num.parse::<u64>()
+                .map_err(|_| Error::Msg(format!("invalid --timeout: {s}")))?)
+                * 60,
         ));
     }
     // Bare number ⇒ seconds.

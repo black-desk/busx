@@ -12,8 +12,8 @@ pub mod state;
 pub mod update;
 
 pub use app::run;
-pub use copy::{generate, CopyOp, Tool};
+pub use copy::{CopyOp, Tool, generate};
 pub use msg::{Effect, Msg};
 pub use render::render;
-pub use state::{flatten_paths, ClickTarget, CopyAsPopup, Screen, ServiceScreen, State};
+pub use state::{ClickTarget, CopyAsPopup, Screen, ServiceScreen, State, flatten_paths};
 pub use update::update;

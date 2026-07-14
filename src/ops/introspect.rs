@@ -29,7 +29,10 @@ pub fn run(
     // Optional interface filter: keep only the named interface (still an array).
     let interfaces: Vec<&Interface> = node.interfaces().iter().collect();
     let interfaces: Vec<&Interface> = match interface {
-        Some(filter) => interfaces.into_iter().filter(|i| i.name().as_ref() == filter).collect(),
+        Some(filter) => interfaces
+            .into_iter()
+            .filter(|i| i.name().as_ref() == filter)
+            .collect(),
         None => interfaces,
     };
 
@@ -92,8 +95,18 @@ fn print_human(interfaces: &[&Interface]) {
     for iface in interfaces {
         println!("{}", iface.name());
         for m in iface.methods() {
-            let in_sig: String = m.args().iter().filter(|a| a.direction() == Some(ArgDirection::In)).map(|a| sig_str(a.ty())).collect();
-            let out_sig: String = m.args().iter().filter(|a| a.direction() == Some(ArgDirection::Out)).map(|a| sig_str(a.ty())).collect();
+            let in_sig: String = m
+                .args()
+                .iter()
+                .filter(|a| a.direction() == Some(ArgDirection::In))
+                .map(|a| sig_str(a.ty()))
+                .collect();
+            let out_sig: String = m
+                .args()
+                .iter()
+                .filter(|a| a.direction() == Some(ArgDirection::Out))
+                .map(|a| sig_str(a.ty()))
+                .collect();
             let sig = match (in_sig.is_empty(), out_sig.is_empty()) {
                 (false, false) => format!("{in_sig} → {out_sig}"),
                 (true, false) => format!("→ {out_sig}"),
@@ -107,7 +120,12 @@ fn print_human(interfaces: &[&Interface]) {
             println!("  .{:<16} signal   {args}", s.name());
         }
         for p in iface.properties() {
-            println!("  .{:<16} prop     {} [{}]", p.name(), sig_str(p.ty()), access_str(p.access()));
+            println!(
+                "  .{:<16} prop     {} [{}]",
+                p.name(),
+                sig_str(p.ty()),
+                access_str(p.access())
+            );
         }
     }
 }

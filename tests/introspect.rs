@@ -11,7 +11,14 @@ fn introspect_lists_test_interface() {
     let addr = common::bus().address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
-        .args(["--json", "--address", &addr, "introspect", "org.busx.Test", "/org/busx/Test"])
+        .args([
+            "--json",
+            "--address",
+            &addr,
+            "introspect",
+            "org.busx.Test",
+            "/org/busx/Test",
+        ])
         .ok()
         .unwrap();
     let v: Value = serde_json::from_slice(&out.stdout).expect("valid json");
@@ -61,7 +68,11 @@ fn introspect_interface_filter_returns_single_match() {
         .unwrap();
     let v: Value = serde_json::from_slice(&out.stdout).expect("valid json");
     let arr = v.as_array().expect("still an array when filtered");
-    assert_eq!(arr.len(), 1, "filter keeps exactly the requested iface: {v}");
+    assert_eq!(
+        arr.len(),
+        1,
+        "filter keeps exactly the requested iface: {v}"
+    );
     assert_eq!(arr[0]["name"], "org.busx.Test");
 }
 
@@ -93,14 +104,32 @@ fn introspect_human_lists_interface_members() {
     let addr = common::bus().address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
-        .args(["--address", &addr, "introspect", "org.busx.Test", "/org/busx/Test"])
+        .args([
+            "--address",
+            &addr,
+            "introspect",
+            "org.busx.Test",
+            "/org/busx/Test",
+        ])
         .ok()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("org.busx.Test"), "missing iface header:\n{stdout}");
+    assert!(
+        stdout.contains("org.busx.Test"),
+        "missing iface header:\n{stdout}"
+    );
     // zbus exposes Rust snake_case methods as PascalCase.
-    assert!(stdout.contains("BumpVolume"), "missing BumpVolume method:\n{stdout}");
-    assert!(stdout.contains("volume"), "missing volume property:\n{stdout}");
-    assert!(stdout.contains("method"), "missing 'method' kind:\n{stdout}");
+    assert!(
+        stdout.contains("BumpVolume"),
+        "missing BumpVolume method:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("volume"),
+        "missing volume property:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("method"),
+        "missing 'method' kind:\n{stdout}"
+    );
     assert!(stdout.contains("prop"), "missing 'prop' kind:\n{stdout}");
 }

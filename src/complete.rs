@@ -23,7 +23,7 @@ use std::ffi::OsStr;
 
 use clap::builder::ValueHint;
 use clap::{Arg, ArgAction, Command};
-use clap_complete::{ArgValueCompleter, CompletionCandidate, CompleteEnv, Shell};
+use clap_complete::{ArgValueCompleter, CompleteEnv, CompletionCandidate, Shell};
 use zbus::blocking::Connection;
 use zbus::blocking::fdo::DBusProxy;
 use zbus_xml::{ArgDirection, Node};
@@ -88,12 +88,19 @@ fn shell_name(shell: Shell) -> Option<&'static str> {
 /// completion — not the real value semantics.
 fn command() -> Command {
     let global = |name: &'static str, help: &'static str| {
-        Arg::new(name).long(name).global(true).action(ArgAction::SetTrue).help(help)
+        Arg::new(name)
+            .long(name)
+            .global(true)
+            .action(ArgAction::SetTrue)
+            .help(help)
     };
     Command::new("busx")
         .bin_name("busx")
         .about("D-Bus CLI (dbus-send/busctl/qdbus replacement)")
-        .arg(global("user", "Connect to the session bus (fallback to system)"))
+        .arg(global(
+            "user",
+            "Connect to the session bus (fallback to system)",
+        ))
         .arg(global("system", "Connect to the system bus"))
         .arg(
             Arg::new("address")
@@ -104,9 +111,15 @@ fn command() -> Command {
                 .help("Connect to the bus at ADDRESS"),
         )
         .arg(global("verbose", "Verbose diagnostics on stderr"))
-        .arg(global("json", "Emit type-tagged JSON (default: human text)"))
+        .arg(global(
+            "json",
+            "Emit type-tagged JSON (default: human text)",
+        ))
         .subcommands([
-            subcommand("list").arg(flag("unique")).arg(flag("acquired")).arg(flag("activatable")),
+            subcommand("list")
+                .arg(flag("unique"))
+                .arg(flag("acquired"))
+                .arg(flag("activatable")),
             subcommand("tree").arg(positional("service", Service)),
             subcommand("introspect")
                 .arg(positional("service", Service))
@@ -137,10 +150,25 @@ fn command() -> Command {
                 .arg(opt("member"))
                 .arg(opt("path"))
                 .arg(opt("sender"))
-                .arg(Arg::new("match").long("match").value_name("MATCH").action(ArgAction::Set))
+                .arg(
+                    Arg::new("match")
+                        .long("match")
+                        .value_name("MATCH")
+                        .action(ArgAction::Set),
+                )
                 .arg(flag("signals"))
-                .arg(Arg::new("limit_messages").long("limit-messages").value_name("N").action(ArgAction::Set))
-                .arg(Arg::new("timeout").long("timeout").value_name("DUR").action(ArgAction::Set)),
+                .arg(
+                    Arg::new("limit_messages")
+                        .long("limit-messages")
+                        .value_name("N")
+                        .action(ArgAction::Set),
+                )
+                .arg(
+                    Arg::new("timeout")
+                        .long("timeout")
+                        .value_name("DUR")
+                        .action(ArgAction::Set),
+                ),
             Command::new("completion")
                 .about("Generate shell completion script")
                 .arg(
@@ -283,12 +311,17 @@ fn complete_positional(kind: Kind, current: &OsStr) -> Vec<CompletionCandidate> 
         Some(s) => s,
         None => return Vec::new(),
     };
-    let conn = match connect(parsed.user, parsed.system, parsed.address.as_deref(), parsed.verbose) {
+    let conn = match connect(
+        parsed.user,
+        parsed.system,
+        parsed.address.as_deref(),
+        parsed.verbose,
+    ) {
         Ok(c) => c,
         Err(_) => return Vec::new(),
     };
-    let cands = positional_candidates(&conn, sub, &parsed.positionals, kind, current)
-        .unwrap_or_default();
+    let cands =
+        positional_candidates(&conn, sub, &parsed.positionals, kind, current).unwrap_or_default();
     cands.into_iter().map(CompletionCandidate::new).collect()
 }
 
@@ -360,7 +393,10 @@ fn parse_args() -> Option<ParsedArgs> {
             if let Some(rest) = token.strip_prefix("--") {
                 // Split `--flag=value` into `(flag, Some(value))`; a bare `--flag`
                 // is `(flag, None)` and may consume the *next* token as its value.
-                let (flag, inline_value) = rest.split_once('=').map(|(f, v)| (f, Some(v))).unwrap_or((rest, None));
+                let (flag, inline_value) = rest
+                    .split_once('=')
+                    .map(|(f, v)| (f, Some(v)))
+                    .unwrap_or((rest, None));
                 let consume_next = inline_value.is_none() && takes_value(flag);
                 match flag {
                     "address" => {
@@ -390,14 +426,27 @@ fn parse_args() -> Option<ParsedArgs> {
         positionals.pop();
     }
 
-    Some(ParsedArgs { user, system, address, verbose, subcommand, positionals })
+    Some(ParsedArgs {
+        user,
+        system,
+        address,
+        verbose,
+        subcommand,
+        positionals,
+    })
 }
 
 /// Whether a long flag (without the `--`) consumes a separate value token.
 fn takes_value(name: &str) -> bool {
     matches!(
         name,
-        "address" | "interface" | "member" | "path" | "sender" | "match" | "limit-messages"
+        "address"
+            | "interface"
+            | "member"
+            | "path"
+            | "sender"
+            | "match"
+            | "limit-messages"
             | "timeout"
     )
 }
@@ -415,16 +464,14 @@ fn positional_candidates(
     let nth = |i: usize| positionals.get(i).map(|s| s.as_str()).unwrap_or("");
     match (sub, kind) {
         (_, Kind::Service) => service_names(conn, partial),
-        ("call" | "get" | "set" | "introspect", Kind::Path) => {
-            child_paths(conn, nth(0), partial)
-        }
+        ("call" | "get" | "set" | "introspect", Kind::Path) => child_paths(conn, nth(0), partial),
         ("call" | "get" | "set" | "introspect", Kind::Interface) => {
             interface_names(conn, nth(0), nth(1), partial)
         }
         ("call", Kind::Method) => method_names(conn, nth(0), nth(1), nth(2), partial),
-        ("call", Kind::Signature) => method_input_signature_candidates(
-            conn, nth(0), nth(1), nth(2), nth(3), partial,
-        ),
+        ("call", Kind::Signature) => {
+            method_input_signature_candidates(conn, nth(0), nth(1), nth(2), nth(3), partial)
+        }
         // `get`'s property positional is variadic: every position from index 3
         // onward (after service/object/[interface]) completes property names.
         // `filled[2]` is the interface the user typed (possibly empty for `get`,
@@ -574,7 +621,9 @@ fn parse_node(xml: &str) -> Option<Node<'static>> {
 /// Parse `<node name="..."/>` child entries — the immediate children of the root
 /// (only one level; the shell re-invokes completion for the next path segment).
 fn parse_node_names(xml: &str) -> Vec<String> {
-    let Some(node) = parse_node(xml) else { return Vec::new() };
+    let Some(node) = parse_node(xml) else {
+        return Vec::new();
+    };
     node.nodes()
         .iter()
         .filter_map(|c| c.name().map(|s| s.to_string()))
@@ -584,13 +633,20 @@ fn parse_node_names(xml: &str) -> Vec<String> {
 /// The interface names that are direct children of the root `<node>` (the
 /// object's own interfaces, including the standard ones).
 fn parse_root_interface_names(xml: &str) -> Vec<String> {
-    let Some(node) = parse_node(xml) else { return Vec::new() };
-    node.interfaces().iter().map(|i| i.name().to_string()).collect()
+    let Some(node) = parse_node(xml) else {
+        return Vec::new();
+    };
+    node.interfaces()
+        .iter()
+        .map(|i| i.name().to_string())
+        .collect()
 }
 
 /// The method names of `interface` (a direct child of the root).
 fn parse_interface_methods(xml: &str, interface: &str) -> Vec<String> {
-    let Some(node) = parse_node(xml) else { return Vec::new() };
+    let Some(node) = parse_node(xml) else {
+        return Vec::new();
+    };
     node.interfaces()
         .iter()
         .find(|i| i.name().as_ref() == interface)
@@ -603,7 +659,9 @@ fn parse_interface_methods(xml: &str, interface: &str) -> Vec<String> {
 /// `interface` is empty, collects from all of the root's own interfaces — useful
 /// for `get` when the interface positional is omitted.
 fn parse_interface_properties(xml: &str, interface: &str) -> Vec<String> {
-    let Some(node) = parse_node(xml) else { return Vec::new() };
+    let Some(node) = parse_node(xml) else {
+        return Vec::new();
+    };
     node.interfaces()
         .iter()
         .filter(|i| interface.is_empty() || i.name().as_ref() == interface)
@@ -616,8 +674,14 @@ fn parse_interface_properties(xml: &str, interface: &str) -> Vec<String> {
 /// `Some("")` for a no-arg method.
 fn parse_method_input_signature(xml: &str, interface: &str, method: &str) -> Option<String> {
     let node = parse_node(xml)?;
-    let iface = node.interfaces().iter().find(|i| i.name().as_ref() == interface)?;
-    let m = iface.methods().iter().find(|m| m.name().as_ref() == method)?;
+    let iface = node
+        .interfaces()
+        .iter()
+        .find(|i| i.name().as_ref() == interface)?;
+    let m = iface
+        .methods()
+        .iter()
+        .find(|m| m.name().as_ref() == method)?;
     let sig: String = m
         .args()
         .iter()

@@ -5,11 +5,11 @@
 //! Pure rendering. Reads `&State`; draws breadcrumb + top screen
 //! + key-hint. Nothing else.
 
+use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
-use ratatui::Frame;
 
 use crate::tui::copy::Tool;
 use crate::tui::state::{
@@ -21,7 +21,11 @@ pub fn render(frame: &mut Frame, state: &State, targets: &mut Vec<(Rect, ClickTa
     let area = frame.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(1), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
         .split(area);
     let (crumb, main, footer) = (chunks[0], chunks[1], chunks[2]);
 
@@ -61,7 +65,13 @@ fn screen_crumb(s: &Screen) -> String {
         Screen::Objects(o) => o.service.clone(),
         Screen::Interfaces(i) => format!("{} {}", i.service, i.object),
         Screen::Interface(i) => format!("{}:{}:{}", i.service, i.object, i.interface),
-        Screen::Detail(d) => format!("{}:{}:{} › {}", d.service, d.object, d.interface, action_title(&d.kind)),
+        Screen::Detail(d) => format!(
+            "{}:{}:{} › {}",
+            d.service,
+            d.object,
+            d.interface,
+            action_title(&d.kind)
+        ),
         Screen::Result(r) => r.title.clone(),
     }
 }
@@ -93,7 +103,11 @@ fn render_service(
     s: &ServiceScreen,
     targets: &mut Vec<(Rect, ClickTarget)>,
 ) {
-    let title = if s.loading { "Services (loading…)" } else { "Services" };
+    let title = if s.loading {
+        "Services (loading…)"
+    } else {
+        "Services"
+    };
     let block = Block::default().borders(Borders::ALL).title(title);
 
     if let Some(err) = &s.error {
@@ -151,7 +165,10 @@ fn render_service(
     // so row `i` is at `y = inner.y + i`, full inner width, height 1.
     let inner = block.inner(area);
     for i in 0..s.services.len() {
-        targets.push((Rect::new(inner.x, inner.y + i as u16, inner.width, 1), ClickTarget::ServiceRow(i)));
+        targets.push((
+            Rect::new(inner.x, inner.y + i as u16, inner.width, 1),
+            ClickTarget::ServiceRow(i),
+        ));
     }
 }
 
@@ -161,13 +178,21 @@ fn render_objects(
     o: &crate::tui::state::ObjectsScreen,
     targets: &mut Vec<(Rect, ClickTarget)>,
 ) {
-    let title = if o.loading { "Objects (loading…)" } else { "Objects" };
+    let title = if o.loading {
+        "Objects (loading…)"
+    } else {
+        "Objects"
+    };
     let block = Block::default().borders(Borders::ALL).title(title);
     if let Some(err) = &o.error {
         frame.render_widget(Paragraph::new(format!("error: {err}")).block(block), area);
         return;
     }
-    let items: Vec<ListItem> = o.paths.iter().map(|p| ListItem::new(Line::from(p.clone()))).collect();
+    let items: Vec<ListItem> = o
+        .paths
+        .iter()
+        .map(|p| ListItem::new(Line::from(p.clone())))
+        .collect();
     let list = List::new(items)
         .block(block.clone())
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
@@ -179,7 +204,10 @@ fn render_objects(
 
     let inner = block.inner(area);
     for i in 0..o.paths.len() {
-        targets.push((Rect::new(inner.x, inner.y + i as u16, inner.width, 1), ClickTarget::ObjectsRow(i)));
+        targets.push((
+            Rect::new(inner.x, inner.y + i as u16, inner.width, 1),
+            ClickTarget::ObjectsRow(i),
+        ));
     }
 }
 
@@ -189,13 +217,21 @@ fn render_interfaces(
     i: &crate::tui::state::InterfacesScreen,
     targets: &mut Vec<(Rect, ClickTarget)>,
 ) {
-    let title = if i.loading { "Interfaces (loading…)" } else { "Interfaces" };
+    let title = if i.loading {
+        "Interfaces (loading…)"
+    } else {
+        "Interfaces"
+    };
     let block = Block::default().borders(Borders::ALL).title(title);
     if let Some(err) = &i.error {
         frame.render_widget(Paragraph::new(format!("error: {err}")).block(block), area);
         return;
     }
-    let items: Vec<ListItem> = i.names.iter().map(|n| ListItem::new(Line::from(n.clone()))).collect();
+    let items: Vec<ListItem> = i
+        .names
+        .iter()
+        .map(|n| ListItem::new(Line::from(n.clone())))
+        .collect();
     let list = List::new(items)
         .block(block.clone())
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
@@ -276,7 +312,11 @@ fn render_interface(
                 ListItem::new(Line::from(format!("{n}  {sig}  {val}")))
             })
             .collect();
-        let p_title = if i.loading { "properties (loading…)" } else { "properties" };
+        let p_title = if i.loading {
+            "properties (loading…)"
+        } else {
+            "properties"
+        };
         render_sub_list(
             frame,
             chunks[1],
@@ -285,7 +325,12 @@ fn render_interface(
             i.selected[1],
             !i.in_buttons && i.focus == InterfaceFocus::Properties,
         );
-        push_list_rows(targets, chunks[1], i.properties.len(), ClickTarget::PropertyRow);
+        push_list_rows(
+            targets,
+            chunks[1],
+            i.properties.len(),
+            ClickTarget::PropertyRow,
+        );
     }
 
     let signals: Vec<ListItem> = i
@@ -310,7 +355,14 @@ fn render_interface(
         .map(|b| ListItem::new(Line::from(*b)))
         .collect();
     let n_buttons = buttons.len();
-    render_sub_list(frame, right, "actions", buttons, i.button_selected, i.in_buttons);
+    render_sub_list(
+        frame,
+        right,
+        "actions",
+        buttons,
+        i.button_selected,
+        i.in_buttons,
+    );
     push_list_rows(targets, right, n_buttons, ClickTarget::ActionButton);
 }
 
@@ -325,7 +377,10 @@ fn push_list_rows(
 ) {
     let inner = Block::default().borders(Borders::ALL).inner(area);
     for i in 0..n_rows {
-        targets.push((Rect::new(inner.x, inner.y + i as u16, inner.width, 1), make(i)));
+        targets.push((
+            Rect::new(inner.x, inner.y + i as u16, inner.width, 1),
+            make(i),
+        ));
     }
 }
 
@@ -400,9 +455,15 @@ fn render_detail(
             Line::from(vec![
                 Span::styled("▶ ", Style::default().fg(Color::Yellow)),
                 Span::raw(format!("{label}  ")),
-                Span::styled(before.to_string(), Style::default().add_modifier(Modifier::REVERSED)),
+                Span::styled(
+                    before.to_string(),
+                    Style::default().add_modifier(Modifier::REVERSED),
+                ),
                 Span::styled("▏", Style::default().fg(Color::Yellow)),
-                Span::styled(after.to_string(), Style::default().add_modifier(Modifier::REVERSED)),
+                Span::styled(
+                    after.to_string(),
+                    Style::default().add_modifier(Modifier::REVERSED),
+                ),
             ])
         } else {
             Line::raw(format!("  {label}  {value}"))
@@ -418,7 +479,9 @@ fn render_detail(
         style = style.add_modifier(Modifier::BOLD | Modifier::REVERSED);
     }
     frame.render_widget(
-        Paragraph::new("[触发]").style(style).alignment(Alignment::Center),
+        Paragraph::new("[触发]")
+            .style(style)
+            .alignment(Alignment::Center),
         trigger_area,
     );
     targets.push((trigger_area, ClickTarget::DetailTrigger));
@@ -454,7 +517,12 @@ fn render_result(frame: &mut Frame, area: Rect, r: &ResultScreen) {
         match &r.result {
             Some(ActionResult::Call(lines)) => {
                 // Skip `scroll` leading lines (update clamps the scroll value).
-                lines.iter().skip(r.scroll).map(String::as_str).collect::<Vec<_>>().join("\n")
+                lines
+                    .iter()
+                    .skip(r.scroll)
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .join("\n")
             }
             Some(ActionResult::Get(v)) => v.clone(),
             Some(ActionResult::Set) => "ok".to_string(),
@@ -474,7 +542,11 @@ fn render_sub_list(
     selected: usize,
     focused: bool,
 ) {
-    let display_title = if focused { format!("▶ {title}") } else { title.to_string() };
+    let display_title = if focused {
+        format!("▶ {title}")
+    } else {
+        title.to_string()
+    };
     let mut block = Block::default().borders(Borders::ALL).title(display_title);
     if focused {
         block = block.border_style(Style::default().add_modifier(Modifier::BOLD));
@@ -494,7 +566,9 @@ fn render_keyhint(frame: &mut Frame, area: Rect, screen: &Screen) {
         Screen::Service(_) => "↑↓ select · Enter open · q quit · ? help",
         Screen::Objects(_) => "↑↓ select · Enter open · Esc back · q quit · ? help",
         Screen::Interfaces(_) => "↑↓ select · Enter open · Esc back · q quit · ? help",
-        Screen::Interface(_) => "Tab column · ↑↓ select · Enter open · r refresh · Esc back · q quit · ? help",
+        Screen::Interface(_) => {
+            "Tab column · ↑↓ select · Enter open · r refresh · Esc back · q quit · ? help"
+        }
         Screen::Detail(_) => "Tab move · Enter trigger · c copy-as · Esc back · q quit · ? help",
         // A streaming-listen Result is armed when it has streamed messages or a
         // live cancel sender; on those, Esc both pops the screen and stops the
@@ -538,7 +612,11 @@ fn render_popup(
     let inner = block.inner(popup_area);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(4), Constraint::Min(1), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(4),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
         .split(inner);
     let (list_area, preview_area, status_area) = (chunks[0], chunks[1], chunks[2]);
 
@@ -591,7 +669,9 @@ fn render_popup(
     // "copying…" placeholder stays default-colored while the copy is in flight.
     if let Some(status) = &popup.status {
         let style = if status == "copied" {
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD)
         } else if status.starts_with("error") {
             Style::default().fg(Color::Red)
         } else {
@@ -635,7 +715,9 @@ navigation: Service → Objects → Interfaces → Interface → Detail → Resu
 fn render_help(frame: &mut Frame, area: Rect) {
     let popup_area = centered_rect(70, 70, area);
     frame.render_widget(Clear, popup_area);
-    let block = Block::default().borders(Borders::ALL).title("help — Esc or ? to close");
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("help — Esc or ? to close");
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
     frame.render_widget(
@@ -655,5 +737,10 @@ fn centered_rect(pct_x: u16, pct_y: u16, r: Rect) -> Rect {
     }
     let (mx, w) = split_rect(r.width, pct_x);
     let (my, h) = split_rect(r.height, pct_y);
-    Rect { x: r.x + mx, y: r.y + my, width: w, height: h }
+    Rect {
+        x: r.x + mx,
+        y: r.y + my,
+        width: w,
+        height: h,
+    }
 }
