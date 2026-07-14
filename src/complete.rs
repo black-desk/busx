@@ -569,9 +569,9 @@ fn property_names(
     names.dedup();
     Ok(names)
 }
-/// single-candidate completion list filtered by the partial token. For a no-arg
-/// method the signature is `""`, which is returned as-is so the user can accept
-/// it.
+/// Candidate input signature of the method — a single candidate, filtered by
+/// the partial token. For a no-arg method the signature is `""`, returned
+/// as-is so the user can accept it.
 fn method_input_signature_candidates(
     conn: &Connection,
     service: &str,

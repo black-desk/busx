@@ -2,11 +2,10 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Monitor support shared by the CLI `monitor` op and the the TUI monitor
-//!. The pure match-rule builder and the `dbus-send`-style message
+//! Monitor support shared by the CLI `monitor` op and the TUI monitor.
+//! The pure match-rule builder and the `dbus-send`-style message
 //! formatter (`format_message`) live here; the async `become_monitor` mirrors
-//! the blocking CLI op. The async streaming + `BusMessage` decoding arrive with
-//! the TUI monitor phase.
+//! the blocking CLI op.
 
 use crate::error::{Error, Result};
 use zbus::MatchRule;
