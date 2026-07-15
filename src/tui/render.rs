@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragra
 use crate::tui::copy::Tool;
 use crate::tui::state::{
     ActionKind, ActionResult, ClickTarget, CopyAsPopup, DetailFocus, DetailScreen, InterfaceFocus,
-    ResultScreen, Screen, ServiceScreen, State,
+    ListenTarget, ResultScreen, Screen, ServiceScreen, State,
 };
 
 /// `scroll` carries the persisted list-scroll offsets for the *top* screen's
@@ -72,35 +72,46 @@ pub fn render(
 }
 
 fn render_breadcrumb(frame: &mut Frame, area: Rect, state: &State) {
-    let parts: Vec<String> = state.screens.iter().map(screen_crumb).collect();
+    let parts: Vec<String> = state.screens.iter().filter_map(screen_crumb).collect();
     let text = parts.join(" > ");
     frame.render_widget(Paragraph::new(text), area);
 }
 
-fn screen_crumb(s: &Screen) -> String {
+fn screen_crumb(s: &Screen) -> Option<String> {
+    // The root Service list has no label of its own: dropping it keeps the
+    // breadcrumb leading with the actual service name once you drill in.
     match s {
-        Screen::Service(_) => "services".to_string(),
-        Screen::Objects(o) => o.service.clone(),
-        Screen::Interfaces(i) => format!("{} {}", i.service, i.object),
-        Screen::Interface(i) => format!("{}:{}:{}", i.service, i.object, i.interface),
-        Screen::Detail(d) => format!(
+        Screen::Service(_) => None,
+        Screen::Objects(o) => Some(o.service.clone()),
+        Screen::Interfaces(i) => Some(format!("{} {}", i.service, i.object)),
+        Screen::Interface(i) => Some(format!("{}:{}:{}", i.service, i.object, i.interface)),
+        Screen::Detail(d) => Some(format!(
             "{}:{}:{} › {}",
             d.service,
             d.object,
             d.interface,
-            action_title(&d.kind)
-        ),
-        Screen::Result(r) => r.title.clone(),
+            action_title(&d.kind, &d.interface)
+        )),
+        Screen::Result(r) => Some(r.title.clone()),
     }
 }
 
-/// Short label for an action kind (breadcrumb / Detail title).
-fn action_title(kind: &ActionKind) -> String {
+/// Short label for an action kind (breadcrumb / Detail title). The member is
+/// qualified with its interface so the title is self-describing outside the
+/// breadcrumb path — e.g. `call org.busx.Test.ListUnits`,
+/// `get org.busx.Test.volume`, `listen org.busx.Test.Changed`.
+fn action_title(kind: &ActionKind, iface: &str) -> String {
     match kind {
-        ActionKind::Call { method, .. } => format!("call {method}"),
-        ActionKind::Get { property } => format!("get {property}"),
-        ActionKind::Set { property, .. } => format!("set {property}"),
-        ActionKind::Listen { .. } => "listen".to_string(),
+        ActionKind::Call { method, .. } => format!("call {iface}.{method}"),
+        ActionKind::Get { property } => format!("get {iface}.{property}"),
+        ActionKind::Set { property, .. } => format!("set {iface}.{property}"),
+        ActionKind::Listen { target } => {
+            let member = match target {
+                ListenTarget::Signal { member } | ListenTarget::Method { member } => member,
+                ListenTarget::Property { property } => property,
+            };
+            format!("listen {iface}.{member}")
+        }
     }
 }
 
@@ -435,9 +446,9 @@ fn render_detail(
     targets: &mut Vec<(Rect, ClickTarget)>,
 ) {
     let title = if d.loading {
-        format!("{} (loading…)", action_title(&d.kind))
+        format!("{} (loading…)", action_title(&d.kind, &d.interface))
     } else {
-        action_title(&d.kind)
+        action_title(&d.kind, &d.interface)
     };
     let block = Block::default().borders(Borders::ALL).title(title);
 
