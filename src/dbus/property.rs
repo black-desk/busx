@@ -38,6 +38,38 @@ pub async fn get_one(
     Ok(proxy.get(name, prop).await?.try_to_owned()?)
 }
 
+/// Fallback for services that don't implement `GetAll`: introspect for the
+/// property names, then `Get` each one individually. Unreadable properties
+/// (write-only, or any that errors) are silently skipped. An empty `iface`
+/// means all interfaces.
+///
+/// Only the TUI uses this — there the interface name always comes from
+/// introspection, so a `GetAll` failure means "not implemented" rather than a
+/// bad name. The CLI does **not** fall back, so a `GetAll` failure there
+/// surfaces as an error (e.g. a typo'd interface isn't silently masked).
+pub async fn get_all_by_one(
+    conn: &zbus::Connection,
+    service: &str,
+    object: &str,
+    iface: &str,
+) -> Result<Vec<(String, OwnedValue)>> {
+    let node = crate::dbus::introspect::introspect(conn, service, object).await?;
+    let mut out = Vec::new();
+    for interface in node.interfaces() {
+        let iname = interface.name();
+        if !iface.is_empty() && &*iname != iface {
+            continue;
+        }
+        for prop in interface.properties() {
+            let pname = prop.name().to_string();
+            if let Ok(v) = get_one(conn, service, object, &iname, &pname).await {
+                out.push((pname, v));
+            }
+        }
+    }
+    Ok(out)
+}
+
 pub async fn set(
     conn: &zbus::Connection,
     service: &str,
