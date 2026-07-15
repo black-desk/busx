@@ -136,11 +136,10 @@ field transformation. All diagnostics (errors, warnings) go to stderr with the
 
 ## Roadmap
 
-1. `emit` (emit signals), pcapng `capture`.
-2. `--host` / `--machine` remote and container buses.
-3. A bytestring string view for `ay` and other value-rendering enhancements.
-4. Re-evaluate an embedded `busx jq` subcommand if `jaq` ever publishes a
-   reusable flag-parsing library entry.
+1. pcapng `capture`.
+2. Value-rendering enhancements: a bytestring view for `ay` byte arrays (today
+   rendered as a numeric array), escaping of control / non-printable characters
+   in string output, and `Fd` rendering.
 
 ## License
 
