@@ -78,40 +78,37 @@ fn render_breadcrumb(frame: &mut Frame, area: Rect, state: &State) {
 }
 
 fn screen_crumb(s: &Screen) -> Option<String> {
-    // The root Service list has no label of its own: dropping it keeps the
-    // breadcrumb leading with the actual service name once you drill in.
+    // One crumb per level, each showing only the context it adds — so the
+    // breadcrumb reads `service > object > interface > Details > Result`
+    // instead of re-stating service/object/interface at every step. (The root
+    // Service list has no label of its own and is dropped.)
     match s {
         Screen::Service(_) => None,
         Screen::Objects(o) => Some(o.service.clone()),
-        Screen::Interfaces(i) => Some(format!("{} {}", i.service, i.object)),
-        Screen::Interface(i) => Some(format!("{}:{}:{}", i.service, i.object, i.interface)),
-        Screen::Detail(d) => Some(format!(
-            "{}:{}:{} › {}",
-            d.service,
-            d.object,
-            d.interface,
-            action_title(&d.kind, &d.interface)
-        )),
-        Screen::Result(r) => Some(r.title.clone()),
+        Screen::Interfaces(i) => Some(i.object.clone()),
+        Screen::Interface(i) => Some(i.interface.clone()),
+        Screen::Detail(_) => Some("Details".to_string()),
+        Screen::Result(_) => Some("Result".to_string()),
     }
 }
 
-/// Short label for an action kind (breadcrumb / Detail title). The member is
-/// qualified with its interface so the title is self-describing outside the
-/// breadcrumb path — e.g. `call org.busx.Test.ListUnits`,
+/// The member a listen targets (signal/method member, or property name).
+fn listen_member(target: &ListenTarget) -> String {
+    match target {
+        ListenTarget::Signal { member } | ListenTarget::Method { member } => member.clone(),
+        ListenTarget::Property { property } => property.clone(),
+    }
+}
+
+/// Interface-qualified action label for the Detail *block title* — it reads
+/// standalone, outside the breadcrumb path: `call org.busx.Test.ListUnits`,
 /// `get org.busx.Test.volume`, `listen org.busx.Test.Changed`.
 fn action_title(kind: &ActionKind, iface: &str) -> String {
     match kind {
         ActionKind::Call { method, .. } => format!("call {iface}.{method}"),
         ActionKind::Get { property } => format!("get {iface}.{property}"),
         ActionKind::Set { property, .. } => format!("set {iface}.{property}"),
-        ActionKind::Listen { target } => {
-            let member = match target {
-                ListenTarget::Signal { member } | ListenTarget::Method { member } => member,
-                ListenTarget::Property { property } => property,
-            };
-            format!("listen {iface}.{member}")
-        }
+        ActionKind::Listen { target } => format!("listen {iface}.{}", listen_member(target)),
     }
 }
 

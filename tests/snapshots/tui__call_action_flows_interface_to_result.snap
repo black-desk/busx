@@ -2,7 +2,7 @@
 source: tests/tui.rs
 expression: "format!(\"{}\", term.backend())"
 ---
-"s:/o:i > s:/o:i › call i.Add > i.Add    "
+"i > Details > Result                    "
 "┌i.Add─────────────────────────────────┐"
 "│42                                    │"
 "│                                      │"
