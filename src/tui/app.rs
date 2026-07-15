@@ -222,7 +222,16 @@ fn run_effect(
         }
         Effect::FetchProperties(service, object, iface) => {
             async_global_executor::spawn(async move {
-                let res = dbus::property::get_all(&conn, &service, &object, &iface).await;
+                // The interface always comes from introspection here, so a
+                // `GetAll` failure means the service doesn't implement it
+                // (some non-standard apps don't) — silently fall back to
+                // Get-ing each property individually. The CLI does NOT do this.
+                let res = match dbus::property::get_all(&conn, &service, &object, &iface).await {
+                    Ok(map) => Ok(map),
+                    Err(_) => {
+                        dbus::property::get_all_by_one(&conn, &service, &object, &iface).await
+                    }
+                };
                 let _ = tx.send(Msg::PropertiesLoaded(res.map_err(|e| e.to_string())));
             })
             .detach();
