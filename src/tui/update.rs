@@ -185,9 +185,10 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
 }
 
 /// Mouse handling: a left-click hit-tests `click_targets` (render populated them
-/// last frame) and applies the matched target; scroll adjusts the Result screen's
-/// `scroll`. Other buttons/gestures are ignored. `click_targets` are populated by
-/// the loop after each render (render writes them to an out-param).
+/// last frame) and applies the matched target; the wheel advances the top
+/// screen's selection/content one row (`↑↓`-style — see [`scroll`]). Other
+/// buttons/gestures are ignored. `click_targets` are populated by the loop after
+/// each render (render writes them to an out-param).
 fn handle_mouse(state: &mut State, ev: MouseEvent) -> Option<Effect> {
     match ev.kind {
         MouseEventKind::Down(MouseButton::Left) => {
@@ -339,23 +340,58 @@ fn copy_selected_tool(popup: &mut crate::tui::state::CopyAsPopup) -> Option<Effe
     }
 }
 
-/// Adjust the Result screen's `scroll` by `delta` (+1 down, -1 up), clamped to
-/// the content range. Only `Screen::Result` is scrollable; other screens ignore
-/// scroll events. Content line count mirrors `update_result_key` (streaming
-/// messages, else one-shot reply lines with a 1-line floor).
+/// Apply a vertical scroll/selection delta (+1 down, −1 up) to the top screen,
+/// mirroring what `↑↓`/`jk` do there. This is what the mouse wheel invokes, so a
+/// wheel notch moves the cursor one row on the list screens (Service/Objects/
+/// Interfaces, and the Interface screen's focused column or button bar) and
+/// scrolls the content on the Result screen. The viewport already follows the
+/// selection (render persists the list offset), so moving the cursor keeps it
+/// visible — no separate viewport scrolling is needed.
 fn scroll(state: &mut State, delta: i32) {
-    if let Screen::Result(r) = state.top_mut() {
-        let lines = if !r.messages.is_empty() {
-            r.messages.len()
-        } else {
-            match &r.result {
-                Some(ActionResult::Call(vs)) => vs.len(),
-                Some(ActionResult::Get(_)) | None | Some(ActionResult::Set) => 1,
+    match state.top_mut() {
+        // Result: scroll the content (line count mirrors `update_result_key` —
+        // streaming messages, else one-shot reply lines with a 1-line floor).
+        Screen::Result(r) => {
+            let lines = if !r.messages.is_empty() {
+                r.messages.len()
+            } else {
+                match &r.result {
+                    Some(ActionResult::Call(vs)) => vs.len(),
+                    Some(ActionResult::Get(_)) | None | Some(ActionResult::Set) => 1,
+                }
+            };
+            let max = lines.saturating_sub(1) as i32;
+            r.scroll = ((r.scroll as i32) + delta).clamp(0, max) as usize;
+        }
+        Screen::Service(s) => move_selected(&mut s.selected, s.services.len(), delta),
+        Screen::Objects(o) => move_selected(&mut o.selected, o.paths.len(), delta),
+        Screen::Interfaces(i) => move_selected(&mut i.selected, i.names.len(), delta),
+        Screen::Interface(i) => {
+            // Mirror ↑↓: in the button bar the wheel moves button_selected;
+            // otherwise it moves the focused column's member selection.
+            if i.in_buttons {
+                let len = buttons_for(i.focus).len();
+                move_selected(&mut i.button_selected, len, delta);
+            } else {
+                let idx = focus_index(i.focus);
+                let len = column_len(i, idx);
+                move_selected(&mut i.selected[idx], len, delta);
             }
-        };
-        let max = lines.saturating_sub(1) as i32;
-        r.scroll = ((r.scroll as i32) + delta).clamp(0, max) as usize;
+        }
+        // Detail has no list to scroll.
+        Screen::Detail(_) => {}
     }
+}
+
+/// Clamp-advance a selection index by `delta` within `[0, len-1]`. A no-op for
+/// an empty list (keeps the index at 0). Shared by the wheel handler for every
+/// list screen, so they clamp identically to the keyboard `↑↓` arms.
+fn move_selected(sel: &mut usize, len: usize, delta: i32) {
+    if len == 0 {
+        return;
+    }
+    let max = (len - 1) as i32;
+    *sel = ((*sel as i32) + delta).clamp(0, max) as usize;
 }
 
 /// Build the `CopyOp` for the top screen: a Detail from its current inputs, or a

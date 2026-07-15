@@ -3207,6 +3207,74 @@ fn mouse_scroll_on_result_changes_scroll() {
 }
 
 #[test]
+fn mouse_scroll_moves_service_selection() {
+    // The wheel moves the Service list's cursor one row (like ↓), clamped to the
+    // list bounds; the viewport already follows the selection (render persists
+    // the offset), so the cursor stays visible.
+    let mut state = State::service(vec![
+        svc("org.busx.A", None, None),
+        svc("org.busx.B", None, None),
+        svc("org.busx.C", None, None),
+    ]);
+    update(&mut state, scroll_msg(MouseEventKind::ScrollDown));
+    assert_eq!(selected_of(&state), 1, "ScrollDown 0 → 1");
+    update(&mut state, scroll_msg(MouseEventKind::ScrollDown));
+    assert_eq!(selected_of(&state), 2, "ScrollDown 1 → 2");
+    // Clamp at the bottom — a third ScrollDown stays on the last row.
+    update(&mut state, scroll_msg(MouseEventKind::ScrollDown));
+    assert_eq!(selected_of(&state), 2, "ScrollDown clamps at last row");
+    // ScrollUp walks back up and clamps at 0.
+    update(&mut state, scroll_msg(MouseEventKind::ScrollUp));
+    assert_eq!(selected_of(&state), 1, "ScrollUp 2 → 1");
+    update(&mut state, scroll_msg(MouseEventKind::ScrollUp));
+    update(&mut state, scroll_msg(MouseEventKind::ScrollUp));
+    update(&mut state, scroll_msg(MouseEventKind::ScrollUp));
+    assert_eq!(selected_of(&state), 0, "ScrollUp clamps at 0");
+}
+
+#[test]
+fn mouse_scroll_moves_objects_selection() {
+    // Same as Service: the wheel moves the Objects list cursor, clamped.
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Objects(
+            busx::tui::state::ObjectsScreen {
+                service: "s".into(),
+                paths: vec!["/a".into(), "/b".into(), "/c".into(), "/d".into()],
+                selected: 0,
+                loading: false,
+                error: None,
+            },
+        )],
+        quit: false,
+        popup: None,
+        click_targets: Vec::new(),
+        help_open: false,
+        bus: Bus::Session,
+    };
+    update(&mut state, scroll_msg(MouseEventKind::ScrollDown));
+    update(&mut state, scroll_msg(MouseEventKind::ScrollDown));
+    match state.top() {
+        Screen::Objects(o) => assert_eq!(o.selected, 2, "two ScrollDowns → row 2"),
+        _ => panic!("still on Objects"),
+    }
+    update(&mut state, scroll_msg(MouseEventKind::ScrollUp));
+    match state.top() {
+        Screen::Objects(o) => assert_eq!(o.selected, 1, "ScrollUp 2 → 1"),
+        _ => panic!("still on Objects"),
+    }
+}
+
+#[test]
+fn mouse_scroll_on_empty_service_list_is_noop() {
+    // An empty list: the wheel is a no-op (no panic, selection stays 0).
+    let mut state = State::service(vec![]);
+    update(&mut state, scroll_msg(MouseEventKind::ScrollDown));
+    assert_eq!(selected_of(&state), 0, "empty list: ScrollDown is a no-op");
+    update(&mut state, scroll_msg(MouseEventKind::ScrollUp));
+    assert_eq!(selected_of(&state), 0, "empty list: ScrollUp is a no-op");
+}
+
+#[test]
 fn mouse_click_on_unrendered_rect_is_noop() {
     // A left-click that hits no recorded Rect does nothing (no panic, no state
     // change). Guards the hit-test's `None` path.
