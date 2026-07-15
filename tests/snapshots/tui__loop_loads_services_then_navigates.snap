@@ -2,7 +2,7 @@
 source: tests/tui.rs
 expression: "format!(\"{}\", term.backend())"
 ---
-"services                                    "
+"                                            "
 "┌Services──────────────────────────────────┐"
 "│org.busx.A                           111  │"
 "│org.busx.B                                │"
