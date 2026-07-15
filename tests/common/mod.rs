@@ -65,6 +65,25 @@ impl TestIface {
         self.volume += 1.0;
         self.volume
     }
+
+    /// Returns a read-only fd to `/dev/null` — deterministic target for the
+    /// unix-fd render test (readlink is always `/dev/null`, fstat is a char
+    /// device). `h` over the wire; the connection negotiates fd passing.
+    fn make_fd(&self) -> zvariant::OwnedFd {
+        let f = std::fs::File::open("/dev/null").expect("open /dev/null");
+        zvariant::OwnedFd::from(std::os::fd::OwnedFd::from(f))
+    }
+
+    /// Returns the read end of a fresh pipe — exercises the `pipe:[ino]` /
+    /// FIFO-kind render (inode is non-deterministic, asserted by prefix).
+    fn make_pipe_fd(&self) -> zvariant::OwnedFd {
+        use std::os::fd::{FromRawFd, OwnedFd};
+        let mut fds = [0i32; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0, "pipe(2)");
+        let read_end = unsafe { OwnedFd::from_raw_fd(fds[0]) };
+        unsafe { libc::close(fds[1]) }; // release the write end in this process
+        zvariant::OwnedFd::from(read_end)
+    }
 }
 
 pub struct TestBus {
