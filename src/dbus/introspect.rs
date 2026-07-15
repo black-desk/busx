@@ -11,6 +11,21 @@ use zbus_xml::Node;
 /// The interface whose `Introspect` method we call. Every object implements it.
 const INTROSPECTABLE: &str = "org.freedesktop.DBus.Introspectable";
 
+/// The standard D-Bus interfaces every object implements (`Properties`,
+/// `Introspectable`, `Peer`). They're noise when browsing, so the TUI hides
+/// them by default (`--show-standard-interfaces` brings them back).
+pub const STANDARD_INTERFACES: &[&str] = &[
+    "org.freedesktop.DBus.Properties",
+    "org.freedesktop.DBus.Introspectable",
+    "org.freedesktop.DBus.Peer",
+];
+
+/// Whether `name` is one of the standard D-Bus interfaces every object
+/// implements.
+pub fn is_standard_interface(name: &str) -> bool {
+    STANDARD_INTERFACES.contains(&name)
+}
+
 /// Call `org.freedesktop.DBus.Introspectable.Introspect` on `service`/`object`
 /// and parse the returned XML into an owned `zbus_xml` tree.
 ///

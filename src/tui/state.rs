@@ -29,6 +29,10 @@ pub struct State {
     /// `--user`/`--system`/`--address` flag per tool. Set once at startup in
     /// `app::run`; defaults to [`Bus::Session`] (the test default).
     pub bus: Bus,
+    /// Whether the Interfaces list shows the standard D-Bus interfaces
+    /// (Properties/Introspectable/Peer). Hidden by default; set from
+    /// `--show-standard-interfaces` at startup.
+    pub show_standard_interfaces: bool,
 }
 
 /// A clickable region recorded by `render`, mapping a screen rect to what a
@@ -232,6 +236,7 @@ impl State {
             click_targets: Vec::new(),
             help_open: false,
             bus: Bus::Session,
+            show_standard_interfaces: false,
         }
     }
 
@@ -249,6 +254,7 @@ impl State {
             click_targets: Vec::new(),
             help_open: false,
             bus: Bus::Session,
+            show_standard_interfaces: false,
         }
     }
 

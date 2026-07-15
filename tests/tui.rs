@@ -180,6 +180,7 @@ fn service_screen_error_state() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 6));
 }
@@ -247,6 +248,7 @@ fn objects_screen_renders_flat_paths() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     insta::assert_snapshot!(render_to_string(&state, 48, 9));
 }
@@ -313,6 +315,7 @@ fn objects_loaded_populates_paths_without_skip() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let tree = obj("/", 1, vec![obj("/a", 1, vec![]), obj("/b", 1, vec![])]);
     let effect = update(&mut state, Msg::ObjectsLoaded(Ok(tree)));
@@ -336,6 +339,7 @@ fn objects_loaded_single_path_auto_skips_to_interfaces() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     // Only the root "/" exposes an object ⇒ one path ⇒ auto-skip into its interfaces.
     let tree = obj("/", 1, vec![]);
@@ -375,6 +379,7 @@ fn objects_enter_drills_selected_path() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let effect = update(&mut state, key(KeyCode::Enter));
     match effect {
@@ -399,6 +404,7 @@ fn objects_loaded_error_sets_error_without_skip() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let effect = update(&mut state, Msg::ObjectsLoaded(Err("boom".into())));
     assert!(effect.is_none(), "error path requests no fetch");
@@ -430,6 +436,7 @@ fn interfaces_screen_lists_interfaces() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     insta::assert_snapshot!(render_to_string(&state, 44, 7));
 }
@@ -439,12 +446,14 @@ fn introspect_node(xml: &str) -> zbus_xml::Node<'static> {
 }
 
 #[test]
-fn interfaces_loaded_lists_all() {
-    // No filtering: every interface (incl. standard org.freedesktop.DBus.*) is shown.
+fn interfaces_loaded_hides_standard_by_default() {
+    // The standard D-Bus interfaces (Properties/Introspectable/Peer) are
+    // filtered out by default; only the "real" interfaces are listed.
     let node = introspect_node(
         "<node>\
          <interface name=\"org.freedesktop.DBus.Peer\"/>\
          <interface name=\"org.freedesktop.DBus.Properties\"/>\
+         <interface name=\"org.freedesktop.DBus.Introspectable\"/>\
          <interface name=\"org.busx.A\"/>\
          <interface name=\"org.busx.B\"/>\
          </node>",
@@ -466,26 +475,73 @@ fn interfaces_loaded_lists_all() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let effect = update(
         &mut state,
         Msg::InterfacesLoaded("org.busx.Test".into(), "/o".into(), Ok(node)),
     );
-    assert!(effect.is_none(), "four interfaces ⇒ no auto-skip");
+    assert!(effect.is_none(), "two interfaces ⇒ no auto-skip");
     match state.top() {
         Screen::Interfaces(i) => {
             assert!(!i.loading);
             assert_eq!(
                 i.names,
-                vec![
-                    "org.freedesktop.DBus.Peer".to_string(),
-                    "org.freedesktop.DBus.Properties".to_string(),
-                    "org.busx.A".to_string(),
-                    "org.busx.B".to_string(),
-                ]
+                vec!["org.busx.A".to_string(), "org.busx.B".to_string()]
             );
+            // The full node (incl. standard interfaces) is still cached, so
+            // drilling into a shown interface finds its members.
             assert!(i.node.is_some(), "node cached for drilling in");
         }
+        _ => panic!("still on Interfaces"),
+    }
+}
+
+#[test]
+fn interfaces_loaded_shows_standard_with_flag() {
+    // `--show-standard-interfaces` disables the filter: every interface is
+    // listed, including the three standard ones.
+    let node = introspect_node(
+        "<node>\
+         <interface name=\"org.freedesktop.DBus.Peer\"/>\
+         <interface name=\"org.freedesktop.DBus.Properties\"/>\
+         <interface name=\"org.freedesktop.DBus.Introspectable\"/>\
+         <interface name=\"org.busx.A\"/>\
+         </node>",
+    );
+    let mut state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Interfaces(
+            busx::tui::state::InterfacesScreen {
+                service: "org.busx.Test".into(),
+                object: "/o".into(),
+                names: vec![],
+                node: None,
+                selected: 0,
+                loading: true,
+                error: None,
+            },
+        )],
+        quit: false,
+        popup: None,
+        click_targets: Vec::new(),
+        help_open: false,
+        bus: Bus::Session,
+        show_standard_interfaces: true,
+    };
+    update(
+        &mut state,
+        Msg::InterfacesLoaded("org.busx.Test".into(), "/o".into(), Ok(node)),
+    );
+    match state.top() {
+        Screen::Interfaces(i) => assert_eq!(
+            i.names,
+            vec![
+                "org.freedesktop.DBus.Peer".to_string(),
+                "org.freedesktop.DBus.Properties".to_string(),
+                "org.freedesktop.DBus.Introspectable".to_string(),
+                "org.busx.A".to_string(),
+            ]
+        ),
         _ => panic!("still on Interfaces"),
     }
 }
@@ -514,6 +570,7 @@ fn interfaces_loaded_single_interface_auto_skips() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let effect = update(
         &mut state,
@@ -552,6 +609,7 @@ fn interfaces_loaded_propertyless_interface_skips_getall() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let effect = update(
         &mut state,
@@ -604,6 +662,7 @@ fn interface_screen_renders_three_columns() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     insta::assert_snapshot!(render_to_string(&state, 60, 16));
 }
@@ -634,6 +693,7 @@ fn properties_loaded_fills_pretty_values() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let vals = vec![("volume".into(), Value::F64(0.5).try_to_owned().unwrap())];
     let effect = update(&mut state, Msg::PropertiesLoaded(Ok(vals)));
@@ -683,6 +743,7 @@ fn interface_screen_shows_getall_error_scoped_to_properties() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let rendered = render_to_string(&state, 64, 16);
     assert!(rendered.contains("m1"), "methods still visible: {rendered}");
@@ -734,6 +795,7 @@ fn interface_tab_cycles_columns() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     // Start on the Methods column, not in the button bar.
     assert_eq!(state.top_focus(), InterfaceFocus::Methods);
@@ -775,6 +837,7 @@ fn interface_tab_leaves_buttons_before_cycling() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     assert!(top_in_buttons(&state));
     update(&mut state, key(KeyCode::Tab));
@@ -795,6 +858,7 @@ fn interface_backtab_cycles_columns() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     // Shift+Tab (BackTab) cycles the column Methods→Signals→Properties→Methods
     // (reverse of Tab). Three presses return to Methods.
@@ -815,6 +879,7 @@ fn interface_arrows_move_within_focused_column() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     // Methods focus, two methods, starts at 0.
     update(&mut state, key(KeyCode::Down));
@@ -852,6 +917,7 @@ fn interface_enter_drills_then_fires_and_esc_backs_out() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     // Start on the Methods column, not in the button bar.
     assert_eq!(state.top_focus(), InterfaceFocus::Methods);
@@ -894,6 +960,7 @@ fn interface_esc_from_column_pops_screen() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     assert!(!top_in_buttons(&state));
     assert_eq!(state.screens.len(), 2);
@@ -925,6 +992,7 @@ fn interface_arrows_in_buttons_move_button_selected() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
 
     // In the button bar, Down moves button_selected (0→1→2, clamped at 2).
@@ -962,6 +1030,7 @@ fn interface_r_requests_property_refresh() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let effect = update(&mut state, key(KeyCode::Char('r')));
     match effect {
@@ -1036,6 +1105,7 @@ fn interface_button_enter_pushes_call_detail() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let effect = update(&mut state, key(KeyCode::Enter));
     assert!(effect.is_none(), "button Enter pushes a Detail (no Effect)");
@@ -1076,6 +1146,7 @@ fn interface_button_enter_pushes_get_detail() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     update(&mut state, key(KeyCode::Enter));
     match state.top() {
@@ -1102,6 +1173,7 @@ fn interface_button_enter_pushes_set_detail() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     update(&mut state, key(KeyCode::Enter));
     match state.top() {
@@ -1147,6 +1219,7 @@ fn interface_renders_action_button_bar() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     insta::assert_snapshot!(render_to_string(&state, 64, 16));
 }
@@ -1185,6 +1258,7 @@ fn interface_on_button(
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     }
 }
 
@@ -1401,6 +1475,7 @@ fn action_result_populates_result_screen() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let effect = update(
         &mut state,
@@ -1443,6 +1518,7 @@ fn call_detail_form_renders_field_and_trigger() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 8));
 }
@@ -1466,6 +1542,7 @@ fn call_result_renders_reply_value() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 8));
 }
@@ -1498,6 +1575,7 @@ fn interface_on_prop_button(button: usize, sig: &str) -> busx::tui::State {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     }
 }
 
@@ -1663,6 +1741,7 @@ fn set_detail_form_renders_one_field() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 8));
 }
@@ -1686,6 +1765,7 @@ fn get_result_renders_value() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 8));
 }
@@ -1724,6 +1804,7 @@ fn call_action_flows_interface_to_result() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let events = vec![
         key(KeyCode::Enter),     // Methods column → drill into the button bar
@@ -1780,6 +1861,7 @@ fn interface_on_signal_button() -> busx::tui::State {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     }
 }
 
@@ -1844,6 +1926,7 @@ fn property_listen_button_targets_propertieschanged_rule() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     update(&mut state, key(KeyCode::Enter));
     match state.top() {
@@ -1986,6 +2069,7 @@ fn listen_result_renders_streaming_messages() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     insta::assert_snapshot!(render_to_string(&state, 52, 10));
 }
@@ -2018,6 +2102,7 @@ fn method_listen_button_and_trigger_target_method() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     update(&mut state, key(KeyCode::Enter)); // push the Method Listen Detail
     // The Detail's single label is the method_call match-rule preview.
@@ -2098,6 +2183,7 @@ fn listen_action_flows_interface_to_streaming_result() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
 
     // Arm a real cancel pair we keep the receiver of, so the Esc-drop assertion
@@ -2176,6 +2262,7 @@ fn listen_refused_renders_error_on_result() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     update(
         &mut state,
@@ -2219,6 +2306,7 @@ fn call_detail_with_input() -> busx::tui::State {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     }
 }
 
@@ -2472,6 +2560,7 @@ fn popup_enter_on_unsupported_tool_is_noop() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     update(&mut state, key(KeyCode::Char('c')));
     // Move to qdbus (row 2).
@@ -2539,6 +2628,7 @@ fn c_on_result_without_op_is_noop() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     update(&mut state, key(KeyCode::Char('c')));
     assert!(state.popup.is_none(), "no op → no popup");
@@ -2598,6 +2688,7 @@ fn copy_as_capstone_loop_closes_popup_over_result() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let events = vec![
         key(KeyCode::Enter),     // Methods column → drill into the button bar
@@ -2660,6 +2751,7 @@ fn copy_as_capstone_copies_busctl_command() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     update(&mut state, key(KeyCode::Enter)); // Methods column → drill into the button bar
     update(&mut state, key(KeyCode::Enter)); // Call → push the Call Detail
@@ -2722,6 +2814,7 @@ fn y_copies_call_result_text_joined() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let effect = update(&mut state, key(KeyCode::Char('y')));
     match effect {
@@ -2749,6 +2842,7 @@ fn y_copies_get_and_set_result_text() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     match update(&mut get_state, key(KeyCode::Char('y'))) {
         Some(Effect::CopyToClipboard(text)) => assert_eq!(text, "0.5"),
@@ -2771,6 +2865,7 @@ fn y_copies_get_and_set_result_text() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     match update(&mut set_state, key(KeyCode::Char('y'))) {
         Some(Effect::CopyToClipboard(text)) => assert_eq!(text, "ok"),
@@ -2800,6 +2895,7 @@ fn y_copies_streaming_result_text_joined() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let effect = update(&mut state, key(KeyCode::Char('y')));
     match effect {
@@ -2831,6 +2927,7 @@ fn y_on_result_without_result_is_noop() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let effect = update(&mut state, key(KeyCode::Char('y')));
     assert!(effect.is_none(), "no result yet → nothing to copy");
@@ -2855,6 +2952,7 @@ fn y_on_result_with_error_is_noop() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let effect = update(&mut state, key(KeyCode::Char('y')));
     assert!(effect.is_none(), "error showing → don't copy error text");
@@ -3008,6 +3106,7 @@ fn mouse_click_selects_objects_row() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     click(&mut state, &ClickTarget::ObjectsRow(1), 40, 7);
     match state.top() {
@@ -3035,6 +3134,7 @@ fn mouse_click_selects_interfaces_row() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     click(&mut state, &ClickTarget::InterfacesRow(2), 44, 7);
     match state.top() {
@@ -3057,6 +3157,7 @@ fn mouse_click_on_interface_method_row_switches_focus() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     click(&mut state, &ClickTarget::MethodRow(1), 64, 16);
     match state.top() {
@@ -3081,6 +3182,7 @@ fn mouse_click_on_action_button_fires() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let before = state.screens.len();
     click(&mut state, &ClickTarget::ActionButton(0), 64, 16);
@@ -3184,6 +3286,7 @@ fn mouse_scroll_on_result_changes_scroll() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     // ScrollDown twice: 0 → 1 → 2.
     update(&mut state, scroll_msg(MouseEventKind::ScrollDown));
@@ -3250,6 +3353,7 @@ fn mouse_scroll_moves_objects_selection() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     update(&mut state, scroll_msg(MouseEventKind::ScrollDown));
     update(&mut state, scroll_msg(MouseEventKind::ScrollDown));
@@ -3320,6 +3424,7 @@ fn call_as_arg_shell_splits_field_value() {
         click_targets: Vec::new(),
         help_open: false,
         bus: Bus::Session,
+        show_standard_interfaces: false,
     };
     let effect = update(&mut state, key(KeyCode::Enter));
     match effect {

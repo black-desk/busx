@@ -91,7 +91,13 @@ impl App {
 }
 
 /// Launch the TUI against the real terminal.
-pub fn run(user: bool, system: bool, address: Option<&str>, verbose: bool) -> Result<()> {
+pub fn run(
+    user: bool,
+    system: bool,
+    address: Option<&str>,
+    verbose: bool,
+    show_standard_interfaces: bool,
+) -> Result<()> {
     let (conn, bus) = async_global_executor::block_on(dbus::conn::connect_with_bus(
         user, system, address, verbose,
     ))?;
@@ -123,6 +129,7 @@ pub fn run(user: bool, system: bool, address: Option<&str>, verbose: bool) -> Re
         state: State::loading_service(),
     };
     app.state.bus = bus;
+    app.state.show_standard_interfaces = show_standard_interfaces;
     let mut terminal = setup_terminal()?;
     let result = app.run_loop(&mut terminal, CrosstermSource { rx }, on_effect);
     // Always try to restore the terminal; prefer the loop's result over a
