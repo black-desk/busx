@@ -522,6 +522,148 @@ fn update_popup_key(state: &mut State, code: KeyCode) -> Option<Effect> {
     }
 }
 
+/// `Enter` on the Interface screen's action button bar: first press drills INTO
+/// the button bar; once in it, Enter fires the selected action. A 0-input
+/// action (Get / Listen / no-arg Call) skips the Detail form and fires straight
+/// to the Result — like the single-interface auto-skip; Call/Set push the form.
+///
+/// Lifted out of `handle_enter`'s `match state.top()` so it can mutate `state`
+/// (push the Result/Detail) without fighting the match's immutable borrow.
+fn enter_interface_action(state: &mut State) -> Option<Effect> {
+    // If focus is still on a member column, Enter drills INTO the action button
+    // bar (does not fire anything yet). Once `in_buttons`, Enter fires.
+    if let Screen::Interface(i) = state.top_mut() {
+        if !i.in_buttons {
+            i.in_buttons = true;
+            i.button_selected = 0;
+            return None;
+        }
+    }
+    // Gather all owned data from the Interface screen in a tight scope so the
+    // immutable `state.top()` borrow ends before we mutate `state` (push the
+    // Detail / fire the Result).
+    let (svc, obj, iface, kind, inputs, field_labels) = {
+        let i = match state.top() {
+            Screen::Interface(i) => i,
+            _ => return None,
+        };
+        let buttons = buttons_for(i.focus);
+        let action = *buttons.get(i.button_selected)?;
+        let (svc, obj, iface) = (i.service.clone(), i.object.clone(), i.interface.clone());
+        let kind = match i.focus {
+            InterfaceFocus::Methods => {
+                let m = i.methods.get(i.selected[0])?;
+                match action {
+                    "Call" => ActionKind::Call {
+                        method: m.name.clone(),
+                        signature: m.signature.clone(),
+                    },
+                    "Listen" => ActionKind::Listen {
+                        target: ListenTarget::Method {
+                            member: m.name.clone(),
+                        },
+                    },
+                    _ => return None,
+                }
+            }
+            InterfaceFocus::Properties => {
+                let (name, sig, _access) = i.properties.get(i.selected[1])?;
+                match action {
+                    "Get" => ActionKind::Get {
+                        property: name.clone(),
+                    },
+                    "Set" => ActionKind::Set {
+                        property: name.clone(),
+                        signature: sig.clone(),
+                    },
+                    "Listen" => ActionKind::Listen {
+                        target: ListenTarget::Property {
+                            property: name.clone(),
+                        },
+                    },
+                    _ => return None,
+                }
+            }
+            InterfaceFocus::Signals => {
+                let (name, _sig) = i.signals.get(i.selected[2])?;
+                match action {
+                    "Listen" => ActionKind::Listen {
+                        target: ListenTarget::Signal {
+                            member: name.clone(),
+                        },
+                    },
+                    _ => return None,
+                }
+            }
+        };
+        // Build the form fields: Call → one input per IN-arg; Set → one input
+        // (the new value), labeled with the property's signature; Get/Listen →
+        // no inputs. A Listen carries its match-rule preview as a single label.
+        let (inputs, field_labels) = match &kind {
+            ActionKind::Call { .. } => {
+                let m = i.methods.get(i.selected[0]);
+                match m {
+                    Some(m) => call_fields(&m.args),
+                    None => (vec![], vec![]),
+                }
+            }
+            ActionKind::Set { signature, .. } => {
+                (vec![tui_input::Input::default()], vec![signature.clone()])
+            }
+            ActionKind::Get { .. } => (vec![], vec![]),
+            ActionKind::Listen { target } => {
+                let rule = listen_rule(&iface, &obj, target).map(|r| r.to_string());
+                (
+                    vec![],
+                    vec![rule.unwrap_or_else(|e| format!("invalid match rule: {e}"))],
+                )
+            }
+        };
+        (svc, obj, iface, kind, inputs, field_labels)
+    };
+    // A 0-input action (Get / Listen / no-arg Call) needs no form, so skip the
+    // Detail screen and fire straight to the Result — like the single-interface
+    // auto-skip.
+    if inputs.is_empty() {
+        let d = DetailScreen {
+            service: svc,
+            object: obj,
+            interface: iface,
+            kind,
+            inputs: vec![],
+            field_labels: vec![],
+            field_selected: 0,
+            focus: DetailFocus::Trigger,
+            loading: false,
+            error: None,
+        };
+        let (rs, effect) = build_detail_result(&d);
+        state.screens.push(Screen::Result(rs));
+        return Some(effect);
+    }
+    push_detail(state, svc, obj, iface, kind, inputs, field_labels);
+    None
+}
+
+/// `Enter` on the Detail screen's `[Trigger]`: fire the action to the Result.
+/// Only fires when the trigger button is focused. Lifted out of `handle_enter`'s
+/// `match state.top()` (which binds the screen) so it can mutate `state` — the
+/// `&State` borrow is contained in a block that hands back an owned clone.
+fn enter_detail_trigger(state: &mut State) -> Option<Effect> {
+    let d = match state.top() {
+        Screen::Detail(d) => d,
+        _ => return None,
+    };
+    if d.focus != DetailFocus::Trigger {
+        return None;
+    }
+    // Build the owned Result + Effect while borrowing `d`, then release before
+    // pushing (which needs `&mut State`).
+    let (rs, effect) = build_detail_result(d);
+    state.screens.push(Screen::Result(rs));
+    Some(effect)
+}
+
 /// `Enter` drills one level deeper, pushing the next screen + requesting its fetch.
 fn handle_enter(state: &mut State) -> Option<Effect> {
     match state.top() {
@@ -547,187 +689,8 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
             let (svc, obj) = (i.service.clone(), i.object.clone());
             push_interface(state, svc, obj, iface)
         }
-        Screen::Interface(_) => {
-            // If focus is still on a member column, Enter drills INTO the action
-            // button bar (does not fire anything yet). Once `in_buttons`, Enter
-            // fires the selected button (builds `ActionKind`, pushes a Detail).
-            if let Screen::Interface(i) = state.top_mut() {
-                if !i.in_buttons {
-                    i.in_buttons = true;
-                    i.button_selected = 0;
-                    return None;
-                }
-            }
-            // Gather owned identity data while holding the immutable borrow, then
-            // release it before the mutable `push_detail`.
-            let i = match state.top() {
-                Screen::Interface(i) => i,
-                _ => return None,
-            };
-            let buttons = buttons_for(i.focus);
-            let action = *buttons.get(i.button_selected)?;
-            let (svc, obj, iface) = (i.service.clone(), i.object.clone(), i.interface.clone());
-            let kind = match i.focus {
-                InterfaceFocus::Methods => {
-                    let m = i.methods.get(i.selected[0])?;
-                    match action {
-                        "Call" => ActionKind::Call {
-                            method: m.name.clone(),
-                            signature: m.signature.clone(),
-                        },
-                        "Listen" => ActionKind::Listen {
-                            target: ListenTarget::Method {
-                                member: m.name.clone(),
-                            },
-                        },
-                        _ => return None,
-                    }
-                }
-                InterfaceFocus::Properties => {
-                    let (name, sig, _access) = i.properties.get(i.selected[1])?;
-                    match action {
-                        "Get" => ActionKind::Get {
-                            property: name.clone(),
-                        },
-                        "Set" => ActionKind::Set {
-                            property: name.clone(),
-                            signature: sig.clone(),
-                        },
-                        "Listen" => ActionKind::Listen {
-                            target: ListenTarget::Property {
-                                property: name.clone(),
-                            },
-                        },
-                        _ => return None,
-                    }
-                }
-                InterfaceFocus::Signals => {
-                    let (name, _sig) = i.signals.get(i.selected[2])?;
-                    match action {
-                        "Listen" => ActionKind::Listen {
-                            target: ListenTarget::Signal {
-                                member: name.clone(),
-                            },
-                        },
-                        _ => return None,
-                    }
-                }
-            };
-            // Build the form fields: Call → one input per IN-arg; Set → one input
-            // (the new value), labeled with the property's signature; Get/Listen →
-            // no inputs. A Listen carries its match-rule preview as a single label.
-            let (inputs, field_labels) = match &kind {
-                ActionKind::Call { .. } => {
-                    let m = i.methods.get(i.selected[0]);
-                    match m {
-                        Some(m) => call_fields(&m.args),
-                        None => (vec![], vec![]),
-                    }
-                }
-                ActionKind::Set { signature, .. } => {
-                    (vec![tui_input::Input::default()], vec![signature.clone()])
-                }
-                ActionKind::Get { .. } => (vec![], vec![]),
-                ActionKind::Listen { target } => {
-                    let rule = listen_rule(&iface, &obj, target).map(|r| r.to_string());
-                    (
-                        vec![],
-                        vec![rule.unwrap_or_else(|e| format!("invalid match rule: {e}"))],
-                    )
-                }
-            };
-            push_detail(state, svc, obj, iface, kind, inputs, field_labels);
-            None
-        }
-        Screen::Detail(d) => {
-            // `[Trigger]` Enter: only fires when the trigger button is focused.
-            // Extract owned (title, Effect, CopyOp) data for Call/Get/Set while
-            // holding the immutable borrow, then push one Result screen carrying
-            // the CopyOp (so `c` on the Result can copy-as it) and return it.
-            if d.focus != DetailFocus::Trigger {
-                return None;
-            }
-            let copy_op = copy_op_from_detail(d);
-            let (title, effect) = match &d.kind {
-                ActionKind::Call { method, signature } => {
-                    let args: Vec<String> = d
-                        .inputs
-                        .iter()
-                        .flat_map(|i| shell_split(i.value()))
-                        .collect();
-                    (
-                        format!("{}.{}", d.interface, method),
-                        Effect::CallMethod {
-                            service: d.service.clone(),
-                            object: d.object.clone(),
-                            iface: d.interface.clone(),
-                            method: method.clone(),
-                            signature: signature.clone(),
-                            args,
-                        },
-                    )
-                }
-                ActionKind::Get { property } => (
-                    format!("{}.{}", d.interface, property),
-                    Effect::GetProperty {
-                        service: d.service.clone(),
-                        object: d.object.clone(),
-                        iface: d.interface.clone(),
-                        property: property.clone(),
-                    },
-                ),
-                ActionKind::Set {
-                    property,
-                    signature,
-                } => {
-                    let value = d
-                        .inputs
-                        .first()
-                        .map(|i| i.value().to_string())
-                        .unwrap_or_default();
-                    (
-                        format!("{}.{}", d.interface, property),
-                        Effect::SetProperty {
-                            service: d.service.clone(),
-                            object: d.object.clone(),
-                            iface: d.interface.clone(),
-                            property: property.clone(),
-                            signature: signature.clone(),
-                            value,
-                        },
-                    )
-                }
-                ActionKind::Listen { target } => {
-                    // Listen targets a member/property; title surfaces which.
-                    let member_or_prop = match target {
-                        ListenTarget::Signal { member } | ListenTarget::Method { member } => {
-                            member.clone()
-                        }
-                        ListenTarget::Property { property } => property.clone(),
-                    };
-                    (
-                        format!("listen {}.{}", d.interface, member_or_prop),
-                        Effect::Listen {
-                            service: d.service.clone(),
-                            object: d.object.clone(),
-                            iface: d.interface.clone(),
-                            target: target.clone(),
-                        },
-                    )
-                }
-            };
-            state.screens.push(Screen::Result(ResultScreen {
-                title,
-                result: None,
-                error: None,
-                loading: true,
-                scroll: 0,
-                messages: vec![],
-                cancel: None,
-                op: Some(copy_op),
-            }));
-            Some(effect)
-        }
+        Screen::Interface(_) => enter_interface_action(state),
+        Screen::Detail(_) => enter_detail_trigger(state),
         Screen::Result(_) => None,
     }
 }
@@ -1192,6 +1155,97 @@ fn call_fields(args: &[(String, String)]) -> (Vec<tui_input::Input>, Vec<String>
         .collect();
     let inputs = args.iter().map(|_| tui_input::Input::default()).collect();
     (inputs, labels)
+}
+
+/// Build the `(title, Effect)` a Detail action fires, from its kind + inputs.
+/// Shared by the `[Trigger]` Enter and the 0-input auto-trigger.
+fn detail_action(d: &DetailScreen) -> (String, Effect) {
+    match &d.kind {
+        ActionKind::Call { method, signature } => {
+            let args: Vec<String> = d
+                .inputs
+                .iter()
+                .flat_map(|i| shell_split(i.value()))
+                .collect();
+            (
+                format!("{}.{}", d.interface, method),
+                Effect::CallMethod {
+                    service: d.service.clone(),
+                    object: d.object.clone(),
+                    iface: d.interface.clone(),
+                    method: method.clone(),
+                    signature: signature.clone(),
+                    args,
+                },
+            )
+        }
+        ActionKind::Get { property } => (
+            format!("{}.{}", d.interface, property),
+            Effect::GetProperty {
+                service: d.service.clone(),
+                object: d.object.clone(),
+                iface: d.interface.clone(),
+                property: property.clone(),
+            },
+        ),
+        ActionKind::Set {
+            property,
+            signature,
+        } => {
+            let value = d
+                .inputs
+                .first()
+                .map(|i| i.value().to_string())
+                .unwrap_or_default();
+            (
+                format!("{}.{}", d.interface, property),
+                Effect::SetProperty {
+                    service: d.service.clone(),
+                    object: d.object.clone(),
+                    iface: d.interface.clone(),
+                    property: property.clone(),
+                    signature: signature.clone(),
+                    value,
+                },
+            )
+        }
+        ActionKind::Listen { target } => {
+            // Listen targets a member/property; title surfaces which.
+            let member_or_prop = match target {
+                ListenTarget::Signal { member } | ListenTarget::Method { member } => member.clone(),
+                ListenTarget::Property { property } => property.clone(),
+            };
+            (
+                format!("listen {}.{}", d.interface, member_or_prop),
+                Effect::Listen {
+                    service: d.service.clone(),
+                    object: d.object.clone(),
+                    iface: d.interface.clone(),
+                    target: target.clone(),
+                },
+            )
+        }
+    }
+}
+
+/// Build the loading Result screen + Effect a Detail action fires, from its
+/// kind + inputs. Returns owned data so the caller can release the `&State`
+/// borrow before pushing. Shared by the Detail `[Trigger]` and the 0-input
+/// auto-trigger.
+fn build_detail_result(d: &DetailScreen) -> (ResultScreen, Effect) {
+    let copy_op = copy_op_from_detail(d);
+    let (title, effect) = detail_action(d);
+    let rs = ResultScreen {
+        title,
+        result: None,
+        error: None,
+        loading: true,
+        scroll: 0,
+        messages: vec![],
+        cancel: None,
+        op: Some(copy_op),
+    };
+    (rs, effect)
 }
 
 /// Push a Detail form for an action. `inputs`/`field_labels` are non-empty only
