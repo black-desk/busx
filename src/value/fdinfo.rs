@@ -107,8 +107,8 @@ fn fstat_kind_size(raw: i32) -> (String, Option<u64>) {
     if unsafe { libc::fstat(raw, &mut st) } != 0 {
         return ("unknown".into(), None);
     }
-    // `st_mode` and the S_IF* constants are both mode_t (u32 on Linux).
-    let mode = st.st_mode as u32;
+    // `st_mode` is mode_t (u32 on Linux); the S_IF* constants are too.
+    let mode = st.st_mode;
     let fmt = mode & libc::S_IFMT;
     let kind = match fmt {
         libc::S_IFREG => "regular",
