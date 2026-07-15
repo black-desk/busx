@@ -939,12 +939,14 @@ fn interface_enter_drills_then_fires_and_esc_backs_out() {
         "Esc from the button bar does not pop"
     );
 
-    // Re-enter the button bar, then a second Enter fires `Call` → pushes Detail.
+    // Re-enter the button bar, then a second Enter fires `Call`. m1 has no
+    // IN-args, so the fire auto-skips the Detail form and pushes a Result.
     update(&mut state, key(KeyCode::Enter)); // drill in
     assert!(top_in_buttons(&state));
-    update(&mut state, key(KeyCode::Enter)); // fire Call (button_selected 0, m1)
-    assert_eq!(state.screens.len(), 2, "fire-Enter pushed a Detail screen");
-    assert!(matches!(state.top(), Screen::Detail(_)));
+    let effect = update(&mut state, key(KeyCode::Enter)); // fire Call (m1, 0 inputs)
+    assert!(effect.is_some(), "fire-Enter returns the Call effect");
+    assert_eq!(state.screens.len(), 2, "fire-Enter pushed a Result screen");
+    assert!(matches!(state.top(), Screen::Result(_)));
 }
 
 /// Esc from a member column (not in the button bar) pops the Interface screen.
@@ -1090,14 +1092,15 @@ fn drill_down_auto_skips_service_to_interface() {
 // --- Phase 3: action buttons push a stub Detail screen ---
 
 #[test]
-fn interface_button_enter_pushes_call_detail() {
+fn interface_button_enter_auto_fires_call() {
     // Methods column, already in the button bar (Enter drilled in earlier),
-    // button_selected on `Call`.
+    // button_selected on `Call`. m1 has signature "u" but no IN-args → a 0-input
+    // Call, so Enter skips the Detail form and fires straight to the Result.
     let mut screen = interface_screen();
     screen.focus = InterfaceFocus::Methods;
     screen.in_buttons = true;
     screen.button_selected = 0;
-    screen.selected = [0, 0, 0]; // m1 (signature "u")
+    screen.selected = [0, 0, 0]; // m1 (signature "u", no IN-args)
     let mut state = busx::tui::State {
         screens: vec![Screen::Interface(screen)],
         quit: false,
@@ -1108,32 +1111,33 @@ fn interface_button_enter_pushes_call_detail() {
         show_standard_interfaces: false,
     };
     let effect = update(&mut state, key(KeyCode::Enter));
-    assert!(effect.is_none(), "button Enter pushes a Detail (no Effect)");
-    match state.top() {
-        Screen::Detail(d) => {
-            assert_eq!(d.service, "s");
-            assert_eq!(d.object, "/o");
-            assert_eq!(d.interface, "i");
-            match &d.kind {
-                busx::tui::state::ActionKind::Call { method, signature } => {
-                    assert_eq!(method, "m1");
-                    assert_eq!(signature, "u");
-                }
-                other => panic!("expected Call, got {other:?}"),
-            }
-            assert!(
-                d.inputs.is_empty(),
-                "m1 has no IN-args (call_fields → 0 inputs)"
-            );
-            assert!(!d.loading);
+    match effect {
+        Some(Effect::CallMethod {
+            method,
+            signature,
+            args,
+            ..
+        }) => {
+            assert_eq!(method, "m1");
+            assert_eq!(signature, "u");
+            assert!(args.is_empty(), "m1 has no IN-args → empty args");
         }
-        _ => panic!("Enter should push a Detail screen"),
+        other => panic!("button Enter should fire CallMethod, got {other:?}"),
+    }
+    match state.top() {
+        Screen::Result(r) => {
+            assert!(r.loading, "Result starts loading");
+            assert_eq!(r.title, "i.m1");
+        }
+        _ => panic!("Enter should push a Result screen"),
     }
 }
 
 #[test]
-fn interface_button_enter_pushes_get_detail() {
+fn interface_button_enter_auto_fires_get() {
     // Properties column, already in the button bar, `Get` button (index 0) on p1.
+    // Get is a 0-input action → Enter skips the Detail form and fires straight to
+    // the Result, returning `Effect::GetProperty` immediately.
     let mut screen = interface_screen();
     screen.focus = InterfaceFocus::Properties;
     screen.in_buttons = true;
@@ -1148,13 +1152,17 @@ fn interface_button_enter_pushes_get_detail() {
         bus: Bus::Session,
         show_standard_interfaces: false,
     };
-    update(&mut state, key(KeyCode::Enter));
+    let effect = update(&mut state, key(KeyCode::Enter));
+    match effect {
+        Some(Effect::GetProperty { property, .. }) => assert_eq!(property, "p1"),
+        other => panic!("button Enter should fire GetProperty, got {other:?}"),
+    }
     match state.top() {
-        Screen::Detail(d) => match &d.kind {
-            busx::tui::state::ActionKind::Get { property } => assert_eq!(property, "p1"),
-            other => panic!("expected Get, got {other:?}"),
-        },
-        _ => panic!("Detail screen expected"),
+        Screen::Result(r) => {
+            assert!(r.loading, "Result starts loading");
+            assert_eq!(r.title, "i.p1");
+        }
+        _ => panic!("Enter should push a Result screen"),
     }
 }
 
@@ -1298,17 +1306,31 @@ fn call_detail_anonymous_arg_labeled_with_signature_only() {
 }
 
 #[test]
-fn zero_arg_method_pushes_detail_with_no_inputs() {
-    // A method with no IN-args → the Detail is just the trigger button.
+fn zero_arg_method_auto_fires_to_result() {
+    // A method with no IN-args → a 0-input Call: Enter skips the Detail form and
+    // fires straight to the Result, returning `Effect::CallMethod` (empty args).
     let state = interface_on_button(vec![method_with_args("Ping", &[])], 0);
     let mut state = state;
-    update(&mut state, key(KeyCode::Enter));
-    match state.top() {
-        Screen::Detail(d) => {
-            assert!(d.inputs.is_empty(), "zero-arg call → no inputs");
-            assert!(d.field_labels.is_empty());
+    let effect = update(&mut state, key(KeyCode::Enter));
+    match effect {
+        Some(Effect::CallMethod {
+            method,
+            signature,
+            args,
+            ..
+        }) => {
+            assert_eq!(method, "Ping");
+            assert_eq!(signature, "", "zero-arg method has empty signature");
+            assert!(args.is_empty(), "zero-arg call sends no args");
         }
-        _ => panic!("Detail screen expected"),
+        other => panic!("expected CallMethod, got {other:?}"),
+    }
+    match state.top() {
+        Screen::Result(r) => {
+            assert!(r.loading, "Result starts loading");
+            assert_eq!(r.title, "i.Ping");
+        }
+        _ => panic!("Enter should push a Result screen"),
     }
 }
 
@@ -1457,11 +1479,10 @@ fn detail_trigger_enter_pushes_result_and_requests_call() {
 }
 
 #[test]
-fn zero_arg_call_trigger_requests_call_with_empty_args() {
+fn zero_arg_call_button_fires_call_with_empty_args() {
+    // A zero-arg method's `Call` button is a 0-input action → Enter fires
+    // straight to the Result and requests `Effect::CallMethod` (empty args).
     let mut state = interface_on_button(vec![method_with_args("Ping", &[])], 0);
-    update(&mut state, key(KeyCode::Enter)); // push the 0-input Detail
-    // 0 inputs → Field collapses; one Tab lands on Trigger.
-    update(&mut state, key(KeyCode::Tab));
     let effect = update(&mut state, key(KeyCode::Enter));
     match effect {
         Some(Effect::CallMethod {
@@ -1634,29 +1655,28 @@ fn interface_on_prop_button(button: usize, sig: &str) -> busx::tui::State {
 }
 
 #[test]
-fn get_button_pushes_detail_with_no_inputs() {
-    // `Get` on p1 → a Get Detail with zero inputs and zero labels.
+fn get_button_auto_fires_to_result() {
+    // `Get` on p1 is a 0-input action → Enter skips the Detail form and fires
+    // straight to the Result, returning `Effect::GetProperty` immediately.
     let mut state = interface_on_prop_button(0, "d");
-    update(&mut state, key(KeyCode::Enter));
+    let effect = update(&mut state, key(KeyCode::Enter));
+    match effect {
+        Some(Effect::GetProperty { property, .. }) => assert_eq!(property, "p1"),
+        other => panic!("button Enter should fire GetProperty, got {other:?}"),
+    }
     match state.top() {
-        Screen::Detail(d) => {
-            match &d.kind {
-                ActionKind::Get { property } => assert_eq!(property, "p1"),
-                other => panic!("expected Get, got {other:?}"),
-            }
-            assert!(d.inputs.is_empty(), "Get → no input fields");
-            assert!(d.field_labels.is_empty());
+        Screen::Result(r) => {
+            assert!(r.loading, "Result starts loading");
+            assert_eq!(r.title, "i.p1");
         }
-        _ => panic!("Enter should push a Detail screen"),
+        _ => panic!("Enter should push a Result screen"),
     }
 }
 
 #[test]
-fn get_trigger_pushes_result_and_requests_get() {
+fn get_button_fires_result_and_requests_get() {
     let mut state = interface_on_prop_button(0, "d");
-    update(&mut state, key(KeyCode::Enter)); // push the Get Detail (0 inputs)
-    // 0 inputs → a single Tab lands on the trigger.
-    update(&mut state, key(KeyCode::Tab));
+    // 0 inputs → Enter fires straight to the Result (no Detail form).
     let effect = update(&mut state, key(KeyCode::Enter));
     match effect {
         Some(Effect::GetProperty {
@@ -1670,14 +1690,14 @@ fn get_trigger_pushes_result_and_requests_get() {
             assert_eq!(iface, "i");
             assert_eq!(property, "p1");
         }
-        other => panic!("trigger Enter should request GetProperty, got {other:?}"),
+        other => panic!("button Enter should request GetProperty, got {other:?}"),
     }
     match state.top() {
         Screen::Result(r) => {
             assert!(r.loading);
             assert_eq!(r.title, "i.p1");
         }
-        _ => panic!("trigger pushed a Result screen"),
+        _ => panic!("button Enter pushed a Result screen"),
     }
     // The result payload populates the Result screen.
     update(
@@ -1920,44 +1940,36 @@ fn interface_on_signal_button() -> busx::tui::State {
 }
 
 #[test]
-fn signal_listen_button_pushes_detail_with_match_rule_preview() {
-    // Signals column, `Listen` button → a Listen Detail whose single label is the
-    // match-rule preview (no inputs).
+fn signal_listen_button_auto_fires_listen() {
+    // Signals column, `Listen` button → a 0-input Listen action, so Enter skips
+    // the Detail form and fires straight to the Result, returning
+    // `Effect::Listen { target: Signal { member: "Changed" } }` immediately. (The
+    // match-rule preview is a Detail-form artifact and is no longer shown.)
     let mut state = interface_on_signal_button();
     let effect = update(&mut state, key(KeyCode::Enter));
-    assert!(
-        effect.is_none(),
-        "the button just pushes a Detail (no Effect)"
-    );
+    match effect {
+        Some(Effect::Listen { target, .. }) => match target {
+            ListenTarget::Signal { member } => assert_eq!(member, "Changed"),
+            other => panic!("expected Signal listen, got {other:?}"),
+        },
+        other => panic!("button Enter should fire Listen, got {other:?}"),
+    }
     match state.top() {
-        Screen::Detail(d) => {
-            match &d.kind {
-                ActionKind::Listen { target } => match target {
-                    ListenTarget::Signal { member } => assert_eq!(member, "Changed"),
-                    other => panic!("expected Signal listen, got {other:?}"),
-                },
-                other => panic!("expected Listen, got {other:?}"),
-            }
-            assert!(d.inputs.is_empty(), "Listen Detail has no input fields");
-            assert_eq!(d.field_labels.len(), 1, "one label: the match-rule preview");
-            // The preview is the signal's match rule on (iface, member, object).
-            let rule = &d.field_labels[0];
-            assert!(
-                rule.contains("type='signal'"),
-                "preview {rule} is a signal rule"
-            );
-            assert!(rule.contains("interface='org.busx.Test'"));
-            assert!(rule.contains("member='Changed'"));
-            assert!(rule.contains("path='/o'"));
+        Screen::Result(r) => {
+            assert!(r.loading, "Result starts loading");
+            assert_eq!(r.title, "listen org.busx.Test.Changed");
         }
-        _ => panic!("Enter should push a Detail screen"),
+        _ => panic!("Enter should push a Result screen"),
     }
 }
 
 #[test]
-fn property_listen_button_targets_propertieschanged_rule() {
-    // Properties column, `Listen` button (index 2) → the preview subscribes the
-    // shared PropertiesChanged signal on the object.
+fn property_listen_button_auto_fires_property_listen() {
+    // Properties column, `Listen` button (index 2) → a 0-input Listen action, so
+    // Enter skips the Detail form and fires straight to the Result, targeting the
+    // property (`ListenTarget::Property { property: "volume" }`). The shared
+    // PropertiesChanged signal subscription that the old match-rule preview
+    // described is now built internally from the target, not shown as a label.
     let screen = busx::tui::state::InterfaceScreen {
         service: "s".into(),
         object: "/o".into(),
@@ -1982,36 +1994,29 @@ fn property_listen_button_targets_propertieschanged_rule() {
         bus: Bus::Session,
         show_standard_interfaces: false,
     };
-    update(&mut state, key(KeyCode::Enter));
+    let effect = update(&mut state, key(KeyCode::Enter));
+    match effect {
+        Some(Effect::Listen { target, .. }) => match target {
+            ListenTarget::Property { property } => assert_eq!(property, "volume"),
+            other => panic!("expected Property listen, got {other:?}"),
+        },
+        other => panic!("button Enter should fire Listen, got {other:?}"),
+    }
     match state.top() {
-        Screen::Detail(d) => {
-            match &d.kind {
-                ActionKind::Listen {
-                    target: ListenTarget::Property { property },
-                } => {
-                    assert_eq!(property, "volume");
-                }
-                other => panic!("expected Property listen, got {other:?}"),
-            }
-            let rule = &d.field_labels[0];
-            assert!(
-                rule.contains("member='PropertiesChanged'"),
-                "preview {rule} is PropertiesChanged"
-            );
-            assert!(rule.contains("path='/o'"));
+        Screen::Result(r) => {
+            assert!(r.loading, "Result starts loading");
+            assert_eq!(r.title, "listen org.busx.Test.volume");
         }
-        _ => panic!("Detail screen expected"),
+        _ => panic!("Enter should push a Result screen"),
     }
 }
 
 #[test]
-fn listen_trigger_pushes_result_and_requests_listen() {
-    // From a Listen Detail, Tab to the trigger, Enter → Result (loading) +
-    // Effect::Listen { target: Signal }.
+fn signal_listen_button_fires_result_and_requests_listen() {
+    // From the Signals column's `Listen` button (0 inputs), Enter fires straight
+    // to the Result (loading) + `Effect::Listen { target: Signal }`.
     let mut state = interface_on_signal_button();
-    update(&mut state, key(KeyCode::Enter)); // push the Listen Detail (0 inputs)
-    // 0 inputs → a single Tab lands on the trigger.
-    update(&mut state, key(KeyCode::Tab));
+    // 0 inputs → Enter fires straight to the Result (no Detail form).
     let effect = update(&mut state, key(KeyCode::Enter));
     match effect {
         Some(Effect::Listen {
@@ -2028,7 +2033,7 @@ fn listen_trigger_pushes_result_and_requests_listen() {
                 other => panic!("expected Signal listen, got {other:?}"),
             }
         }
-        other => panic!("trigger Enter should request Listen, got {other:?}"),
+        other => panic!("button Enter should request Listen, got {other:?}"),
     }
     match state.top() {
         Screen::Result(r) => {
@@ -2040,7 +2045,7 @@ fn listen_trigger_pushes_result_and_requests_listen() {
             assert!(r.messages.is_empty());
             assert!(r.cancel.is_none(), "cancel arrives with ListenStarted");
         }
-        _ => panic!("trigger pushed a Result screen"),
+        _ => panic!("button Enter pushed a Result screen"),
     }
 }
 
@@ -2129,11 +2134,13 @@ fn listen_result_renders_streaming_messages() {
 }
 
 #[test]
-fn method_listen_button_and_trigger_target_method() {
-    // Methods column, `Listen` button → a Listen Detail targeting a Method (Task 3).
-    // The preview is a `type='method_call'` match rule; the trigger pushes a
-    // Result and requests `Effect::Listen { target: Method }` (no real spawn —
-    // the no-op `|_| {}` handler is used, so nothing touches the bus here).
+fn method_listen_button_auto_fires_method_listen() {
+    // Methods column, `Listen` button → a 0-input Listen action targeting a
+    // Method, so Enter skips the Detail form and fires straight to the Result,
+    // requesting `Effect::Listen { target: Method { member: "Ping" } }` (no real
+    // spawn — the no-op `|_| {}` handler is used, so nothing touches the bus
+    // here). The method_call match-rule preview is a Detail-form artifact and is
+    // no longer shown.
     let screen = busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
         service: "s".into(),
         object: "/o".into(),
@@ -2158,31 +2165,7 @@ fn method_listen_button_and_trigger_target_method() {
         bus: Bus::Session,
         show_standard_interfaces: false,
     };
-    update(&mut state, key(KeyCode::Enter)); // push the Method Listen Detail
-    // The Detail's single label is the method_call match-rule preview.
-    match state.top() {
-        Screen::Detail(d) => {
-            match &d.kind {
-                ActionKind::Listen { target } => match target {
-                    ListenTarget::Method { member } => assert_eq!(member, "Ping"),
-                    other => panic!("expected Method listen, got {other:?}"),
-                },
-                other => panic!("expected Listen, got {other:?}"),
-            }
-            assert!(d.inputs.is_empty(), "Listen Detail has no input fields");
-            assert_eq!(d.field_labels.len(), 1, "one label: the match-rule preview");
-            let rule = &d.field_labels[0];
-            assert!(
-                rule.contains("type='method_call'"),
-                "preview {rule} is a method_call rule"
-            );
-            assert!(rule.contains("interface='org.busx.Test'"));
-            assert!(rule.contains("member='Ping'"));
-            assert!(rule.contains("path='/o'"));
-        }
-        _ => panic!("Enter should push a Detail screen"),
-    }
-    update(&mut state, key(KeyCode::Tab)); // → trigger
+    // 0 inputs → Enter fires straight to the Result (no Detail form).
     let effect = update(&mut state, key(KeyCode::Enter));
     match effect {
         Some(Effect::Listen {
@@ -2193,15 +2176,21 @@ fn method_listen_button_and_trigger_target_method() {
         }
         other => panic!("expected Method Listen, got {other:?}"),
     }
-    assert!(matches!(state.top(), Screen::Result(_)));
+    match state.top() {
+        Screen::Result(r) => {
+            assert!(r.loading, "Result starts loading");
+            assert_eq!(r.title, "listen org.busx.Test.Ping");
+        }
+        _ => panic!("Enter should push a Result screen"),
+    }
 }
 
 // --- Phase 4 Task 4: listen capstone loop test (full signal listen through run_loop) ---
 
 /// Drive a full signal listen through `run_loop`: Interface (Signals column) →
-/// Enter drills into the button bar → Enter (`Listen`) pushes the Listen Detail →
-/// Tab to the trigger → Enter pushes the streaming Result (loading) +
-/// `Effect::Listen` (no-op'd by the bus-free handler) → a scripted
+/// Enter drills into the button bar → Enter (`Listen`) is a 0-input action, so
+/// it skips the Detail form and fires straight to the streaming Result
+/// (loading) + `Effect::Listen` (no-op'd by the bus-free handler) → a scripted
 /// `ListenStarted` arms the cancel + clears loading → two `ListenMessage`s
 /// append message blocks → Esc pops the Result, dropping the cancel sender, so
 /// the matching receiver sees `Canceled` (the listen task would exit).
@@ -2249,9 +2238,7 @@ fn listen_action_flows_interface_to_streaming_result() {
     // with two message blocks when this list is exhausted.
     let events = vec![
         key(KeyCode::Enter),           // Signals column → drill into the button bar
-        key(KeyCode::Enter),           // Listen → push Listen Detail (0 inputs)
-        key(KeyCode::Tab),             // 0 inputs → Trigger
-        key(KeyCode::Enter),           // push Result (loading) + Effect::Listen (no-op'd)
+        key(KeyCode::Enter), // Listen (0 inputs) → auto-fire: push Result (loading) + Effect::Listen (no-op'd)
         Msg::ListenStarted(cancel_tx), // store cancel, clear loading
         Msg::ListenMessage("signal  sender=:1.1\n  …block1\n".into()),
         Msg::ListenMessage("signal  sender=:1.2\n  …block2\n".into()),
@@ -3227,8 +3214,9 @@ fn mouse_click_on_interface_method_row_switches_focus() {
 #[test]
 fn mouse_click_on_action_button_fires() {
     // An Interface with a method. Clicking ActionButton(0) (the Call button)
-    // selects + fires it — reusing the Enter "fire button" path, which builds
-    // the Call ActionKind and pushes a Detail. Assert the stack grew.
+    // selects + fires it — reusing the Enter "fire button" path. m1 has no
+    // IN-args, so the fire auto-skips the Detail form and pushes a Result.
+    // Assert the stack grew and landed on a Call Result for "m1".
     let mut state = busx::tui::State {
         screens: vec![Screen::Interface(interface_screen())],
         quit: false,
@@ -3243,17 +3231,15 @@ fn mouse_click_on_action_button_fires() {
     assert_eq!(
         state.screens.len(),
         before + 1,
-        "ActionButton click pushed a Detail"
+        "ActionButton click pushed a Result"
     );
     match state.top() {
-        Screen::Detail(d) => {
-            // Call on the selected method m1 → a Call kind for "m1".
-            assert!(
-                matches!(d.kind, ActionKind::Call { .. }),
-                "fired the call button"
-            );
+        Screen::Result(r) => {
+            // Call on the selected method m1 → a Call Result titled "i.m1".
+            assert_eq!(r.title, "i.m1", "fired the call button");
+            assert!(r.loading);
         }
-        _ => panic!("expected Detail"),
+        _ => panic!("expected Result"),
     }
 }
 
