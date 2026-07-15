@@ -5,11 +5,14 @@
 //! Direct tests for `busx::tui::copy::generate` (spec §10 copy-as generation).
 //! Pin the exact command each tool produces for representative operations.
 
+use busx::dbus::conn::Bus;
 use busx::tui::copy::{CopyOp, Tool, generate};
 
-/// Helper: render `op` for `tool`, unwrapping the `Some(command)`.
+/// Helper: render `op` for `tool` on the *session* bus, unwrapping the
+/// `Some(command)`. (Session is the common default; system/custom-bus behavior
+/// is covered by dedicated tests below.)
 fn cmd(op: &CopyOp, tool: Tool) -> String {
-    generate(op, tool).expect("expected Some(command)")
+    generate(op, &Bus::Session, tool).expect("expected Some(command)")
 }
 
 // --- method call: single basic arg (Add(n: u) → signature "u", args ["42"]) ---
@@ -29,7 +32,7 @@ fn call_add_u() -> CopyOp {
 fn call_basic_u_busctl() {
     assert_eq!(
         cmd(&call_add_u(), Tool::Busctl),
-        "busctl call org.busx.Test /o org.busx.Test Add u 42"
+        "busctl --user call org.busx.Test /o org.busx.Test Add u 42"
     );
 }
 
@@ -76,7 +79,7 @@ fn call_two_args_busctl() {
     // not dotted like dbus-send/qdbus/gdbus).
     assert_eq!(
         cmd(&call_su(), Tool::Busctl),
-        "busctl call org.busx.Test /o org.busx.Test Echo su hi 7"
+        "busctl --user call org.busx.Test /o org.busx.Test Echo su hi 7"
     );
 }
 
@@ -120,7 +123,7 @@ fn call_zero_args_busctl_omits_signature() {
     };
     assert_eq!(
         cmd(&op, Tool::Busctl),
-        "busctl call org.busx.Test /o org.busx.Test Ping"
+        "busctl --user call org.busx.Test /o org.busx.Test Ping"
     );
     assert_eq!(
         cmd(&op, Tool::DbusSend),
@@ -152,7 +155,7 @@ fn call_array_arg_each_tool() {
     // busctl: 1:1.
     assert_eq!(
         cmd(&op, Tool::Busctl),
-        "busctl call org.busx.Test /o org.busx.Test Take as 2 a b"
+        "busctl --user call org.busx.Test /o org.busx.Test Take as 2 a b"
     );
     // dbus-send: array:string:a,b (man dbus-send BNF `array:<type>:<v>,<v>`).
     assert_eq!(
@@ -189,7 +192,7 @@ fn call_dict_arg_each_tool() {
     // busctl: 1:1.
     assert_eq!(
         cmd(&op, Tool::Busctl),
-        "busctl call org.busx.Test /o org.busx.Test Map a{ss} 1 k v"
+        "busctl --user call org.busx.Test /o org.busx.Test Map a{ss} 1 k v"
     );
     // dbus-send: dict:string:string:k,v (man dbus-send BNF
     // `dict:<keytype>:<valtype>:<key>,<value>`).
@@ -199,7 +202,7 @@ fn call_dict_arg_each_tool() {
          dict:string:string:k,v"
     );
     // qdbus: no positional dict syntax → can't express the op (None).
-    assert!(generate(&op, Tool::Qdbus).is_none());
+    assert!(generate(&op, &Bus::Session, Tool::Qdbus).is_none());
     // gdbus: GVariant dict literal {"k":"v"}.
     assert_eq!(
         cmd(&op, Tool::Gdbus),
@@ -223,7 +226,7 @@ fn call_variant_arg_each_tool() {
     };
     assert_eq!(
         cmd(&op, Tool::Busctl),
-        "busctl call org.busx.Test /o org.busx.Test Echo v s hi"
+        "busctl --user call org.busx.Test /o org.busx.Test Echo v s hi"
     );
     // dbus-send: variant:string:hi (man dbus-send BNF `variant:<type>:<value>`).
     assert_eq!(
@@ -258,12 +261,12 @@ fn call_struct_arg_each_tool() {
     };
     assert_eq!(
         cmd(&op, Tool::Busctl),
-        "busctl call org.busx.Test /o org.busx.Test Point (ii) 1 2"
+        "busctl --user call org.busx.Test /o org.busx.Test Point (ii) 1 2"
     );
     // dbus-send: structs are not in the dbus-send BNF → can't express (None).
-    assert!(generate(&op, Tool::DbusSend).is_none());
+    assert!(generate(&op, &Bus::Session, Tool::DbusSend).is_none());
     // qdbus: no positional struct syntax → can't express (None).
-    assert!(generate(&op, Tool::Qdbus).is_none());
+    assert!(generate(&op, &Bus::Session, Tool::Qdbus).is_none());
     // gdbus: GVariant struct literal (1,2).
     assert_eq!(
         cmd(&op, Tool::Gdbus),
@@ -288,12 +291,12 @@ fn call_nested_asv_each_tool() {
     };
     assert_eq!(
         cmd(&op, Tool::Busctl),
-        "busctl call org.busx.Test /o org.busx.Test Hints a{sv} 1 k s v"
+        "busctl --user call org.busx.Test /o org.busx.Test Hints a{sv} 1 k s v"
     );
     // dbus-send forbids nested containers (a{sv}'s value is a variant) → None.
-    assert!(generate(&op, Tool::DbusSend).is_none());
+    assert!(generate(&op, &Bus::Session, Tool::DbusSend).is_none());
     // qdbus → None.
-    assert!(generate(&op, Tool::Qdbus).is_none());
+    assert!(generate(&op, &Bus::Session, Tool::Qdbus).is_none());
     // gdbus: full nesting — {"k":<"v">} (dict value is a GVariant variant).
     assert_eq!(
         cmd(&op, Tool::Gdbus),
@@ -318,12 +321,12 @@ fn call_nested_aas_each_tool() {
     };
     assert_eq!(
         cmd(&op, Tool::Busctl),
-        "busctl call org.busx.Test /o org.busx.Test Grid aas 1 2 x y"
+        "busctl --user call org.busx.Test /o org.busx.Test Grid aas 1 2 x y"
     );
     // dbus-send forbids nested containers → None.
-    assert!(generate(&op, Tool::DbusSend).is_none());
+    assert!(generate(&op, &Bus::Session, Tool::DbusSend).is_none());
     // qdbus → None.
-    assert!(generate(&op, Tool::Qdbus).is_none());
+    assert!(generate(&op, &Bus::Session, Tool::Qdbus).is_none());
     // gdbus: [["x","y"]] (one outer array element, itself a 2-string array).
     assert_eq!(
         cmd(&op, Tool::Gdbus),
@@ -348,10 +351,10 @@ fn call_empty_containers_each_tool() {
     // busctl: 1:1.
     assert_eq!(
         cmd(&op, Tool::Busctl),
-        "busctl call org.busx.Test /o org.busx.Test Take as 0"
+        "busctl --user call org.busx.Test /o org.busx.Test Take as 0"
     );
     // dbus-send: empty array is forbidden → can't express (None).
-    assert!(generate(&op, Tool::DbusSend).is_none());
+    assert!(generate(&op, &Bus::Session, Tool::DbusSend).is_none());
     // qdbus: empty array expands to zero positional args (no note).
     assert_eq!(
         cmd(&op, Tool::Qdbus),
@@ -381,7 +384,7 @@ fn call_partial_array_args_render_placeholder() {
     // busctl: 1:1 (the missing tokens are simply absent).
     assert_eq!(
         cmd(&op, Tool::Busctl),
-        "busctl call org.busx.Test /o org.busx.Test Take as 2"
+        "busctl --user call org.busx.Test /o org.busx.Test Take as 2"
     );
     // dbus-send: count 2, two missing elements → `?` placeholders each.
     assert_eq!(
@@ -417,7 +420,7 @@ fn get_op() -> CopyOp {
 fn get_busctl() {
     assert_eq!(
         cmd(&get_op(), Tool::Busctl),
-        "busctl get-property org.busx.Test /o org.busx.Test Name"
+        "busctl --user get-property org.busx.Test /o org.busx.Test Name"
     );
 }
 
@@ -469,7 +472,7 @@ fn set_op() -> CopyOp {
 fn set_busctl() {
     assert_eq!(
         cmd(&set_op(), Tool::Busctl),
-        "busctl set-property org.busx.Test /o org.busx.Test Name s hi"
+        "busctl --user set-property org.busx.Test /o org.busx.Test Name s hi"
     );
 }
 
@@ -526,7 +529,7 @@ fn set_uint_gdbus_bare_number() {
     // busctl is 1:1.
     assert_eq!(
         cmd(&op, Tool::Busctl),
-        "busctl set-property org.busx.Test /o org.busx.Test Count u 7"
+        "busctl --user set-property org.busx.Test /o org.busx.Test Count u 7"
     );
 }
 
@@ -546,13 +549,13 @@ fn set_array_property_each_tool() {
     // busctl: 1:1.
     assert_eq!(
         cmd(&op, Tool::Busctl),
-        "busctl set-property org.busx.Test /o org.busx.Test Tags as 2 a b"
+        "busctl --user set-property org.busx.Test /o org.busx.Test Tags as 2 a b"
     );
     // dbus-send Properties.Set: the property value is a variant; dbus-send's
     // variant inner type must be basic, and `as` is not → can't express (None).
-    assert!(generate(&op, Tool::DbusSend).is_none());
+    assert!(generate(&op, &Bus::Session, Tool::DbusSend).is_none());
     // qdbus Properties.Set: array not expressible positionally → None.
-    assert!(generate(&op, Tool::Qdbus).is_none());
+    assert!(generate(&op, &Bus::Session, Tool::Qdbus).is_none());
     // gdbus Properties.Set: array value wrapped in a GVariant variant `<[...]>`.
     assert_eq!(
         cmd(&op, Tool::Gdbus),
@@ -582,14 +585,14 @@ fn listen_dbus_send_is_dbus_monitor() {
 fn listen_busctl_is_busctl_monitor() {
     assert_eq!(
         cmd(&listen_op(), Tool::Busctl),
-        "busctl monitor \"type='signal'\""
+        "busctl --user monitor \"type='signal'\""
     );
 }
 
 #[test]
 fn listen_qdbus_is_none() {
     // qdbus has no monitor facility.
-    assert_eq!(generate(&listen_op(), Tool::Qdbus), None);
+    assert_eq!(generate(&listen_op(), &Bus::Session, Tool::Qdbus), None);
 }
 
 #[test]
@@ -597,8 +600,152 @@ fn listen_gdbus_is_bare_command_plus_note() {
     // PINNED: gdbus monitor is unfiltered (it ignores match rules), so emit
     // the bare command + a note rather than dropping the user.
     assert_eq!(
-        generate(&listen_op(), Tool::Gdbus),
+        generate(&listen_op(), &Bus::Session, Tool::Gdbus),
         Some("gdbus monitor --session\n# gdbus monitor is unfiltered — it ignores the rule".into())
+    );
+}
+
+// --- bus selection: each tool defaults to a different bus ---
+
+// A representative call op reused across the bus-selection tests.
+fn call_op() -> CopyOp {
+    CopyOp::Call {
+        service: "org.busx.Test".into(),
+        object: "/o".into(),
+        iface: "org.busx.Test".into(),
+        method: "Add".into(),
+        signature: "u".into(),
+        args: vec!["42".into()],
+    }
+}
+
+#[test]
+fn system_bus_emits_each_tools_system_flag() {
+    // busctl: system is the default → no flag. dbus-send/qdbus: --system.
+    // gdbus always needs an explicit flag → --system.
+    assert_eq!(
+        generate(&call_op(), &Bus::System, Tool::Busctl).unwrap(),
+        "busctl call org.busx.Test /o org.busx.Test Add u 42"
+    );
+    assert_eq!(
+        generate(&call_op(), &Bus::System, Tool::DbusSend).unwrap(),
+        "dbus-send --system --print-reply --dest=org.busx.Test /o org.busx.Test.Add uint32:42"
+    );
+    assert_eq!(
+        generate(&call_op(), &Bus::System, Tool::Qdbus).unwrap(),
+        "qdbus --system org.busx.Test /o org.busx.Test.Add 42"
+    );
+    assert_eq!(
+        generate(&call_op(), &Bus::System, Tool::Gdbus).unwrap(),
+        "gdbus call --system --dest org.busx.Test --object-path /o --method org.busx.Test.Add 42"
+    );
+}
+
+#[test]
+fn session_bus_emits_each_tools_session_flag() {
+    // busctl: session needs --user (its default is system). dbus-send/qdbus:
+    // session is the default → no flag. gdbus: --session.
+    assert_eq!(
+        generate(&call_op(), &Bus::Session, Tool::Busctl).unwrap(),
+        "busctl --user call org.busx.Test /o org.busx.Test Add u 42"
+    );
+    assert_eq!(
+        generate(&call_op(), &Bus::Session, Tool::DbusSend).unwrap(),
+        "dbus-send --print-reply --dest=org.busx.Test /o org.busx.Test.Add uint32:42"
+    );
+    assert_eq!(
+        generate(&call_op(), &Bus::Session, Tool::Qdbus).unwrap(),
+        "qdbus org.busx.Test /o org.busx.Test.Add 42"
+    );
+    assert_eq!(
+        generate(&call_op(), &Bus::Session, Tool::Gdbus).unwrap(),
+        "gdbus call --session --dest org.busx.Test --object-path /o --method org.busx.Test.Add 42"
+    );
+}
+
+#[test]
+fn custom_bus_emits_each_tools_address_flag() {
+    // Every tool can target a custom address, but with different syntax:
+    //   busctl --address=, dbus-send --bus=, qdbus --bus (separate arg),
+    //   gdbus --address=. The address is shell-quoted only if it needs it.
+    let bus = Bus::Other("unix:path=/tmp/x".into());
+    assert_eq!(
+        generate(&call_op(), &bus, Tool::Busctl).unwrap(),
+        "busctl --address=unix:path=/tmp/x call org.busx.Test /o org.busx.Test Add u 42"
+    );
+    assert_eq!(
+        generate(&call_op(), &bus, Tool::DbusSend).unwrap(),
+        "dbus-send --bus=unix:path=/tmp/x --print-reply --dest=org.busx.Test /o org.busx.Test.Add uint32:42"
+    );
+    assert_eq!(
+        generate(&call_op(), &bus, Tool::Qdbus).unwrap(),
+        "qdbus --bus unix:path=/tmp/x org.busx.Test /o org.busx.Test.Add 42"
+    );
+    assert_eq!(
+        generate(&call_op(), &bus, Tool::Gdbus).unwrap(),
+        "gdbus call --address=unix:path=/tmp/x --dest org.busx.Test --object-path /o --method org.busx.Test.Add 42"
+    );
+}
+
+#[test]
+fn custom_bus_address_is_shell_quoted_when_needed() {
+    // A space in the address → every tool's address arg is shell-quoted.
+    let bus = Bus::Other("unix:abstract=foo bar".into());
+    assert_eq!(
+        generate(&call_op(), &bus, Tool::DbusSend).unwrap(),
+        "dbus-send --bus=\"unix:abstract=foo bar\" --print-reply --dest=org.busx.Test /o org.busx.Test.Add uint32:42"
+    );
+    assert_eq!(
+        generate(&call_op(), &bus, Tool::Qdbus).unwrap(),
+        "qdbus --bus \"unix:abstract=foo bar\" org.busx.Test /o org.busx.Test.Add 42"
+    );
+}
+
+#[test]
+fn custom_bus_dbus_monitor_uses_address_separate_arg() {
+    // dbus-monitor (the listen form of Tool::DbusSend) takes the custom bus as
+    // `--address ADDR` (a separate arg), NOT dbus-send's `--bus=ADDR`.
+    let bus = Bus::Other("unix:path=/tmp/x".into());
+    assert_eq!(
+        generate(&listen_op(), &bus, Tool::DbusSend).unwrap(),
+        "dbus-monitor --address unix:path=/tmp/x \"type='signal'\""
+    );
+    // busctl monitor uses the same --address= form as busctl call.
+    assert_eq!(
+        generate(&listen_op(), &bus, Tool::Busctl).unwrap(),
+        "busctl --address=unix:path=/tmp/x monitor \"type='signal'\""
+    );
+    // gdbus monitor gains the address flag too (plus its unfiltered note).
+    assert_eq!(
+        generate(&listen_op(), &bus, Tool::Gdbus).unwrap(),
+        "gdbus monitor --address=unix:path=/tmp/x\n# gdbus monitor is unfiltered — it ignores the rule"
+    );
+}
+
+#[test]
+fn bus_flags_apply_to_get_and_set_too() {
+    let get = CopyOp::Get {
+        service: "org.busx.Test".into(),
+        object: "/o".into(),
+        iface: "org.busx.Test".into(),
+        property: "Name".into(),
+    };
+    assert_eq!(
+        generate(&get, &Bus::System, Tool::DbusSend).unwrap(),
+        "dbus-send --system --print-reply --dest=org.busx.Test /o \
+         org.freedesktop.DBus.Properties.Get string:org.busx.Test string:Name"
+    );
+    let set = CopyOp::Set {
+        service: "org.busx.Test".into(),
+        object: "/o".into(),
+        iface: "org.busx.Test".into(),
+        property: "Name".into(),
+        signature: "s".into(),
+        value: vec!["hi".into()],
+    };
+    assert_eq!(
+        generate(&set, &Bus::System, Tool::Busctl).unwrap(),
+        "busctl set-property org.busx.Test /o org.busx.Test Name s hi"
     );
 }
 

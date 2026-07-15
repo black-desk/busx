@@ -92,8 +92,9 @@ impl App {
 
 /// Launch the TUI against the real terminal.
 pub fn run(user: bool, system: bool, address: Option<&str>, verbose: bool) -> Result<()> {
-    let conn =
-        async_global_executor::block_on(dbus::conn::connect(user, system, address, verbose))?;
+    let (conn, bus) = async_global_executor::block_on(dbus::conn::connect_with_bus(
+        user, system, address, verbose,
+    ))?;
     let (tx, rx) = flume::unbounded::<Msg>();
     let (user_arg, system_arg, address_arg) = (user, system, address.map(String::from));
     // `CopyToClipboard` is NOT a dbus op — intercept it before `run_effect`,
@@ -121,6 +122,7 @@ pub fn run(user: bool, system: bool, address: Option<&str>, verbose: bool) -> Re
     let mut app = App {
         state: State::loading_service(),
     };
+    app.state.bus = bus;
     let mut terminal = setup_terminal()?;
     let result = app.run_loop(&mut terminal, CrosstermSource { rx }, on_effect);
     // Always try to restore the terminal; prefer the loop's result over a

@@ -25,8 +25,16 @@
 //! Where a tool genuinely can't express a type, copy-as emits an honest
 //! `# note` rather than a command the tool would reject (no broken values).
 //!
-//! `--user`/`--system` bus flags are intentionally omitted (the user adds
-//! the bus they want); for gdbus we emit the placeholder `--session`.
+//! Bus selection: each tool defaults to a *different* bus (busctl → system;
+//! dbus-send/qdbus → session; gdbus needs an explicit flag), so [`generate`]
+//! takes the bus busx is on and emits the flag that makes the generated
+//! command target that same bus (omitted when it's the tool's default). Every
+//! tool can also target a custom `--address` ([`Bus::Other`]), so the address
+//! is carried along and rendered in each tool's own syntax (busctl
+//! `--address=`, dbus-send `--bus=`, dbus-monitor `--address`, qdbus `--bus`,
+//! gdbus `--address=`) — no `# note` is needed for a custom bus.
+
+use crate::dbus::conn::Bus;
 
 /// An operation we can render as another tool's command.
 #[derive(Clone, Debug)]
@@ -86,12 +94,14 @@ impl Tool {
     }
 }
 
-/// Render `op` as `tool`'s command line.
+/// Render `op` as `tool`'s command line, targeting `bus`.
 ///
 /// Returns `None` only where the tool genuinely cannot express the operation
 /// (qdbus has no monitor). Best-effort outputs carry a trailing `# …` note
-/// where a tool can't fully express a signature.
-pub fn generate(op: &CopyOp, tool: Tool) -> Option<String> {
+/// where a tool can't fully express a signature. The bus is always expressible
+/// (every tool has session/system/address flags), so it never produces a note
+/// on its own.
+pub fn generate(op: &CopyOp, bus: &Bus, tool: Tool) -> Option<String> {
     match op {
         CopyOp::Call {
             service,
@@ -100,13 +110,13 @@ pub fn generate(op: &CopyOp, tool: Tool) -> Option<String> {
             method,
             signature,
             args,
-        } => call(service, object, iface, method, signature, args, tool),
+        } => call(service, object, iface, method, signature, args, tool, bus),
         CopyOp::Get {
             service,
             object,
             iface,
             property,
-        } => Some(get(service, object, iface, property, tool)),
+        } => Some(get(service, object, iface, property, tool, bus)),
         CopyOp::Set {
             service,
             object,
@@ -114,9 +124,49 @@ pub fn generate(op: &CopyOp, tool: Tool) -> Option<String> {
             property,
             signature,
             value,
-        } => set(service, object, iface, property, signature, value, tool),
-        CopyOp::Listen { rule } => listen(rule, tool),
+        } => set(
+            service, object, iface, property, signature, value, tool, bus,
+        ),
+        CopyOp::Listen { rule } => listen(rule, tool, bus),
     }
+}
+
+/// The bus-selection flag token(s) for `tool` to target `bus` (no trailing
+/// space), or `None` when `bus` is the tool's *default* (no flag needed). The
+/// custom-address syntax differs per tool: busctl `--address=`, dbus-send
+/// `--bus=`, qdbus `--bus` (separate arg), gdbus `--address=`. dbus-monitor
+/// (the listen form of [`Tool::DbusSend`]) uses `--address` (separate arg) and
+/// is special-cased in [`listen`]; for session/system it matches dbus-send.
+/// The address is shell-quoted via [`quote`].
+fn bus_flag(bus: &Bus, tool: Tool) -> Option<String> {
+    match (bus, tool) {
+        (Bus::Session, Tool::Busctl) => Some("--user".into()),
+        (Bus::System, Tool::Busctl) => None,
+        (Bus::Other(a), Tool::Busctl) => Some(format!("--address={}", quote(a))),
+
+        (Bus::Session, Tool::DbusSend) => None,
+        (Bus::System, Tool::DbusSend) => Some("--system".into()),
+        // dbus-send registers on a message bus via --bus=ADDRESS (man dbus-send).
+        (Bus::Other(a), Tool::DbusSend) => Some(format!("--bus={}", quote(a))),
+
+        (Bus::Session, Tool::Qdbus) => None,
+        (Bus::System, Tool::Qdbus) => Some("--system".into()),
+        // qdbus takes the custom-bus address as a separate arg: --bus ADDRESS.
+        (Bus::Other(a), Tool::Qdbus) => Some(format!("--bus {}", quote(a))),
+
+        // gdbus always needs an explicit session/system flag; --address= for custom.
+        (Bus::Session, Tool::Gdbus) => Some("--session".into()),
+        (Bus::System, Tool::Gdbus) => Some("--system".into()),
+        (Bus::Other(a), Tool::Gdbus) => Some(format!("--address={}", quote(a))),
+    }
+}
+
+/// Format `tool`'s bus flag as a trailing-space prefix for `format!`
+/// insertion (empty when it's the tool's default).
+fn bus_prefix(bus: &Bus, tool: Tool) -> String {
+    bus_flag(bus, tool)
+        .map(|f| format!("{f} "))
+        .unwrap_or_default()
 }
 
 // --- method call -----------------------------------------------------------
@@ -130,18 +180,22 @@ fn call(
     signature: &str,
     args: &[String],
     tool: Tool,
+    bus: &Bus,
 ) -> Option<String> {
     match tool {
         // 1:1 — the args are already busctl tokens. Quote each and space-join.
         Tool::Busctl => {
-            let mut parts: Vec<String> = vec![
-                "busctl".into(),
+            let mut parts: Vec<String> = vec!["busctl".into()];
+            if let Some(f) = bus_flag(bus, tool) {
+                parts.push(f);
+            }
+            parts.extend([
                 "call".into(),
                 service.into(),
                 object.into(),
                 iface.into(),
                 method.into(),
-            ];
+            ]);
             if !signature.is_empty() {
                 parts.push(signature.into());
             }
@@ -151,8 +205,9 @@ fn call(
             Some(parts.join(" "))
         }
         Tool::DbusSend => {
+            let flag = bus_prefix(bus, tool);
             let mut out =
-                format!("dbus-send --print-reply --dest={service} {object} {iface}.{method}");
+                format!("dbus-send {flag}--print-reply --dest={service} {object} {iface}.{method}");
             let (rendered, notes) = render_args(signature, args, tool);
             for r in &rendered {
                 if r.unsupported.is_none() && !(r.quoted && r.text.is_empty()) {
@@ -165,7 +220,8 @@ fn call(
             if notes.is_empty() { Some(out) } else { None }
         }
         Tool::Qdbus => {
-            let mut out = format!("qdbus {service} {object} {iface}.{method}");
+            let flag = bus_prefix(bus, tool);
+            let mut out = format!("qdbus {flag}{service} {object} {iface}.{method}");
             let (rendered, notes) = render_args(signature, args, tool);
             for r in &rendered {
                 if r.unsupported.is_none() && !(r.quoted && r.text.is_empty()) {
@@ -176,8 +232,9 @@ fn call(
             if notes.is_empty() { Some(out) } else { None }
         }
         Tool::Gdbus => {
+            let flag = bus_prefix(bus, tool);
             let mut out = format!(
-                "gdbus call --session --dest {service} --object-path {object} --method {iface}.{method}"
+                "gdbus call {flag}--dest {service} --object-path {object} --method {iface}.{method}"
             );
             let (rendered, _notes) = render_args(signature, args, tool);
             // gdbus can express every type, so there are never notes.
@@ -192,31 +249,44 @@ fn call(
 
 // --- property get ----------------------------------------------------------
 
-fn get(service: &str, object: &str, iface: &str, property: &str, tool: Tool) -> String {
+fn get(service: &str, object: &str, iface: &str, property: &str, tool: Tool, bus: &Bus) -> String {
     match tool {
-        Tool::Busctl => format!("busctl get-property {service} {object} {iface} {property}"),
-        Tool::DbusSend => format!(
-            "dbus-send --print-reply --dest={service} {object} \
-             org.freedesktop.DBus.Properties.Get string:{iface} string:{property}"
-        ),
+        Tool::Busctl => {
+            let flag = bus_prefix(bus, tool);
+            format!("busctl {flag}get-property {service} {object} {iface} {property}")
+        }
+        Tool::DbusSend => {
+            let flag = bus_prefix(bus, tool);
+            format!(
+                "dbus-send {flag}--print-reply --dest={service} {object} \
+                 org.freedesktop.DBus.Properties.Get string:{iface} string:{property}"
+            )
+        }
         // qdbus reads a property via the standard Properties.Get method
         // (qdbus has no first-class property syntax on the command line);
         // `--literal` returns the raw value without qdbus's pretty-printer.
-        Tool::Qdbus => format!(
-            "qdbus --literal {service} {object} org.freedesktop.DBus.Properties.Get {iface} {property}"
-        ),
+        Tool::Qdbus => {
+            let flag = bus_prefix(bus, tool);
+            format!(
+                "qdbus {flag}--literal {service} {object} org.freedesktop.DBus.Properties.Get {iface} {property}"
+            )
+        }
         // gdbus Properties.Get takes two GVariant string args; gdbus infers
         // the `'s'` type from the known signature `(ss)`, so bare quoted
         // strings work.
-        Tool::Gdbus => format!(
-            "gdbus call --session --dest {service} --object-path {object} \
-             --method org.freedesktop.DBus.Properties.Get \"{iface}\" \"{property}\""
-        ),
+        Tool::Gdbus => {
+            let flag = bus_prefix(bus, tool);
+            format!(
+                "gdbus call {flag}--dest {service} --object-path {object} \
+                 --method org.freedesktop.DBus.Properties.Get \"{iface}\" \"{property}\""
+            )
+        }
     }
 }
 
 // --- property set ----------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn set(
     service: &str,
     object: &str,
@@ -225,25 +295,30 @@ fn set(
     signature: &str,
     value: &[String],
     tool: Tool,
+    bus: &Bus,
 ) -> Option<String> {
     match tool {
         // 1:1 — signature + value tokens map straight onto set-property.
         Tool::Busctl => {
-            let mut parts: Vec<String> = vec![
-                "busctl".into(),
+            let mut parts: Vec<String> = vec!["busctl".into()];
+            if let Some(f) = bus_flag(bus, tool) {
+                parts.push(f);
+            }
+            parts.extend([
                 "set-property".into(),
                 service.into(),
                 object.into(),
                 iface.into(),
                 property.into(),
                 signature.into(),
-            ];
+            ]);
             for v in value {
                 parts.push(quote(v));
             }
             Some(parts.join(" "))
         }
         Tool::DbusSend => {
+            let flag = bus_prefix(bus, tool);
             // dbus-send Properties.Set variant inner type must be basic.
             let mut tok = Tok {
                 toks: value,
@@ -253,7 +328,7 @@ fn set(
                 Some(tag) => {
                     let val = tok.next();
                     Some(format!(
-                        "dbus-send --print-reply --dest={service} {object} \
+                        "dbus-send {flag}--print-reply --dest={service} {object} \
                          org.freedesktop.DBus.Properties.Set string:{iface} string:{property} variant:{tag}:{val}"
                     ))
                 }
@@ -266,6 +341,7 @@ fn set(
         }
         // qdbus Properties.Set: `variant:` takes a single basic value.
         Tool::Qdbus => {
+            let flag = bus_prefix(bus, tool);
             let mut tok = Tok {
                 toks: value,
                 pos: 0,
@@ -273,7 +349,7 @@ fn set(
             if dbus_send_basic_literal_kind(signature).is_some() {
                 let val = tok.next();
                 Some(format!(
-                    "qdbus {service} {object} org.freedesktop.DBus.Properties.Set \
+                    "qdbus {flag}{service} {object} org.freedesktop.DBus.Properties.Set \
                      {iface} {property} variant:{val}"
                 ))
             } else {
@@ -283,6 +359,7 @@ fn set(
         }
         // gdbus Properties.Set: GVariant variant value. gdbus can express every type.
         Tool::Gdbus => {
+            let flag = bus_prefix(bus, tool);
             let mut tok = Tok {
                 toks: value,
                 pos: 0,
@@ -290,7 +367,7 @@ fn set(
             let inner = gdbus_value(signature, &mut tok).text;
             let gv = format!("<{inner}>");
             Some(format!(
-                "gdbus call --session --dest {service} --object-path {object} \
+                "gdbus call {flag}--dest {service} --object-path {object} \
                  --method org.freedesktop.DBus.Properties.Set \
                  \"{iface}\" \"{property}\" {gv}"
             ))
@@ -300,17 +377,37 @@ fn set(
 
 // --- listen ----------------------------------------------------------------
 
-fn listen(rule: &str, tool: Tool) -> Option<String> {
+fn listen(rule: &str, tool: Tool, bus: &Bus) -> Option<String> {
     match tool {
-        Tool::DbusSend => Some(format!("dbus-monitor {}", quote(rule))),
-        Tool::Busctl => Some(format!("busctl monitor {}", quote(rule))),
+        Tool::DbusSend => {
+            // dbus-monitor takes a custom bus as `--address ADDRESS` (separate
+            // arg), unlike dbus-send's `--bus=ADDRESS` — override the shared
+            // flag for a custom bus. Session/System match dbus-send (none /
+            // --system), so fall back to [`bus_prefix`] there.
+            let flag = match bus {
+                Bus::Other(a) => format!("--address {} ", quote(a)),
+                _ => bus_prefix(bus, tool),
+            };
+            Some(format!("dbus-monitor {flag}{}", quote(rule)))
+        }
+        Tool::Busctl => {
+            // busctl: `--user` selects the session bus (system default); a
+            // custom address uses the same `--address=` form as call/get/set.
+            let flag = bus_prefix(bus, tool);
+            Some(format!("busctl {flag}monitor {}", quote(rule)))
+        }
         // qdbus has no monitor facility at all.
         Tool::Qdbus => None,
         // gdbus monitor is unfiltered (it ignores match rules), so emit the
-        // bare command plus a note rather than dropping the user.
-        Tool::Gdbus => Some(
-            "gdbus monitor --session\n# gdbus monitor is unfiltered — it ignores the rule".into(),
-        ),
+        // bare command plus a note rather than dropping the user. gdbus always
+        // carries a session/system/address flag; no trailing space (the flag is
+        // the last token before the `\n# note`).
+        Tool::Gdbus => {
+            let flag = bus_flag(bus, tool).expect("gdbus always has a bus flag");
+            Some(format!(
+                "gdbus monitor {flag}\n# gdbus monitor is unfiltered — it ignores the rule"
+            ))
+        }
     }
 }
 

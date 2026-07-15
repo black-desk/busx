@@ -5,6 +5,7 @@
 //! Pure display state. A navigation stack of `Screen`s; `render`
 //! draws the top screen + a breadcrumb. `update`/`render` read only this.
 
+use crate::dbus::conn::Bus;
 use crate::dbus::types::{ObjectNode, ServiceInfo};
 use crate::tui::copy::{CopyOp, Tool};
 use ratatui::layout::Rect;
@@ -24,6 +25,10 @@ pub struct State {
     /// The `?` help overlay (open/closed). Renders on top of the current screen;
     /// captures keys while open (Esc/`?` close it; other keys are swallowed).
     pub help_open: bool,
+    /// The bus busx is connected to, so copy-as emits the matching
+    /// `--user`/`--system`/`--address` flag per tool. Set once at startup in
+    /// `app::run`; defaults to [`Bus::Session`] (the test default).
+    pub bus: Bus,
 }
 
 /// A clickable region recorded by `render`, mapping a screen rect to what a
@@ -226,6 +231,7 @@ impl State {
             popup: None,
             click_targets: Vec::new(),
             help_open: false,
+            bus: Bus::Session,
         }
     }
 
@@ -242,6 +248,7 @@ impl State {
             popup: None,
             click_targets: Vec::new(),
             help_open: false,
+            bus: Bus::Session,
         }
     }
 
