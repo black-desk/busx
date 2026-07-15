@@ -60,8 +60,19 @@ impl App {
         F: FnMut(Effect),
     {
         let mut targets: Vec<(ratatui::layout::Rect, crate::tui::ClickTarget)> = Vec::new();
+        // Persisted per-list scroll offsets for the top screen's list(s),
+        // threaded into `render` so the cursor doesn't snap back to the viewport
+        // bottom each frame (see `render`). Like `targets`, this is loop-owned.
+        // Reset on any navigation (screen-stack depth change) so a freshly
+        // entered / returned-to screen starts at the top.
+        let mut scroll = [0usize; 3];
+        let mut prev_len = self.state.screens.len();
         while !self.state.quit {
-            terminal.draw(|f| render(f, &self.state, &mut targets))?;
+            if self.state.screens.len() != prev_len {
+                scroll = [0; 3];
+                prev_len = self.state.screens.len();
+            }
+            terminal.draw(|f| render(f, &self.state, &mut targets, &mut scroll))?;
             // The draw closure's `&self.state` borrow ends when `draw` returns,
             // so storing into `click_targets` here is fine. `take` clears `targets`
             // for reuse next frame (no clone).
