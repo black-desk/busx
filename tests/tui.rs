@@ -1376,6 +1376,29 @@ fn detail_tab_cycles_across_multiple_fields() {
 }
 
 #[test]
+fn detail_backtab_cycles_fields_in_reverse() {
+    let mut state =
+        interface_on_button(vec![method_with_args("Add", &[("a", "u"), ("b", "u")])], 0);
+    update(&mut state, key(KeyCode::Enter)); // push the Detail (2 inputs), focus Field0
+    // Shift+Tab (BackTab) reverse-cycles: Field0 → Trigger → Field1 → Field0.
+    let foci = [
+        (DetailFocus::Trigger, 0),
+        (DetailFocus::Field, 1),
+        (DetailFocus::Field, 0),
+    ];
+    for (want_focus, want_field) in foci {
+        update(&mut state, key(KeyCode::BackTab));
+        match state.top() {
+            Screen::Detail(d) => {
+                assert_eq!(d.focus, want_focus, "backtab reverse cycle");
+                assert_eq!(d.field_selected, want_field);
+            }
+            _ => panic!(),
+        }
+    }
+}
+
+#[test]
 fn detail_arrows_move_field_selection() {
     let mut state =
         interface_on_button(vec![method_with_args("Add", &[("a", "u"), ("b", "u")])], 0);

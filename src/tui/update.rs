@@ -899,8 +899,10 @@ fn buttons_for(column: InterfaceFocus) -> &'static [&'static str] {
 /// `Esc` (pop) and `Enter` (trigger) are handled globally / in `handle_enter`.
 fn update_detail_key(d: &mut DetailScreen, k: KeyEvent) -> Option<Effect> {
     let n = d.inputs.len();
+    let shift = k.modifiers.contains(KeyModifiers::SHIFT);
     match k.code {
-        KeyCode::Tab => {
+        // Forward cycle: Field0→Field1→…→Trigger→Field0.
+        KeyCode::Tab if !shift => {
             // Cycle the focus. With 0 inputs the field row is empty, so a single
             // Tab lands on the trigger; otherwise Field0→Field1→…→last→Trigger→Field0.
             match d.focus {
@@ -919,6 +921,20 @@ fn update_detail_key(d: &mut DetailScreen, k: KeyEvent) -> Option<Effect> {
                 }
             }
         }
+        // Reverse cycle (Shift+Tab): Field0→Trigger→last→…→Field1→Field0.
+        KeyCode::BackTab | KeyCode::Tab => match d.focus {
+            DetailFocus::Field => {
+                if d.field_selected > 0 {
+                    d.field_selected -= 1;
+                } else {
+                    d.focus = DetailFocus::Trigger;
+                }
+            }
+            DetailFocus::Trigger => {
+                d.focus = DetailFocus::Field;
+                d.field_selected = n.saturating_sub(1);
+            }
+        },
         KeyCode::Down | KeyCode::Char('j') if d.focus == DetailFocus::Field && n > 0 => {
             d.field_selected = (d.field_selected + 1).min(n - 1);
         }
