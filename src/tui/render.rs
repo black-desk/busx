@@ -573,25 +573,31 @@ fn render_detail(
         } else {
             format!("{}  {:<sig_w$}", pad_col(name, name_w), sig, sig_w = sig_w)
         };
-        // Focused field: a `▶` marker (which arg is active) + the value REVERSED
-        // with a `▏` cursor at the input position (where typing lands). The label
-        // stays normal so the arg name is readable. Unfocused: plain, indented to
-        // align with the `▶`.
+        // Focused field: a `▶` marker + the label, then the whole input slot
+        // (value + cursor + trailing pad) drawn as one REVERSED block so the
+        // field reads as an interactive box even when empty — not just a lone
+        // cursor. The cursor is a yellow-on-reversed cell so it stands out
+        // within the block. Unfocused: plain, indented to align with the `▶`.
         let line = if focused {
             let cursor = input.map(|v| v.cursor()).unwrap_or(0).min(value.len());
             let (before, after) = value.split_at(cursor);
+            let rev = Style::default().add_modifier(Modifier::REVERSED);
+            let prefix_w = 2 + label.chars().count() + 2;
+            let input_w = (fields_area.width as usize).saturating_sub(prefix_w);
+            let used = before.chars().count() + 1 + after.chars().count();
+            let pad = input_w.saturating_sub(used);
             Line::from(vec![
                 Span::styled("▶ ", Style::default().fg(Color::Yellow)),
                 Span::raw(format!("{label}  ")),
+                Span::styled(before.to_string(), rev),
                 Span::styled(
-                    before.to_string(),
-                    Style::default().add_modifier(Modifier::REVERSED),
+                    "▏",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::REVERSED),
                 ),
-                Span::styled("▏", Style::default().fg(Color::Yellow)),
-                Span::styled(
-                    after.to_string(),
-                    Style::default().add_modifier(Modifier::REVERSED),
-                ),
+                Span::styled(after.to_string(), rev),
+                Span::styled(" ".repeat(pad), rev),
             ])
         } else {
             Line::raw(format!("  {label}  {value}"))
