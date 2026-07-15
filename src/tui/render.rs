@@ -79,7 +79,7 @@ fn render_breadcrumb(frame: &mut Frame, area: Rect, state: &State) {
 
 fn screen_crumb(s: &Screen) -> Option<String> {
     // One crumb per level, each showing only the context it adds — so the
-    // breadcrumb reads `service > object > interface > Details > Result`
+    // breadcrumb reads `service > object > interface > call Method > Result`
     // instead of re-stating service/object/interface at every step. (The root
     // Service list has no label of its own and is dropped.)
     match s {
@@ -87,7 +87,7 @@ fn screen_crumb(s: &Screen) -> Option<String> {
         Screen::Objects(o) => Some(o.service.clone()),
         Screen::Interfaces(i) => Some(i.object.clone()),
         Screen::Interface(i) => Some(i.interface.clone()),
-        Screen::Detail(_) => Some("Details".to_string()),
+        Screen::Detail(d) => Some(action_label(&d.kind)),
         Screen::Result(_) => Some("Result".to_string()),
     }
 }
@@ -97,6 +97,18 @@ fn listen_member(target: &ListenTarget) -> String {
     match target {
         ListenTarget::Signal { member } | ListenTarget::Method { member } => member.clone(),
         ListenTarget::Property { property } => property.clone(),
+    }
+}
+
+/// Short (unqualified) action label for the breadcrumb Detail crumb — the
+/// interface is already the preceding crumb, so `call ListUnits` rather than
+/// `call org.busx.Test.ListUnits`.
+fn action_label(kind: &ActionKind) -> String {
+    match kind {
+        ActionKind::Call { method, .. } => format!("call {method}"),
+        ActionKind::Get { property } => format!("get {property}"),
+        ActionKind::Set { property, .. } => format!("set {property}"),
+        ActionKind::Listen { target } => format!("listen {}", listen_member(target)),
     }
 }
 
