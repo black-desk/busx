@@ -529,16 +529,33 @@ fn render_detail(
 
     // Render each field: "label  value" on its own line; the focused field is
     // REVERSED. With more fields than rows, the lower ones scroll off (fine for
-    // now; methods rarely have many IN-args). The label column is padded to the
-    // widest arg so the value (input) lines up across rows.
-    let label_w = d
+    // now; methods rarely have many IN-args). The `name  sig` label is split
+    // into two padded columns so both the member-name and signature line up
+    // across args. A bare label (no "  " — Set's signature, a Listen preview, a
+    // nameless arg) lands in the signature column; if no field has a name the
+    // name column is dropped entirely (no stray indent).
+    let split: Vec<(&str, &str)> = d
         .field_labels
         .iter()
-        .map(|l| l.chars().count())
+        .map(|l| match l.split_once("  ") {
+            Some((n, s)) => (n, s),
+            None => ("", l.as_str()),
+        })
+        .collect();
+    let width = fields_area.width as usize;
+    let sig_w = split
+        .iter()
+        .map(|(_, s)| s.chars().count())
         .max()
         .unwrap_or(0)
-        .min(fields_area.width.saturating_sub(4) as usize);
-    for (i, label) in d.field_labels.iter().enumerate() {
+        .min(width);
+    let name_w = split
+        .iter()
+        .map(|(n, _)| n.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(width.saturating_sub(sig_w + 6));
+    for (i, (name, sig)) in split.iter().copied().enumerate() {
         if i as u16 >= fields_area.height {
             break;
         }
@@ -551,7 +568,11 @@ fn render_detail(
         };
         let input = d.inputs.get(i);
         let value = input.map(|v| v.value()).unwrap_or("");
-        let label = pad_col(label, label_w);
+        let label = if name_w == 0 {
+            sig.to_string()
+        } else {
+            format!("{}  {:<sig_w$}", pad_col(name, name_w), sig, sig_w = sig_w)
+        };
         // Focused field: a `▶` marker (which arg is active) + the value REVERSED
         // with a `▏` cursor at the input position (where typing lands). The label
         // stays normal so the arg name is readable. Unfocused: plain, indented to
