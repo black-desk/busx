@@ -135,6 +135,34 @@ fn truncate(s: &str, cap: usize) -> String {
     }
 }
 
+/// Left-align `s` in exactly `width` display columns: truncate (with `…`) if
+/// longer, pad with spaces if shorter. Used to align table-like columns (the
+/// member name/signature columns on the Interface screen, the arg labels on the
+/// Detail screen).
+fn pad_col(s: &str, width: usize) -> String {
+    format!("{:<width$}", truncate(s, width))
+}
+
+/// Build `name  signature` rows with the name column padded to the widest
+/// member (capped to the column's inner width) so signatures line up. Shared by
+/// the methods and signals columns.
+fn member_rows(rows: &[(String, String)], inner_w: usize) -> Vec<ListItem<'_>> {
+    let sig_w = rows
+        .iter()
+        .map(|(_, s)| s.chars().count())
+        .max()
+        .unwrap_or(0);
+    let name_w = rows
+        .iter()
+        .map(|(n, _)| n.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(inner_w.saturating_sub(sig_w + 2));
+    rows.iter()
+        .map(|(n, s)| ListItem::new(Line::from(format!("{}  {}", pad_col(n, name_w), s))))
+        .collect()
+}
+
 fn render_service(
     frame: &mut Frame,
     area: Rect,
@@ -320,11 +348,12 @@ fn render_interface(
         ])
         .split(left);
 
-    let methods: Vec<ListItem> = i
+    let method_rows: Vec<(String, String)> = i
         .methods
         .iter()
-        .map(|m| ListItem::new(Line::from(format!("{}  {}", m.name, m.signature))))
+        .map(|m| (m.name.clone(), m.signature.clone()))
         .collect();
+    let methods = member_rows(&method_rows, chunks[0].width.saturating_sub(2) as usize);
     scroll[0] = render_sub_list(
         frame,
         chunks[0],
@@ -347,6 +376,21 @@ fn render_interface(
             .title("properties (unavailable)");
         frame.render_widget(Paragraph::new(err.clone()).block(block), chunks[1]);
     } else {
+        // Align the name and signature columns so the GetAll values line up.
+        let inner = chunks[1].width.saturating_sub(2) as usize;
+        let sig_w = i
+            .properties
+            .iter()
+            .map(|(_, s, _)| s.chars().count())
+            .max()
+            .unwrap_or(0);
+        let name_w = i
+            .properties
+            .iter()
+            .map(|(n, _, _)| n.chars().count())
+            .max()
+            .unwrap_or(0)
+            .min(inner.saturating_sub(sig_w + 4));
         let properties: Vec<ListItem> = i
             .properties
             .iter()
@@ -357,7 +401,13 @@ fn render_interface(
                     .find(|(k, _)| k == n)
                     .map(|(_, v)| v.as_str())
                     .unwrap_or("");
-                ListItem::new(Line::from(format!("{n}  {sig}  {val}")))
+                ListItem::new(Line::from(format!(
+                    "{}  {:<sig_w$}  {}",
+                    pad_col(n, name_w),
+                    sig,
+                    val,
+                    sig_w = sig_w,
+                )))
             })
             .collect();
         let p_title = if i.loading {
@@ -382,11 +432,7 @@ fn render_interface(
         );
     }
 
-    let signals: Vec<ListItem> = i
-        .signals
-        .iter()
-        .map(|(n, sig)| ListItem::new(Line::from(format!("{n}  {sig}"))))
-        .collect();
+    let signals = member_rows(&i.signals, chunks[2].width.saturating_sub(2) as usize);
     scroll[2] = render_sub_list(
         frame,
         chunks[2],
@@ -483,7 +529,15 @@ fn render_detail(
 
     // Render each field: "label  value" on its own line; the focused field is
     // REVERSED. With more fields than rows, the lower ones scroll off (fine for
-    // now; methods rarely have many IN-args).
+    // now; methods rarely have many IN-args). The label column is padded to the
+    // widest arg so the value (input) lines up across rows.
+    let label_w = d
+        .field_labels
+        .iter()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(fields_area.width.saturating_sub(4) as usize);
     for (i, label) in d.field_labels.iter().enumerate() {
         if i as u16 >= fields_area.height {
             break;
@@ -497,6 +551,7 @@ fn render_detail(
         };
         let input = d.inputs.get(i);
         let value = input.map(|v| v.value()).unwrap_or("");
+        let label = pad_col(label, label_w);
         // Focused field: a `▶` marker (which arg is active) + the value REVERSED
         // with a `▏` cursor at the input position (where typing lands). The label
         // stays normal so the arg name is readable. Unfocused: plain, indented to
