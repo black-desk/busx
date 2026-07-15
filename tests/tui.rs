@@ -1621,7 +1621,7 @@ fn get_trigger_pushes_result_and_requests_get() {
     match state.top() {
         Screen::Result(r) => {
             assert!(r.loading);
-            assert_eq!(r.title, "p1");
+            assert_eq!(r.title, "i.p1");
         }
         _ => panic!("trigger pushed a Result screen"),
     }
@@ -1702,7 +1702,7 @@ fn set_trigger_pushes_result_with_typed_value() {
     match state.top() {
         Screen::Result(r) => {
             assert!(r.loading);
-            assert_eq!(r.title, "p1");
+            assert_eq!(r.title, "i.p1");
         }
         _ => panic!("trigger pushed a Result screen"),
     }
@@ -1751,7 +1751,7 @@ fn get_result_renders_value() {
     // A completed Get Result shows the property value.
     let state = busx::tui::State {
         screens: vec![busx::tui::Screen::Result(ResultScreen {
-            title: "p1".into(),
+            title: "i.p1".into(),
             result: Some(ActionResult::Get("0.5".into())),
             error: None,
             loading: false,

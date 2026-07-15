@@ -668,7 +668,7 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                     )
                 }
                 ActionKind::Get { property } => (
-                    property.clone(),
+                    format!("{}.{}", d.interface, property),
                     Effect::GetProperty {
                         service: d.service.clone(),
                         object: d.object.clone(),
@@ -686,7 +686,7 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
                         .map(|i| i.value().to_string())
                         .unwrap_or_default();
                     (
-                        property.clone(),
+                        format!("{}.{}", d.interface, property),
                         Effect::SetProperty {
                             service: d.service.clone(),
                             object: d.object.clone(),
