@@ -17,7 +17,25 @@ use crate::tui::state::{
     ResultScreen, Screen, ServiceScreen, State,
 };
 
-pub fn render(frame: &mut Frame, state: &State, targets: &mut Vec<(Rect, ClickTarget)>) {
+/// `scroll` carries the persisted list-scroll offsets for the *top* screen's
+/// list(s), threaded in/out across frames. Slot 0 is the single list on the
+/// Service/Objects/Interfaces screens; slots 0/1/2 are the methods/properties/
+/// signals columns on the Interface screen. The app loop owns it (like
+/// `targets`) and resets it to `[0; 3]` whenever the navigation stack depth
+/// changes, so a freshly entered screen starts at the top.
+///
+/// Without this, each frame builds a fresh `ListState` (offset 0) and ratatui
+/// re-anchors the selected item to the *bottom* of the viewport — so after
+/// scrolling down, moving the cursor back up keeps the highlight glued to the
+/// last row. Seeding `with_offset` from the persisted value lets ratatui keep
+/// the cursor stable (vim/less-style: the viewport only scrolls once the cursor
+/// reaches an edge).
+pub fn render(
+    frame: &mut Frame,
+    state: &State,
+    targets: &mut Vec<(Rect, ClickTarget)>,
+    scroll: &mut [usize; 3],
+) {
     let area = frame.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -31,10 +49,10 @@ pub fn render(frame: &mut Frame, state: &State, targets: &mut Vec<(Rect, ClickTa
 
     render_breadcrumb(frame, crumb, state);
     match state.top() {
-        Screen::Service(s) => render_service(frame, main, s, targets),
-        Screen::Objects(o) => render_objects(frame, main, o, targets),
-        Screen::Interfaces(i) => render_interfaces(frame, main, i, targets),
-        Screen::Interface(i) => render_interface(frame, main, i, targets),
+        Screen::Service(s) => render_service(frame, main, s, targets, scroll),
+        Screen::Objects(o) => render_objects(frame, main, o, targets, scroll),
+        Screen::Interfaces(i) => render_interfaces(frame, main, i, targets, scroll),
+        Screen::Interface(i) => render_interface(frame, main, i, targets, scroll),
         Screen::Detail(d) => render_detail(frame, main, d, targets),
         Screen::Result(r) => render_result(frame, main, r),
     }
@@ -102,6 +120,7 @@ fn render_service(
     area: Rect,
     s: &ServiceScreen,
     targets: &mut Vec<(Rect, ClickTarget)>,
+    scroll: &mut [usize; 3],
 ) {
     let title = if s.loading {
         "Services (loading…)"
@@ -155,11 +174,14 @@ fn render_service(
     let list = List::new(items)
         .block(block.clone())
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-    let mut list_state = ListState::default();
+    let mut list_state = ListState::default().with_offset(scroll[0]);
     if !s.services.is_empty() {
         list_state.select(Some(s.selected));
     }
     frame.render_stateful_widget(list, area, &mut list_state);
+    // Persist the offset ratatui computed so the cursor stays put next frame
+    // (rather than re-anchoring to the viewport bottom from offset 0).
+    scroll[0] = list_state.offset();
 
     // Record one click target per row: the list renders inside `block.inner(area)`,
     // so row `i` is at `y = inner.y + i`, full inner width, height 1.
@@ -177,6 +199,7 @@ fn render_objects(
     area: Rect,
     o: &crate::tui::state::ObjectsScreen,
     targets: &mut Vec<(Rect, ClickTarget)>,
+    scroll: &mut [usize; 3],
 ) {
     let title = if o.loading {
         "Objects (loading…)"
@@ -196,11 +219,12 @@ fn render_objects(
     let list = List::new(items)
         .block(block.clone())
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-    let mut ls = ListState::default();
+    let mut ls = ListState::default().with_offset(scroll[0]);
     if !o.paths.is_empty() {
         ls.select(Some(o.selected));
     }
     frame.render_stateful_widget(list, area, &mut ls);
+    scroll[0] = ls.offset();
 
     let inner = block.inner(area);
     for i in 0..o.paths.len() {
@@ -216,6 +240,7 @@ fn render_interfaces(
     area: Rect,
     i: &crate::tui::state::InterfacesScreen,
     targets: &mut Vec<(Rect, ClickTarget)>,
+    scroll: &mut [usize; 3],
 ) {
     let title = if i.loading {
         "Interfaces (loading…)"
@@ -235,11 +260,12 @@ fn render_interfaces(
     let list = List::new(items)
         .block(block.clone())
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-    let mut ls = ListState::default();
+    let mut ls = ListState::default().with_offset(scroll[0]);
     if !i.names.is_empty() {
         ls.select(Some(i.selected));
     }
     frame.render_stateful_widget(list, area, &mut ls);
+    scroll[0] = ls.offset();
 
     let inner = block.inner(area);
     for row in 0..i.names.len() {
@@ -255,6 +281,7 @@ fn render_interface(
     area: Rect,
     i: &crate::tui::state::InterfaceScreen,
     targets: &mut Vec<(Rect, ClickTarget)>,
+    scroll: &mut [usize; 3],
 ) {
     // Left: the three stacked member lists. Right: the action-button bar for the
     // focused column's selected member.
@@ -278,13 +305,14 @@ fn render_interface(
         .iter()
         .map(|m| ListItem::new(Line::from(format!("{}  {}", m.name, m.signature))))
         .collect();
-    render_sub_list(
+    scroll[0] = render_sub_list(
         frame,
         chunks[0],
         "methods",
         methods,
         i.selected[0],
         !i.in_buttons && i.focus == InterfaceFocus::Methods,
+        scroll[0],
     );
     push_list_rows(targets, chunks[0], i.methods.len(), ClickTarget::MethodRow);
 
@@ -317,13 +345,14 @@ fn render_interface(
         } else {
             "properties"
         };
-        render_sub_list(
+        scroll[1] = render_sub_list(
             frame,
             chunks[1],
             p_title,
             properties,
             i.selected[1],
             !i.in_buttons && i.focus == InterfaceFocus::Properties,
+            scroll[1],
         );
         push_list_rows(
             targets,
@@ -338,30 +367,33 @@ fn render_interface(
         .iter()
         .map(|(n, sig)| ListItem::new(Line::from(format!("{n}  {sig}"))))
         .collect();
-    render_sub_list(
+    scroll[2] = render_sub_list(
         frame,
         chunks[2],
         "signals",
         signals,
         i.selected[2],
         !i.in_buttons && i.focus == InterfaceFocus::Signals,
+        scroll[2],
     );
     push_list_rows(targets, chunks[2], i.signals.len(), ClickTarget::SignalRow);
 
     // Action-button bar: the buttons offered for the focused column's selected
-    // member. Highlighted (focused) when `in_buttons`.
+    // member. Highlighted (focused) when `in_buttons`. Never grows past a few
+    // rows, so its offset isn't persisted (seed 0; return ignored).
     let buttons: Vec<ListItem> = action_buttons(i.focus)
         .iter()
         .map(|b| ListItem::new(Line::from(*b)))
         .collect();
     let n_buttons = buttons.len();
-    render_sub_list(
+    let _ = render_sub_list(
         frame,
         right,
         "actions",
         buttons,
         i.button_selected,
         i.in_buttons,
+        0,
     );
     push_list_rows(targets, right, n_buttons, ClickTarget::ActionButton);
 }
@@ -534,6 +566,10 @@ fn render_result(frame: &mut Frame, area: Rect, r: &ResultScreen) {
 
 /// A titled list. The focused column gets a `▶` title prefix + bold border; the
 /// selected row is REVERSED in every column (so selection is visible everywhere).
+///
+/// `offset` seeds the list's scroll position (persisted across frames by the
+/// caller via `render`'s `scroll` param); the returned offset is what ratatui
+/// recomputed to keep `selected` visible, for the caller to persist.
 fn render_sub_list(
     frame: &mut Frame,
     area: Rect,
@@ -541,7 +577,8 @@ fn render_sub_list(
     items: Vec<ListItem>,
     selected: usize,
     focused: bool,
-) {
+    offset: usize,
+) -> usize {
     let display_title = if focused {
         format!("▶ {title}")
     } else {
@@ -551,7 +588,7 @@ fn render_sub_list(
     if focused {
         block = block.border_style(Style::default().add_modifier(Modifier::BOLD));
     }
-    let mut ls = ListState::default();
+    let mut ls = ListState::default().with_offset(offset);
     if !items.is_empty() {
         ls.select(Some(selected));
     }
@@ -559,6 +596,7 @@ fn render_sub_list(
         .block(block)
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
     frame.render_stateful_widget(list, area, &mut ls);
+    ls.offset()
 }
 
 fn render_keyhint(frame: &mut Frame, area: Rect, screen: &Screen) {

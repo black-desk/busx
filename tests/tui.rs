@@ -17,7 +17,22 @@ fn render_to_string(state: &State, w: u16, h: u16) -> String {
     let backend = TestBackend::new(w, h);
     let mut term = Terminal::new(backend).unwrap();
     let mut targets = Vec::new();
-    term.draw(|f| render(f, state, &mut targets)).unwrap();
+    let mut scroll = [0usize; 3];
+    term.draw(|f| render(f, state, &mut targets, &mut scroll))
+        .unwrap();
+    format!("{}", term.backend())
+}
+
+/// Render with a *persisted* scroll offset threaded across calls, mirroring how
+/// `run_loop` drives `render` (where the scroll out-param survives between
+/// frames). `render_to_string` resets scroll each call, so it can't exercise
+/// cross-frame scroll behavior — this helper can.
+fn render_with_scroll(state: &State, scroll: &mut [usize; 3], w: u16, h: u16) -> String {
+    let backend = TestBackend::new(w, h);
+    let mut term = Terminal::new(backend).unwrap();
+    let mut targets = Vec::new();
+    term.draw(|f| render(f, state, &mut targets, scroll))
+        .unwrap();
     format!("{}", term.backend())
 }
 
@@ -67,6 +82,71 @@ fn service_screen_up_clamps_at_top() {
     let mut state = State::service(vec![svc("a", None, None), svc("b", None, None)]);
     update(&mut state, key(KeyCode::Up));
     assert_eq!(selected_of(&state), 0, "Up at top stays at 0");
+}
+
+/// Regression: after scrolling the list *down* past the viewport and then moving
+/// the cursor back *up*, the highlight must leave the bottom row and climb
+/// within the viewport (vim/less-style) — the viewport only scrolls again once
+/// the cursor reaches the top. Previously each frame rebuilt a fresh ListState
+/// (offset 0), so ratatui re-pinned the cursor to the bottom every render; the
+/// highlight stayed glued to the last row until it climbed back into the first
+/// page.
+#[test]
+fn service_screen_scroll_up_after_down_does_not_pin_to_bottom() {
+    // 20 services, viewport shows 4 list rows (h=8 → breadcrumb/footer 2 + block
+    // borders 2 = 4 rows of list). Names are zero-padded so they're easy to grep
+    // for in the rendered buffer.
+    let services: Vec<_> = (0..20)
+        .map(|n| svc(&format!("svc{n:02}"), None, None))
+        .collect();
+    let mut state = State::service(services);
+    let mut scroll = [0usize; 3];
+
+    // Move the cursor down 10 rows (to svc10). With a 4-row viewport the offset
+    // lands at 7, so the visible window is svc07..svc10 with the cursor on svc10
+    // (the bottom row).
+    for _ in 0..10 {
+        update(&mut state, key(KeyCode::Down));
+    }
+    let after_down = render_with_scroll(&state, &mut scroll, 40, 8);
+    assert_eq!(selected_of(&state), 10);
+    assert!(
+        after_down.contains("svc07") && after_down.contains("svc10"),
+        "scrolled-down window shows svc07..svc10:\n{after_down}"
+    );
+
+    // Now move UP one row (cursor → svc09). The viewport must NOT jump to keep
+    // the cursor at the bottom: svc07 should remain the top visible row and
+    // svc10 should still be visible (cursor is now one up from the bottom).
+    update(&mut state, key(KeyCode::Up));
+    let after_up = render_with_scroll(&state, &mut scroll, 40, 8);
+
+    // With the fix the offset stays 7 (window svc07..svc10). The pre-fix bug
+    // reset offset to 0 each frame and recomputed offset = 6 (window svc06..
+    // svc09), so svc10 scrolled off and svc06 scrolled in. Assert both halves.
+    assert!(
+        after_up.contains("svc10"),
+        "after one Up the bottom row (svc10) must still be visible, cursor \
+         climbed within the viewport rather than the viewport jumping:\n{after_up}"
+    );
+    assert!(
+        !after_up.contains("svc06"),
+        "after one Up svc06 must NOT be visible (the viewport didn't jump down \
+         to re-pin the cursor to the bottom):\n{after_up}"
+    );
+
+    // Keep climbing to the top of the window: the viewport holds until the cursor
+    // reaches svc07, then scrolls. Verify the window only starts moving once the
+    // cursor hits the top row.
+    for _ in 0..2 {
+        update(&mut state, key(KeyCode::Up));
+    }
+    let climbing = render_with_scroll(&state, &mut scroll, 40, 8);
+    assert_eq!(selected_of(&state), 7);
+    assert!(
+        climbing.contains("svc07"),
+        "cursor at the top of the viewport (svc07); window hasn't scrolled yet"
+    );
 }
 
 #[test]
@@ -2803,7 +2883,9 @@ fn click(state: &mut State, target: &ClickTarget, w: u16, h: u16) {
     let backend = TestBackend::new(w, h);
     let mut term = Terminal::new(backend).unwrap();
     let mut targets = Vec::new();
-    term.draw(|f| render(f, state, &mut targets)).unwrap();
+    let mut scroll = [0usize; 3];
+    term.draw(|f| render(f, state, &mut targets, &mut scroll))
+        .unwrap();
     state.click_targets = targets;
     let rect = state
         .click_targets
