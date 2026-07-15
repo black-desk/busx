@@ -122,11 +122,10 @@ python。所有诊断（错误、警告）打到stderr，前缀 `busx:`；退出
 
 ## 路线图
 
-1. `emit`（发信号）、pcapng `capture`。
-2. `--host` / `--machine` 远程与容器总线。
-3. `ay` 的 bytestring 字符串视图等值渲染增强。
-4. 若 `jaq` 将来发布可复用的「flag 解析 + 运行」库入口，重新评估内嵌 `busx jq`
-   子命令。
+1. pcapng `capture`。
+2. 值渲染增强：`ay`
+   字节数组的 bytestring 视图（目前渲染为数字数组）、字符串输出中控制 / 不可打印字符的转义、`Fd`
+   渲染。
 
 ## 许可证
 
