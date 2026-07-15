@@ -19,6 +19,7 @@
 //! - Structure → `(f0, f1, ...)`.
 //! - anything else (Fd, Maybe under a gated feature) → `<?>`.
 
+use std::os::fd::AsRawFd;
 use zvariant::Value;
 
 /// Render a borrowed [`Value`] as a human-friendly string.
@@ -49,10 +50,34 @@ pub fn pretty(v: &Value<'_>) -> String {
             d.iter()
                 .map(|(k, v)| format!("{}: {}", pretty(k), pretty(v))),
         ),
-        // Optional/platform variants: Fd (cfg(unix)), Maybe (gvariant feature).
+        // Real fd, duplicated into this process via SCM_RIGHTS. Resolve it to a
+        // label/kind/mode via /proc + fstat (see `fdinfo`). Never hold the fd.
+        Value::Fd(fd) => format_fd(&crate::value::fdinfo::gather(fd.as_raw_fd())),
+        // Optional/platform variant: Maybe (gvariant feature, not enabled).
         // Render a clear placeholder rather than crashing on an unfamiliar type.
+        #[allow(unreachable_patterns)]
         other => format!("unsupported value: {other:?}"),
     }
+}
+
+/// Render an fd as `<fd TARGET [SIZE] [MODE] [NOTE]>`. The target is resolved
+/// from `/proc/self/fd/<n>`; size is shown for regular files; mode (ro/wo/rw)
+/// and the eventfd count come from fdinfo. Falls back to `<fd unknown>` if
+/// `/proc` is unavailable. See [`crate::value::fdinfo`].
+fn format_fd(info: &crate::value::fdinfo::FdInfo) -> String {
+    let label = crate::value::fdinfo::pretty_label(info);
+    let mut s = format!("<fd {label}");
+    if let Some(size) = info.size {
+        s.push_str(&format!(" {size}B"));
+    }
+    if !info.mode.is_empty() {
+        s.push_str(&format!(" {}", info.mode));
+    }
+    if let Some(note) = &info.note {
+        s.push_str(&format!(" {note}"));
+    }
+    s.push('>');
+    s
 }
 
 /// Join an iterator of already-rendered element strings between `open`/`close`.

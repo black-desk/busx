@@ -224,3 +224,85 @@ fn call_rejects_bad_element_count() {
         .failure()
         .stderr(predicates::str::contains("invalid element count"));
 }
+
+/// A method returning an `h` renders the real fd: the JSON path emits a
+/// structured object (kind/target/mode) instead of a meaningless integer.
+#[test]
+fn call_renders_unix_fd() {
+    let addr = common::bus().address.clone();
+    let out = Command::cargo_bin("busx")
+        .unwrap()
+        .args([
+            "--json",
+            "--address",
+            &addr,
+            "call",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "MakeFd",
+            "",
+        ])
+        .ok()
+        .unwrap();
+    let v: Value = serde_json::from_slice(&out.stdout).expect("valid json");
+    assert_eq!(v[0]["type"], "h", "MakeFd returns one fd: {v}");
+    assert_eq!(v[0]["data"]["kind"], "char", "fstat of /dev/null: {v}");
+    assert_eq!(v[0]["data"]["target"], "/dev/null", "readlink target: {v}");
+    assert_eq!(v[0]["data"]["mode"], "ro", "opened O_RDONLY: {v}");
+}
+
+/// Human output resolves the fd inline: `h  <fd /dev/null ro>`.
+#[test]
+fn call_renders_unix_fd_human() {
+    let addr = common::bus().address.clone();
+    let out = Command::cargo_bin("busx")
+        .unwrap()
+        .args([
+            "--address",
+            &addr,
+            "call",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "MakeFd",
+            "",
+        ])
+        .ok()
+        .unwrap();
+    let s = String::from_utf8(out.stdout).expect("utf8");
+    assert!(
+        s.contains("<fd /dev/null"),
+        "human fd render should resolve /dev/null: {s}"
+    );
+}
+
+/// A pipe read end renders as kind `pipe` with a `pipe:[ino]` target (inode is
+/// non-deterministic, asserted by prefix only).
+#[test]
+fn call_renders_pipe_fd() {
+    let addr = common::bus().address.clone();
+    let out = Command::cargo_bin("busx")
+        .unwrap()
+        .args([
+            "--json",
+            "--address",
+            &addr,
+            "call",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "MakePipeFd",
+            "",
+        ])
+        .ok()
+        .unwrap();
+    let v: Value = serde_json::from_slice(&out.stdout).expect("valid json");
+    assert_eq!(v[0]["type"], "h", "MakePipeFd returns one fd: {v}");
+    assert_eq!(v[0]["data"]["kind"], "pipe", "fstat FIFO: {v}");
+    let target = v[0]["data"]["target"].as_str().expect("target present");
+    assert!(
+        target.starts_with("pipe:["),
+        "readlink of a pipe end is pipe:[ino]: {target}"
+    );
+}

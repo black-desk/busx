@@ -5,4 +5,5 @@
 pub mod decode;
 pub mod dict;
 pub mod encode;
+pub mod fdinfo;
 pub mod pretty;
