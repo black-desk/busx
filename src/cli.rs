@@ -26,6 +26,14 @@ pub struct Cli {
     pub address: Option<String>,
     #[arg(long, help = "Verbose diagnostics on stderr")]
     pub verbose: bool,
+    /// Show the standard D-Bus interfaces (Properties, Introspectable, Peer)
+    /// that every object implements. The TUI hides them by default since
+    /// they're rarely useful when browsing; this brings them back.
+    #[arg(
+        long,
+        help = "Show standard D-Bus interfaces in the TUI (hidden by default)"
+    )]
+    pub show_standard_interfaces: bool,
     /// Emit machine-readable type-tagged JSON instead of human-friendly text.
     /// Global: applies to every subcommand. For `monitor` the JSON form is NDJSON
     /// (one object per message).

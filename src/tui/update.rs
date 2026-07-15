@@ -980,6 +980,8 @@ fn load_interfaces(
     res: Result<Node<'static>, String>,
 ) -> Option<Effect> {
     let mut drill = None;
+    // Read the config before borrowing `state` mutably for the screen.
+    let show_standard = state.show_standard_interfaces;
     if let Screen::Interfaces(i) = state.top_mut() {
         if i.service != service || i.object != object {
             return None;
@@ -987,10 +989,15 @@ fn load_interfaces(
         i.loading = false;
         match res {
             Ok(node) => {
+                // Drop the standard D-Bus interfaces (Properties/Introspectable/
+                // Peer) unless `--show-standard-interfaces` asked for them.
+                // `node` keeps everything so drilling into a shown interface
+                // still finds its members.
                 let names: Vec<String> = node
                     .interfaces()
                     .iter()
                     .map(|iface| iface.name().to_string())
+                    .filter(|n| show_standard || !crate::dbus::introspect::is_standard_interface(n))
                     .collect();
                 if names.len() == 1 {
                     drill = Some(names[0].clone());

@@ -38,10 +38,17 @@ fn main() -> std::process::ExitCode {
         address,
         verbose,
         json,
+        show_standard_interfaces,
         command,
     } = cli;
     let result = match command {
-        None => tui::run(user, system, address.as_deref(), verbose),
+        None => tui::run(
+            user,
+            system,
+            address.as_deref(),
+            verbose,
+            show_standard_interfaces,
+        ),
         Some(command) => run_command(user, system, address, verbose, json, command),
     };
     match result {
