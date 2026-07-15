@@ -1524,6 +1524,37 @@ fn call_detail_form_renders_field_and_trigger() {
 }
 
 #[test]
+fn call_detail_aligns_arg_labels() {
+    // Multi-arg call: the label column is padded to the widest arg so the
+    // value (input) column lines up across rows regardless of name/signature
+    // width.
+    let state = busx::tui::State {
+        screens: vec![busx::tui::Screen::Detail(DetailScreen {
+            service: "s".into(),
+            object: "/o".into(),
+            interface: "i".into(),
+            kind: ActionKind::Call {
+                method: "Move".into(),
+                signature: "us".into(),
+            },
+            inputs: vec!["3".into(), "x".into()],
+            field_labels: vec!["count  u".into(), "name  s".into()],
+            field_selected: 0,
+            focus: DetailFocus::Field,
+            loading: false,
+            error: None,
+        })],
+        quit: false,
+        popup: None,
+        click_targets: Vec::new(),
+        help_open: false,
+        bus: Bus::Session,
+        show_standard_interfaces: false,
+    };
+    insta::assert_snapshot!(render_to_string(&state, 40, 8));
+}
+
+#[test]
 fn call_result_renders_reply_value() {
     // A completed call Result shows one line per reply value.
     let state = busx::tui::State {
