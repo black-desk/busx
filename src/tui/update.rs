@@ -441,7 +441,8 @@ fn copy_op_from_detail(d: &DetailScreen) -> CopyOp {
 
 /// Precompute each tool's command for `op` and open the popup focused on row 0.
 fn open_copy_as_popup(state: &mut State, op: CopyOp) {
-    let commands = Tool::ALL.map(|t| (t, generate(&op, t)));
+    let bus = state.bus.clone();
+    let commands = Tool::ALL.map(|t| (t, generate(&op, &bus, t)));
     state.popup = Some(CopyAsPopup {
         op,
         commands,
