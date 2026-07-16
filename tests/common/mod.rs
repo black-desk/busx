@@ -84,6 +84,16 @@ impl TestIface {
         unsafe { libc::close(fds[1]) }; // release the write end in this process
         zvariant::OwnedFd::from(read_end)
     }
+
+    /// Returns `ay` = "hello" — bytestring render test (all printable ASCII).
+    fn make_bytes(&self) -> Vec<u8> {
+        b"hello".to_vec()
+    }
+
+    /// Returns `ay` with non-printable bytes — exercises the `\xNN` escaping.
+    fn make_raw_bytes(&self) -> Vec<u8> {
+        vec![0x00, 0xab, b'c', 0xff]
+    }
 }
 
 pub struct TestBus {
