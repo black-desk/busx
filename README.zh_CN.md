@@ -37,42 +37,96 @@ SPDX-License-Identifier: MIT
 >
 > 本项目处于**早期开发阶段**，代码**完全未经人工审核**，请勿用于生产环境。
 
-`busx` 是一个用 Rust（基于 [zbus]）实现的 D-Bus 命令行工具，目标是替代
-`dbus-send` / `busctl` / `qdbus` 三件套，把它们各自的痛点一次性补齐：
-
-- 入参采用 `busctl` 风格（签名串 + 位置参数），**完整支持嵌套与空容器** ——补齐
-  `dbus-send` 的硬伤；
-- 默认输出**人类可读文本**；加 `--json` 切到**带类型标签的 JSON**（值
-  `{"type":..,"data":..}`，监听为每行一个对象的 NDJSON），对脚本友好、可管道到
-  `jq` / python；
-- **不会重蹈 sd-bus 的覆辙**：非 string 键的 dict（如 `a{uu}`）正常渲染成
-  `[{"key":..,"value":..}]`，绝不崩溃（对比 systemd#32904）；
-- 自带**动态 shell 补全**（bash/zsh），实时内省总线；
-- **单二进制、零运行时依赖**（纯 Rust，不依赖 libdbus）。
+`busx` 是一个用 Rust（基于 [zbus]）实现的 D-Bus
+TUI/命令行工具，类似于 dbus-send 以及 d-feet/d-spy。
 
 [zbus]: https://crates.io/crates/zbus
 
 ## 功能
 
-- `list` —— 列出服务名 + PID + 进程名（人类为表，`--json` 为对象数组）。
-- `tree SVC` —— 画单个服务的对象路径树。
-- `introspect` —— 列出对象的接口 / 方法 / 信号 / 属性。
-- `call SVC OBJ IFACE METHOD SIG ARGS...`
-  —— 调用方法（SIG 独立必填、可补全；入参 busctl 风格，支持任意嵌套）。
-- `get` / `set` —— 读取（不传属性名走 `GetAll`）/ 写入属性。
-- `monitor` —— 监听总线消息，按 match rule 过滤（`--json` 出 NDJSON，含
-  `PropertiesChanged` 解码）。
-- `completion`
-  —— 生成动态 shell 补全脚本（实时内省总线补全服务/路径/接口/方法/签名/属性）。
-- **TUI 模式** —— 裸 `busx`（不带子命令）打开全屏交互式浏览器：逐级钻取 service
-  → objects → interfaces → interface（methods / properties /
-  signals）。调用方法、读写属性、监听信号（Esc 停止），并将任意操作一键复制为
-  `dbus-send` / `busctl` / `qdbus` / `gdbus` 命令。支持鼠标。
+- 不带子命令直接运行
+  `busx`，进入交互式浏览器（服务 → 对象 → 接口 → 方法 / 属性 / 信号）；
+- 带子命令（`list` / `call` / `get` / …）则按纯命令行方式工作，方便写进脚本。
+
+```bash
+busx --help
+```
+
+```text
+D-Bus CLI (dbus-send/busctl/qdbus replacement)
+
+Usage: busx [OPTIONS] [COMMAND]
+
+Commands:
+  list        List service names on the bus
+  tree        Show the object path tree of a service
+  introspect  Show interfaces/methods/signals/properties of an object
+  call        Call a method
+  get         Get properties (no property names => GetAll)
+  set         Set a property
+  monitor     Monitor bus messages
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+      --user                      Connect to the session bus; if that fails, fall back to the system bus (default)
+      --system                    Connect to the system bus
+      --address <ADDRESS>         Connect to the bus at ADDRESS (e.g. unix:path=...)
+      --verbose                   Verbose diagnostics on stderr
+      --show-standard-interfaces  Show standard D-Bus interfaces in the TUI (hidden by default)
+      --json                      Emit type-tagged JSON (default: human text)
+  -h, --help                      Print help
+  -V, --version                   Print version
+```
+
+几个常用例子：
+
+```bash
+# 交互式 TUI（不带子命令）
+busx
+
+# 列出总线上的服务（默认会话总线，失败回退系统总线）
+busx list
+
+# 内省一个对象
+busx introspect org.freedesktop.systemd1 /org/freedesktop/systemd1
+
+# 调用方法（SIG 是独立的必填参数；ListUnits 无参，故 SIG 为 ""）
+busx call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
+  org.freedesktop.systemd1.Manager ListUnits ""
+
+# 读属性（不给属性名 = GetAll）
+busx get org.freedesktop.systemd1 /org/freedesktop/systemd1 \
+  org.freedesktop.systemd1.Manager
+
+# 监听信号；--json 输出 NDJSON，方便管道给 jq
+busx --json monitor --signals --interface org.freedesktop.DBus.Properties \
+  --member PropertiesChanged | jq 'select(.args[1] != {})'
+
+# 启用动态补全：加进 ~/.bashrc（zsh 用 ~/.zshrc）后重启 shell
+eval "$(busx completion bash)"
+```
+
+默认输出是人类友好的纯文本；`--json` 切换到**带类型标签的 JSON**（`monitor`
+为 NDJSON）——每个值都是
+`{"type":..,"data":..}`，完整保留 D-Bus 类型信息，管道给外部 `jq` /
+python 即可。所有诊断（错误、警告）打到 stderr 并带 `busx:` 前缀；退出码 `0`
+成功 / `1` 失败；管道到 `less`/`head` 不会 panic（SIGPIPE 按常规处理）。
+
+### 命令行模式：与 busctl 的不同
+
+- **输出**：默认人类友好纯文本；`--json`
+  给出**带类型标签的 JSON**，完整保留 D-Bus 类型信息，方便脚本 / `jq` 处理。
+- **默认总线**：默认连会话总线。
+- **纯 Rust 单二进制**：不依赖 libdbus，也不依赖 systemd。
+
+### TUI 模式：与 d-feet 的不同
+
+- **跑在终端里**：不需要图形环境，SSH、TTY、容器里都能用；d-feet /
+  d-spy 是 GTK 图形程序，必须有桌面。
+- **copy-as**：任意一次操作（调用、读 / 写属性、监听信号）都能按 `dbus-send` /
+  `busctl` / `qdbus` / `gdbus` 四种格式复制成命令
 
 ## 安装
-
-需要 Rust 工具链与一个 D-Bus 环境（仅 Linux）。系统需装有 `dbus-daemon`
-（运行/测试时用）。
 
 ```bash
 # 从 GitHub 安装最新版（二进制落到 ~/.cargo/bin，用 rustup 的话已在 $PATH 里）
@@ -81,44 +135,6 @@ cargo install --git https://github.com/black-desk/busx
 # 之后升级（一次性：`cargo install cargo-update`）。-g 必加：git 来源默认会被跳过
 cargo install-update -g busx       # 或 `cargo install-update -ag` 升级全部
 ```
-
-## 用法
-
-```bash
-# 交互式 TUI（裸 busx 不带子命令）：浏览、调用、监听、copy-as
-busx
-
-# 列服务（默认连 session bus，连不上自动回退 system bus）
-busx list
-
-# 内省某个对象
-busx introspect org.freedesktop.systemd1 /org/freedesktop/systemd1
-
-# 调方法（SIG 是独立必填位；ListUnits 无入参故 SIG 为空串）
-busx call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
-  org.freedesktop.systemd1.Manager ListUnits ""
-
-# 嵌套入参（dbus-send 做不到的 a{sv} 内含数组；'a{sv}' 即 SIG）：
-busx call org.example /obj org.example.Iface Method \
-  'a{sv}' 1 'hint' 'a' 's' 2 'a' 'b'
-
-# 读属性（不传属性名 = GetAll）
-busx get org.freedesktop.systemd1 /org/freedesktop/systemd1 \
-  org.freedesktop.systemd1.Manager
-
-# 监听信号，--json 出 NDJSON 管道到外部 jq 处理
-busx --json monitor --signals --interface org.freedesktop.DBus.Properties \
-  --member PropertiesChanged | jq 'select(.args[1] != {})'
-
-# 开启补全：把这行加进 ~/.bashrc（zsh 加进 ~/.zshrc）后重开 shell ——
-# 它会实时内省总线，补全服务/路径/接口/方法
-eval "$(busx completion bash)"     # zsh: eval "$(busx completion zsh)"
-```
-
-默认输出人类可读文本；`--json` 切到 type-tagged JSON（`monitor`
-为 NDJSON），需要缩进美化或字段变换时管道到外部 `jq` /
-python。所有诊断（错误、警告）打到stderr，前缀 `busx:`；退出码 `0` 成功 / `1`
-失败。管道到 `less`/`head` 也不会 panic（SIGPIPE 按常规处理）。
 
 ## 许可证
 
