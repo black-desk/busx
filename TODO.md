@@ -157,5 +157,5 @@ migrated.
 
 ## Suggested order
 
-B → D / E. (A done in #33; C done in #34.) B's state refactor is next; D and
-E are independent cleanups.
+B → D / E. (A done in #33; C done in #34.) B's state refactor is next; D and E
+are independent cleanups.
