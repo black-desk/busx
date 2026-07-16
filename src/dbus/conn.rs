@@ -49,7 +49,7 @@ pub async fn connect_with_bus(
     }
     match Connection::session().await {
         Ok(c) => Ok((c, Bus::Session)),
-        Err(e) if user => Err(Error::Msg(format!("cannot connect to session bus: {e}"))),
+        Err(e) if user => Err(Error::context("cannot connect to session bus", e)),
         Err(e) => {
             tracing::debug!("session bus unavailable ({e}); falling back to system bus");
             Ok((Connection::system().await?, Bus::System))

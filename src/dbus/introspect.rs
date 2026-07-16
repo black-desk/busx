@@ -5,7 +5,7 @@
 //! `introspect` — call `Introspect` and parse the XML with `zbus_xml`.
 //! `Node::from_reader` yields an owned (`'static`) tree.
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use zbus_xml::{Node, PropertyAccess, Signature};
 
 /// The interface whose `Introspect` method we call. Every object implements it.
@@ -61,8 +61,7 @@ pub async fn introspect(
         .await?
         .body()
         .deserialize()?;
-    // `zbus_xml::Error` has no `From` impl in `crate::error::Error`, so stringify it
-    // and carry it via the generic message variant (the tree itself is owned/static).
-    Node::from_reader(xml.as_bytes())
-        .map_err(|e| Error::Msg(format!("parse introspection XML: {e}")))
+    // The parse error (`zbus_xml::Error`) converts via `#[from]` so the typed
+    // cause survives for `-v` to walk; the tree itself is owned/static.
+    Ok(Node::from_reader(xml.as_bytes())?)
 }

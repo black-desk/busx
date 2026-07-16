@@ -64,6 +64,15 @@ fn main() -> std::process::ExitCode {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("busx: {e}");
+            // `-v`+ prints the full cause chain (walk .source()). Only the CLI
+            // reaches here; the TUI surfaces errors inside its popup instead.
+            if verbose > 0 {
+                let mut source = std::error::Error::source(&e);
+                while let Some(s) = source {
+                    eprintln!("  caused by: {s}");
+                    source = s.source();
+                }
+            }
             e.exit_code()
         }
     }

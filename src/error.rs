@@ -20,6 +20,16 @@ pub enum Error {
     #[error("{0}")]
     Json(#[from] serde_json::Error),
     #[error("{0}")]
+    ZbusXml(#[from] zbus_xml::Error),
+    /// A typed error wrapped with human context; the original cause is kept as
+    /// the source so `-v` can walk the full cause chain (`Error::source`).
+    #[error("{context}")]
+    Context {
+        context: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+    },
+    #[error("{0}")]
     Msg(String),
 }
 
@@ -32,6 +42,18 @@ impl From<Infallible> for Error {
 }
 
 impl Error {
+    /// Wrap a typed error with human `context`, preserving the original as the
+    /// `source` so `-v` can print the full cause chain.
+    pub fn context(
+        context: impl Into<String>,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Error::Context {
+            context: context.into(),
+            source: Box::new(source),
+        }
+    }
+
     /// All failures exit 1.
     pub fn exit_code(&self) -> ExitCode {
         ExitCode::FAILURE
