@@ -101,7 +101,7 @@ migrated.
   file. **DEBUG, not WARN** — occasional malformed messages are expected bus
   noise; only real anomalies hit WARN. (Rides on the logging sink.)
 
-## D. CLI surface cleanup (independent)
+## D. CLI surface cleanup (independent) — DONE (#36)
 
 ### Delete the `tree` command
 
@@ -157,8 +157,8 @@ migrated.
 
 ## Suggested order
 
-D / E. (A done #33; C done #34; B done #35.) D and E are the remaining
-independent cleanups.
+E. (A #33; C #34; B #35; D #36.) E — the completion restructure — is the last
+item.
 
 ## Deferred micro-items
 
