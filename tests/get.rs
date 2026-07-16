@@ -120,7 +120,7 @@ fn get_single_property_human() {
 fn get_all_by_one_matches_getall() {
     let addr = common::bus().address.clone();
     let (by_all, by_one) = async_global_executor::block_on(async {
-        let conn = busx::dbus::conn::connect(false, false, Some(&addr), false)
+        let conn = busx::dbus::conn::connect(false, false, Some(&addr))
             .await
             .expect("connect test bus");
         let svc = "org.busx.Test";

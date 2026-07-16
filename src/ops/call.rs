@@ -14,7 +14,6 @@ pub fn run(
     user: bool,
     system: bool,
     address: Option<&str>,
-    verbose: bool,
     json: bool,
     service: &str,
     object: &str,
@@ -24,7 +23,7 @@ pub fn run(
     args: &[String],
 ) -> Result<()> {
     let fields = async_global_executor::block_on(async {
-        let conn = dbus::conn::connect(user, system, address, verbose).await?;
+        let conn = dbus::conn::connect(user, system, address).await?;
         dbus::call::call_method(&conn, service, object, interface, method, signature, args).await
     })?;
 

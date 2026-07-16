@@ -106,7 +106,13 @@ fn command() -> Command {
                 .action(ArgAction::Set)
                 .help("Connect to the bus at ADDRESS"),
         )
-        .arg(global("verbose", "Verbose diagnostics on stderr"))
+        .arg(
+            Arg::new("verbose")
+                .short('v')
+                .action(ArgAction::Count)
+                .global(true)
+                .help("Increase log verbosity (-v / -vv / -vvv)"),
+        )
         .arg(global(
             "json",
             "Emit type-tagged JSON (default: human text)",
@@ -317,7 +323,6 @@ fn complete_positional(kind: Kind, current: &OsStr) -> Vec<CompletionCandidate> 
         parsed.user,
         parsed.system,
         parsed.address.as_deref(),
-        parsed.verbose,
     )) {
         Ok(c) => zbus::blocking::Connection::from(c),
         Err(_) => return Vec::new(),
@@ -334,7 +339,6 @@ struct ParsedArgs {
     user: bool,
     system: bool,
     address: Option<String>,
-    verbose: bool,
     subcommand: Option<&'static str>,
     positionals: Vec<String>,
 }
@@ -347,7 +351,6 @@ fn parse_args() -> Option<ParsedArgs> {
     let mut user = false;
     let mut system = false;
     let mut address: Option<String> = None;
-    let mut verbose = false;
     let mut subcommand: Option<&'static str> = None;
     let mut positionals: Vec<String> = Vec::new();
 
@@ -362,7 +365,6 @@ fn parse_args() -> Option<ParsedArgs> {
             match token {
                 "--user" => user = true,
                 "--system" => system = true,
-                "--verbose" => verbose = true,
                 "--address" => address = iter.next().and_then(|v| v.into_string().ok()),
                 "--" => {}
                 t if t.starts_with("--address=") => {
@@ -432,7 +434,6 @@ fn parse_args() -> Option<ParsedArgs> {
         user,
         system,
         address,
-        verbose,
         subcommand,
         positionals,
     })

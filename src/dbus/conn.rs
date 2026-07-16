@@ -4,7 +4,8 @@
 
 //! Async bus connection with the session→system fallback — the single source
 //! of truth for connecting to the bus. `--address` > `--system` > session with
-//! silent fallback to system (warn on `--verbose`).
+//! silent fallback to system (logged at DEBUG — it's an expected degradation,
+//! not an anomaly).
 
 use crate::error::{Error, Result};
 use zbus::Connection;
@@ -24,13 +25,8 @@ pub enum Bus {
     Other(String),
 }
 
-pub async fn connect(
-    user: bool,
-    system: bool,
-    address: Option<&str>,
-    verbose: bool,
-) -> Result<Connection> {
-    let (conn, _bus) = connect_with_bus(user, system, address, verbose).await?;
+pub async fn connect(user: bool, system: bool, address: Option<&str>) -> Result<Connection> {
+    let (conn, _bus) = connect_with_bus(user, system, address).await?;
     Ok(conn)
 }
 
@@ -41,7 +37,6 @@ pub async fn connect_with_bus(
     user: bool,
     system: bool,
     address: Option<&str>,
-    verbose: bool,
 ) -> Result<(Connection, Bus)> {
     if let Some(addr) = address {
         return Ok((
@@ -56,11 +51,7 @@ pub async fn connect_with_bus(
         Ok(c) => Ok((c, Bus::Session)),
         Err(e) if user => Err(Error::Msg(format!("cannot connect to session bus: {e}"))),
         Err(e) => {
-            if verbose {
-                eprintln!(
-                    "busx: warning: session bus unavailable ({e}); falling back to system bus"
-                );
-            }
+            tracing::debug!("session bus unavailable ({e}); falling back to system bus");
             Ok((Connection::system().await?, Bus::System))
         }
     }

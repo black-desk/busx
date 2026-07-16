@@ -24,14 +24,13 @@ pub fn run(
     user: bool,
     system: bool,
     address: Option<&str>,
-    verbose: bool,
     json: bool,
     unique: bool,
     acquired: bool,
     activatable: bool,
 ) -> Result<()> {
     let names = async_global_executor::block_on(async {
-        let conn = dbus::conn::connect(user, system, address, verbose).await?;
+        let conn = dbus::conn::connect(user, system, address).await?;
         dbus::list::list_names(&conn, unique, acquired, activatable).await
     })?;
 

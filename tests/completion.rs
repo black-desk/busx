@@ -67,11 +67,11 @@ fn complete_subcommand_position_filters_by_prefix() {
 }
 
 /// Completing right after `busx` also offers the global flags (bug #1's "flags
-/// should complete" half).
+/// should complete" half). `--verbose` is now the repeatable short `-v`.
 #[test]
 fn complete_after_busx_offers_global_flags() {
     let out = complete_bash(&["busx", "-"], 1);
-    for flag in ["--user", "--system", "--address", "--verbose"] {
+    for flag in ["--user", "--system", "--address", "-v"] {
         assert!(
             out.lines().any(|l| l == flag),
             "global flag `{flag}` missing from:\n{out}"
