@@ -136,6 +136,10 @@ is `0` on success, `1` on failure; piping into `less`/`head` does not panic
   signals) can be copied as a command line in `dbus-send` / `busctl` / `qdbus` /
   `gdbus` form
 
+## Roadmap
+
+Planned refactors and known issues are tracked in [TODO.md](TODO.md).
+
 ## Install
 
 ```bash
