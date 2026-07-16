@@ -24,8 +24,19 @@ pub struct Cli {
         help = "Connect to the bus at ADDRESS (e.g. unix:path=...)"
     )]
     pub address: Option<String>,
-    #[arg(long, help = "Verbose diagnostics on stderr")]
-    pub verbose: bool,
+    #[arg(
+        short = 'v',
+        action = clap::ArgAction::Count,
+        global = true,
+        help = "Increase log verbosity (-v / -vv / -vvv)"
+    )]
+    pub verbose: u8,
+    #[arg(
+        long = "log",
+        value_name = "PATH",
+        help = "TUI log file (default: $XDG_CACHE_HOME/busx/busx.log)"
+    )]
+    pub log: Option<String>,
     /// Show the standard D-Bus interfaces (Properties, Introspectable, Peer)
     /// that every object implements. The TUI hides them by default since
     /// they're rarely useful when browsing; this brings them back.

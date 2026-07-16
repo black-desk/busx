@@ -18,14 +18,13 @@ pub fn run(
     user: bool,
     system: bool,
     address: Option<&str>,
-    verbose: bool,
     json: bool,
     service: &str,
     object: &str,
     interface: Option<&str>,
 ) -> Result<()> {
     let node = async_global_executor::block_on(async {
-        let conn = dbus::conn::connect(user, system, address, verbose).await?;
+        let conn = dbus::conn::connect(user, system, address).await?;
         dbus::introspect::introspect(&conn, service, object).await
     })?;
 

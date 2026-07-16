@@ -10,7 +10,7 @@ Follow-up items from the initial code review. Each has a **decided direction**
 but is **not yet implemented**. Grouped by dependency; see "Suggested order" at
 the bottom.
 
-## A. Connection layer — go all-async
+## A. Connection layer — go all-async — DONE (#33)
 
 - Delete `src/conn.rs` (the blocking `connect`); make `src/dbus/conn.rs` (async)
   the single source of truth for the session→system fallback.
@@ -157,6 +157,6 @@ migrated.
 
 ## Suggested order
 
-A → C (logging first) → B → D / E. A and C untangle the monitor / clipboard /
-error / logging knot; B's state refactor is cleaner once that's done; D and E
-are independent cleanups.
+C (logging first) → B → D / E. (A is done, #33.) C untangles the monitor /
+clipboard / error / logging knot; B's state refactor is cleaner once that's
+done; D and E are independent cleanups.

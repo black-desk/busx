@@ -162,7 +162,6 @@ pub fn run(
     user: bool,
     system: bool,
     address: Option<&str>,
-    verbose: bool,
     json: bool,
     services: Vec<String>,
     interface: Option<String>,
@@ -175,7 +174,7 @@ pub fn run(
     timeout: Option<&str>,
 ) -> Result<()> {
     async_global_executor::block_on(async {
-        let conn = dbus::conn::connect(user, system, address, verbose).await?;
+        let conn = dbus::conn::connect(user, system, address).await?;
 
         let rule = crate::dbus::monitor::build_match_rule(
             interface.as_deref(),
@@ -197,12 +196,9 @@ pub fn run(
             match dbus::monitor::become_monitor(&conn, Some(&rule)).await {
                 Ok(()) => MessageStream::from(&conn),
                 Err(e) => {
-                    if verbose {
-                        eprintln!(
-                            "busx: warning: BecomeMonitor failed ({e}); \
-                             falling back to signal subscription"
-                        );
-                    }
+                    tracing::debug!(
+                        "BecomeMonitor refused ({e}); falling back to signal subscription"
+                    );
                     MessageStream::for_match_rule(rule.clone(), &conn, None).await?
                 }
             }
@@ -249,7 +245,7 @@ async fn stream_msgs(
                 None => break,
                 Some(Err(e)) => {
                     // A single malformed message shouldn't kill the stream.
-                    eprintln!("busx: warning: dropped message: {e}");
+                    tracing::debug!("dropped malformed message: {e}");
                     continue;
                 }
                 Some(Ok(msg)) => {

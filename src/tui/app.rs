@@ -95,12 +95,10 @@ pub fn run(
     user: bool,
     system: bool,
     address: Option<&str>,
-    verbose: bool,
     show_standard_interfaces: bool,
 ) -> Result<()> {
-    let (conn, bus) = async_global_executor::block_on(dbus::conn::connect_with_bus(
-        user, system, address, verbose,
-    ))?;
+    let (conn, bus) =
+        async_global_executor::block_on(dbus::conn::connect_with_bus(user, system, address))?;
     let (tx, rx) = flume::unbounded::<Msg>();
     let (user_arg, system_arg, address_arg) = (user, system, address.map(String::from));
     // `CopyToClipboard` is NOT a dbus op — intercept it before `run_effect`,
@@ -318,9 +316,7 @@ fn run_effect(
                 if let ListenTarget::Method { .. } = &target {
                     // BecomeMonitor makes a connection recv-only — build a dedicated one.
                     let dedicated =
-                        match dbus::conn::connect(user, system, address_owned.as_deref(), false)
-                            .await
-                        {
+                        match dbus::conn::connect(user, system, address_owned.as_deref()).await {
                             Ok(c) => c,
                             Err(e) => {
                                 let _ = tx.send(Msg::ActionResult(Err(format!(
@@ -356,7 +352,7 @@ fn run_effect(
                                     let _ = tx.send(Msg::ListenMessage(
                                         crate::dbus::monitor::format_message(&m)));
                                 }
-                                Some(Err(_)) => {}   // drop a single malformed message
+                                Some(Err(e)) => tracing::debug!("dropped malformed message: {e}"),
                                 None => break,        // stream ended
                             },
                             _ = cancel_rx => break,   // Esc left the Result → stop
@@ -391,7 +387,7 @@ fn run_effect(
                                         crate::dbus::monitor::format_message(&m)));
                                 }
                             }
-                            Some(Err(_)) => {}   // drop a single malformed message
+                            Some(Err(e)) => tracing::debug!("dropped malformed message: {e}"),
                             None => break,        // stream ended
                         },
                         _ = cancel_rx => break,   // Esc left the Result → stop

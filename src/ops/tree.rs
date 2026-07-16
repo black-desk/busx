@@ -14,12 +14,11 @@ pub fn run(
     user: bool,
     system: bool,
     address: Option<&str>,
-    verbose: bool,
     json: bool,
     service: &str,
 ) -> Result<()> {
     let root = async_global_executor::block_on(async {
-        let conn = dbus::conn::connect(user, system, address, verbose).await?;
+        let conn = dbus::conn::connect(user, system, address).await?;
         dbus::tree::object_tree(&conn, service).await
     })?;
 

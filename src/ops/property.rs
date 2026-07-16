@@ -20,7 +20,6 @@ pub fn get(
     user: bool,
     system: bool,
     address: Option<&str>,
-    verbose: bool,
     json: bool,
     service: &str,
     object: &str,
@@ -32,7 +31,7 @@ pub fn get(
         // No/empty interface: GetAll over all interfaces is allowed; Get is not.
         None | Some("") if get_all_only => {
             let map = async_global_executor::block_on(async {
-                let conn = dbus::conn::connect(user, system, address, verbose).await?;
+                let conn = dbus::conn::connect(user, system, address).await?;
                 dbus::property::get_all(&conn, service, object, "").await
             })?;
             print_map(&map, json)
@@ -44,13 +43,13 @@ pub fn get(
         Some(name) => {
             if get_all_only {
                 let map = async_global_executor::block_on(async {
-                    let conn = dbus::conn::connect(user, system, address, verbose).await?;
+                    let conn = dbus::conn::connect(user, system, address).await?;
                     dbus::property::get_all(&conn, service, object, name).await
                 })?;
                 print_map(&map, json)
             } else {
                 let values = async_global_executor::block_on(async {
-                    let conn = dbus::conn::connect(user, system, address, verbose).await?;
+                    let conn = dbus::conn::connect(user, system, address).await?;
                     let mut vs: Vec<OwnedValue> = Vec::with_capacity(props.len());
                     for p in props {
                         vs.push(dbus::property::get_one(&conn, service, object, name, p).await?);
@@ -86,7 +85,6 @@ pub fn set(
     user: bool,
     system: bool,
     address: Option<&str>,
-    verbose: bool,
     service: &str,
     object: &str,
     interface: &str,
@@ -95,7 +93,7 @@ pub fn set(
     value: &[String],
 ) -> Result<()> {
     async_global_executor::block_on(async {
-        let conn = dbus::conn::connect(user, system, address, verbose).await?;
+        let conn = dbus::conn::connect(user, system, address).await?;
         dbus::property::set(
             &conn, service, object, interface, property, signature, value,
         )

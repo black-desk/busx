@@ -10,6 +10,7 @@ pub mod cli;
 pub mod complete;
 pub mod dbus;
 pub mod error;
+pub mod log;
 pub mod ops;
 pub mod out;
 pub mod tui;
