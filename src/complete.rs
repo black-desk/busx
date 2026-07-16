@@ -28,7 +28,6 @@ use zbus::blocking::Connection;
 use zbus::blocking::fdo::DBusProxy;
 use zbus_xml::{ArgDirection, Node};
 
-use crate::conn::connect;
 use crate::error::Result;
 
 /// Names of subcommands that take a service as their first positional.
@@ -308,13 +307,19 @@ fn complete_positional(kind: Kind, current: &OsStr) -> Vec<CompletionCandidate> 
         Some(s) => s,
         None => return Vec::new(),
     };
-    let conn = match connect(
+    // Connect via the async `dbus::conn::connect` (the blocking `crate::conn`
+    // wrapper is gone); block on it here because the clap_complete completer
+    // closure is synchronous. The introspection helpers below still use the
+    // blocking proxy API, so convert the async connection back to a
+    // `zbus::blocking::Connection` (zero-cost wrap — the blocking API is just
+    // `block_on` over the async core).
+    let conn = match async_global_executor::block_on(crate::dbus::conn::connect(
         parsed.user,
         parsed.system,
         parsed.address.as_deref(),
         parsed.verbose,
-    ) {
-        Ok(c) => c,
+    )) {
+        Ok(c) => zbus::blocking::Connection::from(c),
         Err(_) => return Vec::new(),
     };
     let cands =
