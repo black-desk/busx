@@ -31,9 +31,6 @@ use zbus_xml::{ArgDirection, Node};
 use crate::conn::connect;
 use crate::error::Result;
 
-/// The interface whose `Introspect` method we call. Every object implements it.
-const INTROSPECTABLE: &str = "org.freedesktop.DBus.Introspectable";
-
 /// Names of subcommands that take a service as their first positional.
 const SERVICE_SUBS: &[&str] = &["call", "get", "set", "introspect", "tree", "monitor"];
 
@@ -607,7 +604,7 @@ fn method_input_signature(
 /// can't target an arbitrary object path — the generic `Proxy` carries the real
 /// path (mirrors `src/ops/tree.rs`).
 fn introspect_xml(conn: &Connection, service: &str, path: &str) -> Result<String> {
-    let proxy = zbus::blocking::Proxy::new(conn, service, path, INTROSPECTABLE)?;
+    let proxy = zbus::blocking::Proxy::new(conn, service, path, crate::dbus::introspect::INTROSPECTABLE)?;
     Ok(proxy.introspect()?)
 }
 
