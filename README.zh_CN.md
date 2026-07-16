@@ -71,7 +71,8 @@ Options:
       --user                      Connect to the session bus (the default falls back to the system bus on failure)
       --system                    Connect to the system bus
       --address <ADDRESS>         Connect to the bus at ADDRESS (e.g. unix:path=...)
-      --verbose                   Verbose diagnostics on stderr
+  -v...                           Increase log verbosity (-v / -vv / -vvv)
+      --log <PATH>                TUI log file (default: $XDG_CACHE_HOME/busx/busx.log)
       --show-standard-interfaces  Show standard D-Bus interfaces in the TUI (hidden by default)
       --json                      Emit type-tagged JSON (default: human text)
   -h, --help                      Print help
