@@ -2,8 +2,8 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Async bus connection with the session→system fallback, mirroring
-//! the blocking `crate::conn::connect`. `--address` > `--system` > session with
+//! Async bus connection with the session→system fallback — the single source
+//! of truth for connecting to the bus. `--address` > `--system` > session with
 //! silent fallback to system (warn on `--verbose`).
 
 use crate::error::{Error, Result};

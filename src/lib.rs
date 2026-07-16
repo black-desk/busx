@@ -8,7 +8,6 @@
 
 pub mod cli;
 pub mod complete;
-pub mod conn;
 pub mod dbus;
 pub mod error;
 pub mod ops;
