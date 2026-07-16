@@ -74,9 +74,11 @@ fn list_orders_well_known_before_unique() {
     }
 }
 
-/// Overlong service names are truncated (`…`) and every line stays ≤ 80 cols.
+/// Piped (non-TTY) `list` output is tab-separated and untruncated — a long
+/// well-known name appears in full. (The TTY truncation is unit-tested in
+/// `ops::list::tests`, since it needs a real terminal width.)
 #[test]
-fn list_human_truncates_overlong_names() {
+fn list_piped_is_tab_separated_and_untruncated() {
     let addr = common::bus().address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
@@ -84,17 +86,13 @@ fn list_human_truncates_overlong_names() {
         .ok()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
-    const LONG: &str = "org.busx.TestServiceNameThatIsIntentionallyVeryLongSoItExceedsTheNameColumnWidthLimitOfFiftyFour";
-    assert!(stdout.contains('…'), "expected a truncated name:\n{stdout}");
     assert!(
-        !stdout.contains(LONG),
-        "full overlong name should be truncated, not shown in full:\n{stdout}"
+        stdout.lines().next() == Some("NAME\tPID\tPROCESS"),
+        "piped output should be tab-separated with this header:\n{stdout}"
     );
-    for line in stdout.lines() {
-        assert!(
-            line.chars().count() <= 80,
-            "line is {} cols (> 80): {line}",
-            line.chars().count()
-        );
-    }
+    const LONG: &str = "org.busx.TestServiceNameThatIsIntentionallyVeryLongSoItExceedsTheNameColumnWidthLimitOfFiftyFour";
+    assert!(
+        stdout.contains(LONG),
+        "piped (non-TTY) output must not truncate names:\n{stdout}"
+    );
 }
