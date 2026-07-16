@@ -9,7 +9,8 @@
 //! positionally per busctl rules:
 //!
 //! - basic type → one value token (`b` accepts `true`/`yes`/`on`/`1` and
-//!   `false`/`no`/`off`/`0`, case-sensitive per busctl).
+//!   `false`/`no`/`off`/`0`, case-sensitive per busctl; anything else is an
+//!   error rather than silently coercing to `false`).
 //! - `v` (variant) → next token is the inner signature, then its value.
 //! - `a<X>` (array) → next token is the element count `N`, then `N` elements.
 //! - `a{KV}` (dict array) → count `N`, then `N` pairs (key then value).
@@ -124,7 +125,7 @@ fn parse_type(st: &mut SigStream<'_>, cur: &mut Cur<'_>) -> Result<Value<'static
     Ok(match c {
         // --- basic types ---
         'y' => Value::U8(parse_num(cur.next()?, "byte")?),
-        'b' => Value::Bool(parse_bool(cur.next()?)),
+        'b' => Value::Bool(parse_bool(cur.next()?)?),
         'n' => Value::I16(parse_num(cur.next()?, "int16")?),
         'q' => Value::U16(parse_num(cur.next()?, "uint16")?),
         'i' => Value::I32(parse_num(cur.next()?, "int32")?),
@@ -317,8 +318,16 @@ fn substring_sig(st: &SigStream<'_>, start: usize, end: usize) -> Result<Signatu
     parse_signature(&s)
 }
 
-fn parse_bool(s: &str) -> bool {
-    matches!(s, "true" | "yes" | "on" | "1")
+/// Parse a busctl-style boolean token: `true`/`yes`/`on`/`1` → `true`,
+/// `false`/`no`/`off`/`0` → `false` (case-sensitive, per busctl). Any other
+/// value is an error — previously an unrecognized token silently became `false`,
+/// which could mask a typo in a method call argument.
+fn parse_bool(s: &str) -> Result<bool> {
+    match s {
+        "true" | "yes" | "on" | "1" => Ok(true),
+        "false" | "no" | "off" | "0" => Ok(false),
+        other => Err(Error::Msg(format!("invalid boolean `{other}`"))),
+    }
 }
 
 fn parse_num<T>(s: &str, what: &str) -> Result<T>
@@ -328,4 +337,37 @@ where
 {
     s.parse::<T>()
         .map_err(|e| Error::Msg(format!("invalid {what} `{s}`: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bool_accepts_busctl_truthy_and_falsy() {
+        for t in ["true", "yes", "on", "1"] {
+            assert!(parse_bool(t).unwrap(), "{t} should be true");
+        }
+        for f in ["false", "no", "off", "0"] {
+            assert!(!parse_bool(f).unwrap(), "{f} should be false");
+        }
+    }
+
+    #[test]
+    fn bool_rejects_unrecognized_input() {
+        // Case-sensitive: uppercase variants are not busctl's accepted forms.
+        for bad in ["True", "TRUE", "garbage", "maybe", "2", "", "y", "t"] {
+            assert!(
+                parse_bool(bad).is_err(),
+                "`{bad}` should be rejected, not silently coerced"
+            );
+        }
+    }
+
+    #[test]
+    fn bool_round_trips_through_parse() {
+        assert!(matches!(parse("b", &["true".into()]), Ok(v) if matches!(v[0], Value::Bool(true))));
+        assert!(matches!(parse("b", &["0".into()]), Ok(v) if matches!(v[0], Value::Bool(false))));
+        assert!(parse("b", &["nope".into()]).is_err());
+    }
 }
