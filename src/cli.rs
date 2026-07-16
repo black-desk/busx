@@ -3,6 +3,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use clap::{Parser, Subcommand};
+use clap_complete::ArgValueCompleter;
+
+use crate::complete;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -71,37 +74,54 @@ pub enum Command {
     },
     /// Show interfaces/methods/signals/properties of an object.
     Introspect {
+        #[arg(add = ArgValueCompleter::new(complete::complete_service))]
         service: String,
+        #[arg(add = ArgValueCompleter::new(complete::complete_path))]
         object: String,
+        #[arg(add = ArgValueCompleter::new(complete::complete_interface))]
         interface: Option<String>,
     },
     /// Call a method.
     Call {
+        #[arg(add = ArgValueCompleter::new(complete::complete_service))]
         service: String,
+        #[arg(add = ArgValueCompleter::new(complete::complete_path))]
         object: String,
+        #[arg(add = ArgValueCompleter::new(complete::complete_interface))]
         interface: String,
+        #[arg(add = ArgValueCompleter::new(complete::complete_method))]
         method: String,
+        #[arg(add = ArgValueCompleter::new(complete::complete_signature))]
         signature: String,
         args: Vec<String>,
     },
     /// Get properties (no property names => GetAll).
     Get {
+        #[arg(add = ArgValueCompleter::new(complete::complete_service))]
         service: String,
+        #[arg(add = ArgValueCompleter::new(complete::complete_path))]
         object: String,
+        #[arg(add = ArgValueCompleter::new(complete::complete_interface))]
         interface: Option<String>,
+        #[arg(add = ArgValueCompleter::new(complete::complete_property))]
         props: Vec<String>,
     },
     /// Set a property.
     Set {
+        #[arg(add = ArgValueCompleter::new(complete::complete_service))]
         service: String,
+        #[arg(add = ArgValueCompleter::new(complete::complete_path))]
         object: String,
+        #[arg(add = ArgValueCompleter::new(complete::complete_interface))]
         interface: String,
+        #[arg(add = ArgValueCompleter::new(complete::complete_property))]
         property: String,
         signature: String,
         value: Vec<String>,
     },
     /// Monitor bus messages.
     Monitor {
+        #[arg(add = ArgValueCompleter::new(complete::complete_service))]
         services: Vec<String>,
         #[arg(long)]
         interface: Option<String>,
