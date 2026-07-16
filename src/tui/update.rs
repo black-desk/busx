@@ -8,9 +8,10 @@
 use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-use zbus_xml::{ArgDirection, Node, PropertyAccess, Signature};
+use zbus_xml::{ArgDirection, Node};
 use zvariant::OwnedValue;
 
+use crate::dbus::introspect::{access_str, sig_str};
 use crate::dbus::types::{ObjectNode, ServiceInfo};
 use crate::tui::copy::{CopyOp, Tool, generate};
 use crate::tui::msg::{Effect, Msg};
@@ -1070,19 +1071,6 @@ fn members_of(node: &Node, iface_name: &str) -> (Methods, Properties, Signals) {
         })
         .collect();
     (methods, properties, signals)
-}
-
-/// `zbus_xml::Signature` is not `Display`; go through the inner `zvariant::Signature`.
-fn sig_str(sig: &Signature) -> String {
-    sig.inner().to_string()
-}
-
-fn access_str(a: PropertyAccess) -> &'static str {
-    match a {
-        PropertyAccess::Read => "read",
-        PropertyAccess::Write => "write",
-        PropertyAccess::ReadWrite => "readwrite",
-    }
 }
 
 /// Push an Interfaces screen for (service, object) in loading state.
