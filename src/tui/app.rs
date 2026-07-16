@@ -66,11 +66,11 @@ impl App {
         // Reset on any navigation (screen-stack depth change) so a freshly
         // entered / returned-to screen starts at the top.
         let mut scroll = [0usize; 3];
-        let mut prev_len = self.state.screens.len();
+        let mut prev_len = self.state.screens().len();
         while !self.state.quit {
-            if self.state.screens.len() != prev_len {
+            if self.state.screens().len() != prev_len {
                 scroll = [0; 3];
-                prev_len = self.state.screens.len();
+                prev_len = self.state.screens().len();
             }
             terminal.draw(|f| render(f, &self.state, &mut targets, &mut scroll))?;
             // The draw closure's `&self.state` borrow ends when `draw` returns,

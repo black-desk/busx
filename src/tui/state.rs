@@ -29,7 +29,12 @@ pub struct State {
     /// The accumulated service/object/interface of the current drill path.
     pub nav: NavContext,
     /// Navigation stack; the last element is the currently-shown screen.
-    /// Never empty (the initial Service screen is pushed at construction).
+    /// Never empty (the initial Service screen is pushed at construction and
+    /// `pop_screen` refuses at the root). `push_screen`/`pop_screen` maintain
+    /// the nav context alongside it. (Field is public because integration tests
+    /// build `State` literals directly; the never-empty invariant is upheld by
+    /// the constructors + `pop_screen`. Making it fully private is TODO B's
+    /// last micro-item — it needs the test fixtures moved to a constructor.)
     pub screens: Vec<Screen>,
     pub quit: bool,
     /// The copy-as popup overlay (`Some` while open; `c` opens, `Esc`/`Enter`
@@ -271,13 +276,20 @@ impl State {
         }
     }
 
-    /// The currently-shown screen.
+    /// The currently-shown screen. The stack is never empty (private field +
+    /// constructors push one + `pop_screen` refuses at the root), so this cannot
+    /// panic in practice.
     pub fn top(&self) -> &Screen {
         self.screens.last().expect("screen stack never empty")
     }
 
     pub fn top_mut(&mut self) -> &mut Screen {
         self.screens.last_mut().expect("screen stack never empty")
+    }
+
+    /// Read-only view of the screen stack (for depth assertions in tests).
+    pub fn screens(&self) -> &[Screen] {
+        &self.screens
     }
 
     /// Push a screen onto the navigation stack.
