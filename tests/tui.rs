@@ -3419,6 +3419,63 @@ fn mouse_scroll_on_empty_service_list_is_noop() {
 }
 
 #[test]
+fn mouse_click_after_scroll_hits_the_visible_row() {
+    // Regression: click targets used to ignore the scroll offset, so after
+    // scrolling, clicking a visible row selected the wrong index (the top
+    // visible row mapped to row 0). Now targets are offset by the scroll, so a
+    // click lands on the row actually rendered under the cursor.
+    let mut state = State::service(
+        (0..20)
+            .map(|i| svc(&format!("svc{i:02}"), None, None))
+            .collect(),
+    );
+    // Scroll well past the top so the viewport offset is > 0.
+    for _ in 0..10 {
+        update(&mut state, scroll_msg(MouseEventKind::ScrollDown));
+    }
+    assert!(selected_of(&state) > 0, "scrolling moved the cursor");
+
+    // Render to populate click_targets for the scrolled viewport.
+    let mut targets = Vec::new();
+    let mut scroll = [0usize; 3];
+    let mut term = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    term.draw(|f| render(f, &state, &mut targets, &mut scroll))
+        .unwrap();
+
+    // The topmost service-row target is the row rendered at the top of the
+    // viewport; its index must reflect the scroll (not 0). Clicking it selects
+    // that index.
+    let (rect, top_idx) = targets
+        .iter()
+        .filter_map(|(r, t)| match t {
+            ClickTarget::ServiceRow(i) => Some((*r, *i)),
+            _ => None,
+        })
+        .min_by_key(|(r, _)| r.y)
+        .expect("a service row target");
+    assert!(
+        top_idx > 0,
+        "top visible row reflects the scroll, got index {top_idx}"
+    );
+
+    state.click_targets = targets;
+    update(
+        &mut state,
+        Msg::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: rect.x + rect.width / 2,
+            row: rect.y,
+            modifiers: KeyModifiers::NONE,
+        }),
+    );
+    assert_eq!(
+        selected_of(&state),
+        top_idx,
+        "click after scroll selects the row under the cursor"
+    );
+}
+
+#[test]
 fn mouse_click_on_unrendered_rect_is_noop() {
     // A left-click that hits no recorded Rect does nothing (no panic, no state
     // change). Guards the hit-test's `None` path.

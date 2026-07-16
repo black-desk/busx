@@ -231,15 +231,15 @@ fn render_service(
     // (rather than re-anchoring to the viewport bottom from offset 0).
     scroll[0] = list_state.offset();
 
-    // Record one click target per row: the list renders inside `block.inner(area)`,
-    // so row `i` is at `y = inner.y + i`, full inner width, height 1.
-    let inner = block.inner(area);
-    for i in 0..s.services.len() {
-        targets.push((
-            Rect::new(inner.x, inner.y + i as u16, inner.width, 1),
-            ClickTarget::ServiceRow(i),
-        ));
-    }
+    // Record click targets for the visible rows only, offset by the scroll so a
+    // click maps to the row actually rendered under the cursor.
+    push_list_rows(
+        targets,
+        area,
+        scroll[0],
+        s.services.len(),
+        ClickTarget::ServiceRow,
+    );
 }
 
 fn render_objects(
@@ -274,13 +274,13 @@ fn render_objects(
     frame.render_stateful_widget(list, area, &mut ls);
     scroll[0] = ls.offset();
 
-    let inner = block.inner(area);
-    for i in 0..o.paths.len() {
-        targets.push((
-            Rect::new(inner.x, inner.y + i as u16, inner.width, 1),
-            ClickTarget::ObjectsRow(i),
-        ));
-    }
+    push_list_rows(
+        targets,
+        area,
+        scroll[0],
+        o.paths.len(),
+        ClickTarget::ObjectsRow,
+    );
 }
 
 fn render_interfaces(
@@ -315,13 +315,13 @@ fn render_interfaces(
     frame.render_stateful_widget(list, area, &mut ls);
     scroll[0] = ls.offset();
 
-    let inner = block.inner(area);
-    for row in 0..i.names.len() {
-        targets.push((
-            Rect::new(inner.x, inner.y + row as u16, inner.width, 1),
-            ClickTarget::InterfacesRow(row),
-        ));
-    }
+    push_list_rows(
+        targets,
+        area,
+        scroll[0],
+        i.names.len(),
+        ClickTarget::InterfacesRow,
+    );
 }
 
 fn render_interface(
@@ -363,7 +363,13 @@ fn render_interface(
         !i.in_buttons && i.focus == InterfaceFocus::Methods,
         scroll[0],
     );
-    push_list_rows(targets, chunks[0], i.methods.len(), ClickTarget::MethodRow);
+    push_list_rows(
+        targets,
+        chunks[0],
+        scroll[0],
+        i.methods.len(),
+        ClickTarget::MethodRow,
+    );
 
     // Properties show the GetAll value alongside name + signature. If GetAll
     // failed for this object/interface, show that scoped to this column (some
@@ -427,6 +433,7 @@ fn render_interface(
         push_list_rows(
             targets,
             chunks[1],
+            scroll[1],
             i.properties.len(),
             ClickTarget::PropertyRow,
         );
@@ -442,7 +449,13 @@ fn render_interface(
         !i.in_buttons && i.focus == InterfaceFocus::Signals,
         scroll[2],
     );
-    push_list_rows(targets, chunks[2], i.signals.len(), ClickTarget::SignalRow);
+    push_list_rows(
+        targets,
+        chunks[2],
+        scroll[2],
+        i.signals.len(),
+        ClickTarget::SignalRow,
+    );
 
     // Action-button bar: the buttons offered for the focused column's selected
     // member. Highlighted (focused) when `in_buttons`. Never grows past a few
@@ -461,22 +474,30 @@ fn render_interface(
         i.in_buttons,
         0,
     );
-    push_list_rows(targets, right, n_buttons, ClickTarget::ActionButton);
+    push_list_rows(targets, right, 0, n_buttons, ClickTarget::ActionButton);
 }
 
 /// Push one click target per row of a bordered list rendered into `area`. The
 /// list renders inside its block's inner area (inside the border); row `i` is at
-/// `y = inner.y + i`, full inner width, height 1.
+/// Record one click target per VISIBLE list row, accounting for the scroll
+/// `offset`: row `i` renders at `inner.y + (i - offset)`. Only the visible
+/// window `[offset, offset+height)` gets targets. Without the offset a scrolled
+/// list desyncs clicks from the rendered rows — e.g. clicking the top visible
+/// row (index `offset`) would hit row 0 instead.
 fn push_list_rows(
     targets: &mut Vec<(Rect, ClickTarget)>,
     area: Rect,
+    offset: usize,
     n_rows: usize,
     make: impl Fn(usize) -> ClickTarget,
 ) {
     let inner = Block::default().borders(Borders::ALL).inner(area);
-    for i in 0..n_rows {
+    let vh = inner.height as usize;
+    let start = offset.min(n_rows);
+    let end = offset.saturating_add(vh).min(n_rows);
+    for i in start..end {
         targets.push((
-            Rect::new(inner.x, inner.y + i as u16, inner.width, 1),
+            Rect::new(inner.x, inner.y + (i - offset) as u16, inner.width, 1),
             make(i),
         ));
     }
