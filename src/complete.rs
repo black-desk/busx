@@ -6,24 +6,25 @@
 //!
 //! Two layers:
 //! - **Structural completion** (subcommand names, flag names, global-flag
-//!   parsing) is delegated to clap by `CompleteEnv` + the `complete` engine.
-//!   The shell re-invokes `busx` with the full command line under a special
-//!   env var (`COMPLETE=<shell>`); `try_complete` processes it and exits.
+//!   parsing) is delegated to clap by `CompleteEnv` + the `complete` engine,
+//!   driven off the real `Cli::command()` (no hand-built mirror). The shell
+//!   re-invokes `busx` with the full command line under a special env var
+//!   (`COMPLETE=<shell>`); `try_complete` processes it and exits.
 //! - **Positional values** (service / object-path / interface / method) get
 //!   live bus introspection via `ArgValueCompleter` closures attached to each
-//!   positional when building the clap `Command`. The closures read the bus
-//!   flags and the already-typed positionals straight from `std::env::args_os()`
-//!   — the same arg vector clap itself parses — so completion connects to the
-//!   bus the user actually selected (`--user`/`--system`/`--address`).
+//!   positional in `cli.rs` with `#[arg(add = ...)]`. The closures (exported
+//!   below as `pub fn`) read the bus flags and the already-typed positionals
+//!   straight from `std::env::args_os()` — the same arg vector clap itself
+//!   parses — so completion connects to the bus the user actually selected
+//!   (`--user`/`--system`/`--address`).
 //!
 //! Everything here is best-effort: a bus error yields no candidates (and the
 //! command never fails), and introspection is uncached (re-issued each TAB).
 
 use std::ffi::OsStr;
 
-use clap::builder::ValueHint;
-use clap::{Arg, ArgAction, Command};
-use clap_complete::{ArgValueCompleter, CompleteEnv, CompletionCandidate, Shell};
+use clap::CommandFactory;
+use clap_complete::{CompleteEnv, CompletionCandidate, Shell};
 use zbus::blocking::Connection;
 use zbus::blocking::fdo::DBusProxy;
 use zbus_xml::{ArgDirection, Node};
@@ -39,7 +40,7 @@ const SERVICE_SUBS: &[&str] = &["call", "get", "set", "introspect", "monitor"];
 /// normal run and we return `Ok(false)` so `main` proceeds to parse args.
 pub fn try_complete() -> Result<bool> {
     let current_dir = std::env::current_dir().ok();
-    CompleteEnv::with_factory(command)
+    CompleteEnv::with_factory(crate::cli::Cli::command)
         .try_complete(std::env::args_os(), current_dir.as_deref())
         .map_err(|e| crate::error::Error::Msg(format!("completion: {e}")))
 }
@@ -58,7 +59,8 @@ pub fn emit_script(shell: Shell) {
         unsafe { std::env::set_var("COMPLETE", name) };
         let bin = std::env::args_os().next().unwrap_or_else(|| "busx".into());
         let current_dir = std::env::current_dir().ok();
-        let _ = CompleteEnv::with_factory(command).try_complete([bin], current_dir.as_deref());
+        let _ = CompleteEnv::with_factory(crate::cli::Cli::command)
+            .try_complete([bin], current_dir.as_deref());
     }
 }
 
@@ -76,113 +78,9 @@ fn shell_name(shell: Shell) -> Option<&'static str> {
     }
 }
 
-/// Build the `Command` mirror of `crate::cli::Cli` with dynamic completion
-/// attached to the bus-walking positionals. This is a hand-built mirror rather
-/// than `Cli::command()` because `ArgValueCompleter` is attached via the
-/// programmatic `Arg::add` API (clap derive has no `add = ...` attribute in the
-/// resolved clap version), and we only need the surface clap parses for
-/// completion — not the real value semantics.
-fn command() -> Command {
-    let global = |name: &'static str, help: &'static str| {
-        Arg::new(name)
-            .long(name)
-            .global(true)
-            .action(ArgAction::SetTrue)
-            .help(help)
-    };
-    Command::new("busx")
-        .bin_name("busx")
-        .about("D-Bus CLI (dbus-send/busctl/qdbus replacement)")
-        .arg(global(
-            "user",
-            "Connect to the session bus (fallback to system)",
-        ))
-        .arg(global("system", "Connect to the system bus"))
-        .arg(
-            Arg::new("address")
-                .long("address")
-                .global(true)
-                .value_name("ADDRESS")
-                .action(ArgAction::Set)
-                .help("Connect to the bus at ADDRESS"),
-        )
-        .arg(
-            Arg::new("verbose")
-                .short('v')
-                .action(ArgAction::Count)
-                .global(true)
-                .help("Increase log verbosity (-v / -vv / -vvv)"),
-        )
-        .arg(global(
-            "json",
-            "Emit type-tagged JSON (default: human text)",
-        ))
-        .subcommands([
-            subcommand("list")
-                .arg(flag("unique"))
-                .arg(flag("acquired"))
-                .arg(flag("activatable")),
-            subcommand("introspect")
-                .arg(positional("service", Service))
-                .arg(positional("object", Path))
-                .arg(positional_opt("interface", Interface)),
-            subcommand("call")
-                .arg(positional("service", Service))
-                .arg(positional("object", Path))
-                .arg(positional("interface", Interface))
-                .arg(positional("method", Method))
-                .arg(positional("signature", Signature))
-                .arg(positional_vec("args", None)),
-            subcommand("get")
-                .arg(positional("service", Service))
-                .arg(positional("object", Path))
-                .arg(positional_opt("interface", Interface))
-                .arg(positional_vec("props", Property)),
-            subcommand("set")
-                .arg(positional("service", Service))
-                .arg(positional("object", Path))
-                .arg(positional("interface", Interface))
-                .arg(positional("property", Property))
-                .arg(positional("signature", None))
-                .arg(positional_vec("value", None)),
-            subcommand("monitor")
-                .arg(positional_vec("services", Service))
-                .arg(opt("interface"))
-                .arg(opt("member"))
-                .arg(opt("path"))
-                .arg(opt("sender"))
-                .arg(
-                    Arg::new("match")
-                        .long("match")
-                        .value_name("MATCH")
-                        .action(ArgAction::Set),
-                )
-                .arg(flag("signals"))
-                .arg(
-                    Arg::new("limit_messages")
-                        .long("limit-messages")
-                        .value_name("N")
-                        .action(ArgAction::Set),
-                )
-                .arg(
-                    Arg::new("timeout")
-                        .long("timeout")
-                        .value_name("DUR")
-                        .action(ArgAction::Set),
-                ),
-            Command::new("completion")
-                .about("Generate shell completion script")
-                .arg(
-                    Arg::new("shell")
-                        .value_name("SHELL")
-                        .required(true)
-                        .value_parser(["bash", "elvish", "fish", "powershell", "zsh"]),
-                ),
-        ])
-}
-
 /// The "kind" of bus value a positional holds. `None` ⇒ no dynamic completion
-/// (e.g. method args, property values — out of scope for v1).
+/// (e.g. method args, property values — out of scope for v1). Used by
+/// `complete_positional` to dispatch to the matching introspection helper.
 #[derive(Clone, Copy)]
 enum Kind {
     Service,
@@ -193,105 +91,36 @@ enum Kind {
     Property,
 }
 
-// Short lowercase aliases read better at the `positional(...)` call sites than
-// `Some(Kind::Service)`; they're local ergonomics, not exported constants.
-#[allow(non_upper_case_globals)]
-const Service: Option<Kind> = Some(Kind::Service);
-#[allow(non_upper_case_globals)]
-const Path: Option<Kind> = Some(Kind::Path);
-#[allow(non_upper_case_globals)]
-const Interface: Option<Kind> = Some(Kind::Interface);
-#[allow(non_upper_case_globals)]
-const Method: Option<Kind> = Some(Kind::Method);
-#[allow(non_upper_case_globals)]
-const Signature: Option<Kind> = Some(Kind::Signature);
-#[allow(non_upper_case_globals)]
-const Property: Option<Kind> = Some(Kind::Property);
-
-fn subcommand(name: &'static str) -> Command {
-    Command::new(name).about(match name {
-        "list" => "List service names on the bus",
-        "introspect" => "Show interfaces/methods/signals/properties of an object",
-        "call" => "Call a method",
-        "get" => "Get properties",
-        "set" => "Set a property",
-        "monitor" => "Monitor bus messages",
-        _ => "",
-    })
-}
-
-fn flag(name: &'static str) -> Arg {
-    Arg::new(name).long(name).action(ArgAction::SetTrue)
-}
-
-fn opt(name: &'static str) -> Arg {
-    Arg::new(name).long(name).action(ArgAction::Set)
-}
-
-/// A required positional with optional dynamic completion.
-fn positional(name: &'static str, kind: Option<Kind>) -> Arg {
-    let arg = Arg::new(name).required(true).action(ArgAction::Set);
-    attach(arg, kind)
-}
-
-/// An optional (nullable) positional.
-fn positional_opt(name: &'static str, kind: Option<Kind>) -> Arg {
-    let arg = Arg::new(name).action(ArgAction::Set);
-    attach(arg, kind)
-}
-
-/// A variadic positional (`Vec<String>`).
-fn positional_vec(name: &'static str, kind: Option<Kind>) -> Arg {
-    let arg = Arg::new(name).num_args(0..).action(ArgAction::Append);
-    attach(arg, kind)
-}
-
-/// Attach the `ArgValueCompleter` for `kind` (if any). The completer ignores
-/// clap's value-hint default (clap would otherwise try filesystem completion for
-/// an `Other`-hinted arg) by setting `ValueHint::Other` and supplying its own
-/// candidates.
-fn attach(arg: Arg, kind: Option<Kind>) -> Arg {
-    let arg = arg.value_hint(ValueHint::Other);
-    match kind {
-        Some(Kind::Service) => arg.add(ArgValueCompleter::new(complete_service)),
-        Some(Kind::Path) => arg.add(ArgValueCompleter::new(complete_path)),
-        Some(Kind::Interface) => arg.add(ArgValueCompleter::new(complete_interface)),
-        Some(Kind::Method) => arg.add(ArgValueCompleter::new(complete_method)),
-        Some(Kind::Signature) => arg.add(ArgValueCompleter::new(complete_signature)),
-        Some(Kind::Property) => arg.add(ArgValueCompleter::new(complete_property)),
-        None => arg,
-    }
-}
-
-/// Completer fn for the service positional.
-fn complete_service(current: &OsStr) -> Vec<CompletionCandidate> {
+/// Completer fn for the service positional. `pub` so `cli.rs`'s
+/// `#[arg(add = ArgValueCompleter::new(complete::complete_service))]` can name it.
+pub fn complete_service(current: &OsStr) -> Vec<CompletionCandidate> {
     complete_positional(Kind::Service, current)
 }
 
 /// Completer fn for the object-path positional.
-fn complete_path(current: &OsStr) -> Vec<CompletionCandidate> {
+pub fn complete_path(current: &OsStr) -> Vec<CompletionCandidate> {
     complete_positional(Kind::Path, current)
 }
 
 /// Completer fn for the interface positional.
-fn complete_interface(current: &OsStr) -> Vec<CompletionCandidate> {
+pub fn complete_interface(current: &OsStr) -> Vec<CompletionCandidate> {
     complete_positional(Kind::Interface, current)
 }
 
 /// Completer fn for the method positional.
-fn complete_method(current: &OsStr) -> Vec<CompletionCandidate> {
+pub fn complete_method(current: &OsStr) -> Vec<CompletionCandidate> {
     complete_positional(Kind::Method, current)
 }
 
 /// Completer fn for the signature positional of `call`. Returns the method's
 /// input signature (a single candidate), filtered by the partial token.
-fn complete_signature(current: &OsStr) -> Vec<CompletionCandidate> {
+pub fn complete_signature(current: &OsStr) -> Vec<CompletionCandidate> {
     complete_positional(Kind::Signature, current)
 }
 
 /// Completer fn for the property-name positional(s) of `get`/`set`. Lists the
 /// property names of the chosen (or all) interface(s) on the object.
-fn complete_property(current: &OsStr) -> Vec<CompletionCandidate> {
+pub fn complete_property(current: &OsStr) -> Vec<CompletionCandidate> {
     complete_positional(Kind::Property, current)
 }
 

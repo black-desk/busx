@@ -42,7 +42,9 @@ fn complete_subcommand_position_lists_subcommands() {
         "list",
         "introspect",
         "monitor",
-        "completion",
+        // "completion" is `#[command(hide = true)]` so it's deliberately not
+        // offered — now that completion uses the real Cli (not the old mirror,
+        // which forgot to replicate `hide`).
     ] {
         assert!(
             out.lines().any(|l| l == sub),
@@ -58,11 +60,12 @@ fn complete_subcommand_position_filters_by_prefix() {
     let out = complete_bash(&["busx", "c"], 1);
     let cands: Vec<&str> = out.lines().filter(|l| !l.starts_with('-')).collect();
     assert!(cands.contains(&"call"), "call missing: {out}");
-    assert!(cands.contains(&"completion"), "completion missing: {out}");
+    // "completion" is hidden, so `c` narrows to just "call".
     assert!(
-        !cands.contains(&"list"),
-        "non-matching subcommands leaked: {out}"
+        !cands.contains(&"completion"),
+        "hidden `completion` subcommand leaked: {out}"
     );
+    assert!(!cands.contains(&"list"), "non-matching leaked: {out}");
 }
 
 /// Completing right after `busx` also offers the global flags (bug #1's "flags
