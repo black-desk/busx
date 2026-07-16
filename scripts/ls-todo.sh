@@ -65,6 +65,7 @@ function main() {
 		--line-number \
 		--exclude="$CURRENT_SOURCE_FILE_NAME" \
 		--exclude-dir=.git \
+		--exclude-dir=target \
 		--extended-regexp 'TODO:|FIXME:' .
 }
 
