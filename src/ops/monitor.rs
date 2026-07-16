@@ -118,8 +118,9 @@ fn matches_service(m: &zbus::Message, services: &[String]) -> bool {
         .any(|svc| Some(svc.as_str()) == sender || Some(svc.as_str()) == dest)
 }
 
-/// Parse a short duration string ("250ms", "5s", "1m", or a bare number of
-/// seconds). A leading `+`/trailing unit beyond s/ms/us/m/h is rejected.
+/// Parse a short duration string: `250us`, `250ms`, `5s`, `1m`, or a bare
+/// number of seconds. Any other suffix (e.g. `h`), or a leading sign, is
+/// rejected.
 fn parse_duration(s: &str) -> Result<Duration> {
     let s = s.trim();
     if let Some(num) = s.strip_suffix("us") {
