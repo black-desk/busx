@@ -7,7 +7,7 @@ use assert_cmd::cargo_bin;
 use serde_json::Value;
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// `busx monitor --signals ... --limit-messages 1` must emit one NDJSON line
 /// for the `PropertiesChanged` signal triggered by `BumpVolume`.
@@ -163,5 +163,59 @@ fn monitor_human_emits_block() {
     assert!(
         !stdout.trim_start().starts_with('{'),
         "human mode must not emit JSON:\n{stdout}"
+    );
+}
+
+/// Regression: `--timeout` must fire even when **no matching traffic** arrives.
+/// Before the async `MessageStream` rewrite the blocking iterator's `next()`
+/// dead-waited, so the deadline check (inside the loop body) only ran after a
+/// message landed — `--timeout` hung forever on an idle bus. This guards that.
+#[test]
+fn monitor_timeout_fires_on_idle_bus() {
+    let addr = common::bus().address.clone();
+
+    // Subscribe to a sender that never emits on the test bus → the match-rule
+    // stream yields nothing, so the ONLY way this process returns is the
+    // `--timeout` firing.
+    let mut child = Command::new(cargo_bin!("busx"))
+        .args([
+            "--address",
+            &addr,
+            "monitor",
+            "--signals",
+            "--sender",
+            ":1.999999", // a unique name that will never speak on the test bus
+            "--timeout",
+            "500ms",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn monitor");
+
+    // Poll with a hard kill deadline so a regression FAILS instead of hanging
+    // the whole suite: the old code would block forever here.
+    let kill = Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                assert!(status.success(), "monitor failed: {status}");
+                break;
+            }
+            Ok(None) if Instant::now() >= kill => {
+                let _ = child.kill();
+                panic!("monitor did not exit within 5s — --timeout did not fire");
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(20)),
+            Err(e) => panic!("wait failed: {e}"),
+        }
+    }
+
+    let out = child.wait_with_output().expect("read output");
+    // No matching traffic → no stdout.
+    assert!(
+        out.stdout.is_empty(),
+        "expected no output for a never-matching rule: {:?}",
+        String::from_utf8_lossy(&out.stdout)
     );
 }
