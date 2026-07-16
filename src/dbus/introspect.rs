@@ -6,7 +6,7 @@
 //! `Node::from_reader` yields an owned (`'static`) tree.
 
 use crate::error::{Error, Result};
-use zbus_xml::Node;
+use zbus_xml::{Node, PropertyAccess, Signature};
 
 /// The interface whose `Introspect` method we call. Every object implements it.
 pub const INTROSPECTABLE: &str = "org.freedesktop.DBus.Introspectable";
@@ -24,6 +24,25 @@ pub const STANDARD_INTERFACES: &[&str] = &[
 /// implements.
 pub fn is_standard_interface(name: &str) -> bool {
     STANDARD_INTERFACES.contains(&name)
+}
+
+/// Render a `zbus_xml::Signature` as its signature string.
+///
+/// `zbus_xml::Signature` derefs to `zvariant::Signature` (which implements
+/// `Display`) but does not itself implement `Display`, so go through the inner
+/// value to format it. Shared by the CLI introspection renderer and the TUI.
+pub fn sig_str(sig: &Signature) -> String {
+    sig.inner().to_string()
+}
+
+/// Lowercased spec name for a property's access mode (`read`/`write`/`readwrite`).
+/// Shared by the CLI introspection renderer and the TUI.
+pub fn access_str(a: PropertyAccess) -> &'static str {
+    match a {
+        PropertyAccess::Read => "read",
+        PropertyAccess::Write => "write",
+        PropertyAccess::ReadWrite => "readwrite",
+    }
 }
 
 /// Call `org.freedesktop.DBus.Introspectable.Introspect` on `service`/`object`

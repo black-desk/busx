@@ -8,7 +8,10 @@
 use crate::dbus;
 use crate::error::Result;
 use serde_json::{Value as Json, json};
-use zbus_xml::{Arg, ArgDirection, Interface, PropertyAccess, Signature};
+use zbus_xml::{Arg, ArgDirection, Interface};
+
+// Shared zbus_xml → string helpers (also used by the TUI).
+use dbus::introspect::{access_str, sig_str};
 
 #[allow(clippy::too_many_arguments)]
 pub fn run(
@@ -72,23 +75,6 @@ fn iface_to_json(iface: &Interface) -> Json {
 
 fn arg_to_json(a: &Arg) -> Json {
     json!({ "name": a.name(), "type": sig_str(a.ty()) })
-}
-
-/// Render a `zbus_xml` signature as its signature string.
-///
-/// `zbus_xml::Signature` derefs to `zvariant::Signature` (which implements
-/// `Display`) but does not itself implement `Display`, so go through the inner
-/// value to format it.
-fn sig_str(sig: &Signature) -> String {
-    sig.inner().to_string()
-}
-
-fn access_str(a: PropertyAccess) -> &'static str {
-    match a {
-        PropertyAccess::Read => "read",
-        PropertyAccess::Write => "write",
-        PropertyAccess::ReadWrite => "readwrite",
-    }
 }
 
 fn print_human(interfaces: &[&Interface]) {
