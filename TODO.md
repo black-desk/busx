@@ -73,9 +73,9 @@ migrated.
 
 ### Clipboard routing + blocking
 
-- Hard constraint: the clipboard write must run on a background thread
-  (`spawn` / `spawn_blocking`), never synchronously on the loop thread — it's
-  inherently blocking (subprocess + compositor round-trip), not `.await`.
+- Hard constraint: the clipboard write must run on a background thread (`spawn`
+  / `spawn_blocking`), never synchronously on the loop thread — it's inherently
+  blocking (subprocess + compositor round-trip), not `.await`.
 - Move `write_to_clipboard` out of the `on_effect` interception closure into
   `run_effect` as a normal arm that spawns off-thread and sends
   `Msg::ClipboardResult` back — identical to the dbus effects.
@@ -121,13 +121,12 @@ migrated.
 - TTY: use `crossterm::terminal::size()` (already a dep; fall back to 80 if
   unavailable), lay out right-to-left — reserve PROCESS (the last column) a
   fixed slot of 15 (`/proc/<pid>/comm` is ≤15 bytes → ≤15 display cols is the
-  safe upper bound; CJK is actually *narrower* at 3 bytes/char, so 15 is the
+  safe upper bound; CJK is actually _narrower_ at 3 bytes/char, so 15 is the
   true max), PID natural width, NAME gets the remainder and is truncated to it
-  (NAME is ASCII, so char-truncation == display-truncation, safe). Pad
-  NAME/PID, don't pad PROCESS (trailing column). Total width is then always ≤
-  terminal width → Chinese process names never cause wrapping. This essentially
-  replaces the hardcoded `NAME_CAP = 54` (= 80 − 15 − 7 − 4) with a dynamic
-  value.
+  (NAME is ASCII, so char-truncation == display-truncation, safe). Pad NAME/PID,
+  don't pad PROCESS (trailing column). Total width is then always ≤ terminal
+  width → Chinese process names never cause wrapping. This essentially replaces
+  the hardcoded `NAME_CAP = 54` (= 80 − 15 − 7 − 4) with a dynamic value.
 - Non-TTY: tab-separated output, no width calc, no alignment.
 - Zero new dependencies (`IsTerminal` from std 1.70+, `terminal::size` from the
   existing crossterm).
