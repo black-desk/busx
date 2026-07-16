@@ -94,6 +94,13 @@ impl TestIface {
     fn make_raw_bytes(&self) -> Vec<u8> {
         vec![0x00, 0xab, b'c', 0xff]
     }
+
+    /// Returns `s` with embedded control characters — exercises string escaping
+    /// (`\n` / `\t` named, other controls as `\u{NN}`) so they don't break the
+    /// line-based output.
+    fn make_control_string(&self) -> String {
+        "a\tb\nc\u{1}d".to_string()
+    }
 }
 
 pub struct TestBus {

@@ -11,7 +11,9 @@
 //!
 //! - numbers (U8/I16/U32/U64/I64/F64) → bare number.
 //! - Bool → `true`/`false`.
-//! - Str / ObjectPath / Signature → `"..."` (with `"` and `\` escaped).
+//! - Str / ObjectPath / Signature → a Rust-style quoted literal `"..."` via
+//!   `{:?}`, so control characters are escaped (`\n`, `\t`, `\u{1}`, …) and
+//!   don't break the line-based output.
 //! - Variant → `<{inner_type_sig} {pretty(inner)}>` (e.g. `<d 0.5>`).
 //! - Array → `[e0, e1, ...]`; a byte array (`ay`) → `b"..."` (printable ASCII
 //!   verbatim, else `\xNN`).
@@ -35,9 +37,9 @@ pub fn pretty(v: &Value<'_>) -> String {
         Value::I64(i) => i.to_string(),
         Value::U64(i) => i.to_string(),
         Value::F64(d) => d.to_string(),
-        Value::Str(s) => quote_str(s.as_str()),
-        Value::Signature(s) => quote_str(&s.to_string()),
-        Value::ObjectPath(o) => quote_str(o.as_str()),
+        Value::Str(s) => format!("{:?}", s.as_str()),
+        Value::Signature(s) => format!("{:?}", s.to_string()),
+        Value::ObjectPath(o) => format!("{:?}", o.as_str()),
 
         // A variant carries its own inner signature, so render it tag-first.
         // `value_signature()` gives the enclosed type (e.g. `d`), whereas the
@@ -133,21 +135,4 @@ where
     }
     s.push(close);
     s
-}
-
-/// Quote a string and escape `"` and `\`. Non-string scalars don't need this.
-fn quote_str(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for ch in s.chars() {
-        match ch {
-            '"' | '\\' => {
-                out.push('\\');
-                out.push(ch);
-            }
-            _ => out.push(ch),
-        }
-    }
-    out.push('"');
-    out
 }

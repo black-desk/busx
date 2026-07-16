@@ -378,3 +378,35 @@ fn call_ay_json_stays_tagged_bytes() {
     assert_eq!(v[0]["data"][0]["type"], "y", "elements stay tagged bytes");
     assert_eq!(v[0]["data"][0]["data"], 104, "'h' as a bare byte");
 }
+
+/// Control characters in a string value are escaped (via `{:?}`), so a `\n`
+/// etc. doesn't inject a raw newline into the line-based output.
+#[test]
+fn call_renders_control_chars_in_string() {
+    let addr = common::bus().address.clone();
+    let out = Command::cargo_bin("busx")
+        .unwrap()
+        .args([
+            "--address",
+            &addr,
+            "call",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "MakeControlString",
+            "",
+        ])
+        .ok()
+        .unwrap();
+    let s = String::from_utf8(out.stdout).expect("utf8");
+    // Tab/newline get the named escapes; U+0001 → `\u{1}` (Rust literal style),
+    // all inside the quotes — and no raw newline leaks onto a second line.
+    assert!(
+        s.contains("\"a\\tb\\nc\\u{1}d\""),
+        "control chars escaped inside quotes: {s}"
+    );
+    assert!(
+        !s.contains("a\tb"),
+        "no raw tab leaked into the output: {s:?}"
+    );
+}
