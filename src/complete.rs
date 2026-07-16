@@ -604,7 +604,8 @@ fn method_input_signature(
 /// can't target an arbitrary object path — the generic `Proxy` carries the real
 /// path (mirrors `src/ops/tree.rs`).
 fn introspect_xml(conn: &Connection, service: &str, path: &str) -> Result<String> {
-    let proxy = zbus::blocking::Proxy::new(conn, service, path, crate::dbus::introspect::INTROSPECTABLE)?;
+    let proxy =
+        zbus::blocking::Proxy::new(conn, service, path, crate::dbus::introspect::INTROSPECTABLE)?;
     Ok(proxy.introspect()?)
 }
 
