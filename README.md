@@ -43,42 +43,98 @@ en | [zh_CN](README.zh_CN.md)
 > This English README is translated from the Chinese version and may contain
 > errors.
 
-`busx` is a D-Bus command-line tool written in Rust (on top of [zbus]), aiming
-to replace `dbus-send` / `busctl` / `qdbus` and fix each of their pain points at
-once:
-
-- Input follows `busctl` style (signature string + positional args) and **fully
-  supports nesting and empty containers** — closing `dbus-send`'s hard gap;
-- Output is **human-friendly text by default**; `--json` switches to
-  **type-tagged JSON** (every value is `{"type":..,"data":..}`, and monitoring
-  is NDJSON — one object per line), script-friendly and pipeable to `jq` /
-  python;
-- **It does not repeat sd-bus's mistake**: dicts with non-string keys (e.g.
-  `a{uu}`) render as `[{"key":..,"value":..}]` instead of crashing (cf.
-  systemd#32904);
-- Ships **dynamic shell completion** (bash/zsh) that introspects the bus live;
-- **Single binary, zero runtime dependencies** (pure Rust, no libdbus).
+`busx` is a D-Bus TUI / command-line tool written in Rust (on top of [zbus]), in
+the lineage of `dbus-send` and d-feet / d-spy.
 
 [zbus]: https://crates.io/crates/zbus
 
 ## Features
 
-- `list` — list service names + PID + process (human table, or `--json` array of
-  objects).
-- `tree SVC` — draw the object-path tree of a single service.
-- `introspect` — list an object's interfaces / methods / signals / properties.
-- `call SVC OBJ IFACE METHOD SIG ARGS...` — call a method (SIG is a distinct,
-  completable required arg; busctl-style input, arbitrary nesting supported).
-- `get` / `set` — read (no property names = `GetAll`) / write properties.
-- `monitor` — monitor bus messages, filter by match rule (`--json` emits NDJSON
-  with `PropertiesChanged` decoded).
-- `completion` — generate a dynamic shell-completion script (live-completes
-  services/paths/interfaces/methods/signature/properties).
-- **TUI mode** — bare `busx` (no subcommand) opens a full-screen interactive
-  browser: drill down service → objects → interfaces → interface (methods /
-  properties / signals). Call methods, get/set properties, listen to signals
-  (Esc stops), and copy any operation as a `dbus-send` / `busctl` / `qdbus` /
-  `gdbus` command. Mouse supported.
+- Run `busx` with no subcommand to open the interactive browser (service →
+  objects → interfaces → methods / properties / signals).
+- Run a subcommand (`list` / `call` / `get` / …) for plain command-line use —
+  easy to drop into scripts.
+
+```bash
+busx --help
+```
+
+```text
+D-Bus CLI (dbus-send/busctl/qdbus replacement)
+
+Usage: busx [OPTIONS] [COMMAND]
+
+Commands:
+  list        List service names on the bus
+  tree        Show the object path tree of a service
+  introspect  Show interfaces/methods/signals/properties of an object
+  call        Call a method
+  get         Get properties (no property names => GetAll)
+  set         Set a property
+  monitor     Monitor bus messages
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+      --user                      Connect to the session bus; if that fails, fall back to the system bus (default)
+      --system                    Connect to the system bus
+      --address <ADDRESS>         Connect to the bus at ADDRESS (e.g. unix:path=...)
+      --verbose                   Verbose diagnostics on stderr
+      --show-standard-interfaces  Show standard D-Bus interfaces in the TUI (hidden by default)
+      --json                      Emit type-tagged JSON (default: human text)
+  -h, --help                      Print help
+  -V, --version                   Print version
+```
+
+A few common examples:
+
+```bash
+# Interactive TUI (no subcommand)
+busx
+
+# List services on the bus (defaults to the session bus, falling back to system)
+busx list
+
+# Introspect an object
+busx introspect org.freedesktop.systemd1 /org/freedesktop/systemd1
+
+# Call a method (SIG is a distinct required arg; ListUnits takes none, so SIG is "")
+busx call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
+  org.freedesktop.systemd1.Manager ListUnits ""
+
+# Read properties (no property names = GetAll)
+busx get org.freedesktop.systemd1 /org/freedesktop/systemd1 \
+  org.freedesktop.systemd1.Manager
+
+# Monitor signals; --json emits NDJSON, easy to pipe to jq
+busx --json monitor --signals --interface org.freedesktop.DBus.Properties \
+  --member PropertiesChanged | jq 'select(.args[1] != {})'
+
+# Enable completion: add this to ~/.bashrc (or ~/.zshrc for zsh) and restart
+# your shell — it live-introspects the bus to complete services/paths/etc.
+eval "$(busx completion bash)"
+```
+
+By default the output is human-friendly text; `--json` switches to **type-tagged
+JSON** (`monitor` is NDJSON) — every value is `{"type":..,"data":..}`,
+preserving full D-Bus type information for piping to external `jq` / python. All
+diagnostics (errors, warnings) go to stderr with the `busx:` prefix; exit code
+is `0` on success, `1` on failure; piping into `less`/`head` does not panic
+(SIGPIPE is handled the Unix way).
+
+### CLI mode: vs `busctl`
+
+- **Output**: human-friendly text by default; `--json` emits type-tagged JSON
+  that preserves full D-Bus type information for scripts / `jq`.
+- **Default bus**: connects to the session bus by default.
+- **Pure-Rust single binary**: no libdbus, and no systemd dependency.
+
+### TUI mode: vs d-feet
+
+- **Runs in a terminal**: no graphical environment needed — works over SSH, in a
+  TTY, in a container; d-feet / d-spy are GTK apps that need a desktop.
+- **copy-as**: any operation (method call, get / set property, listen for
+  signals) can be copied as a command line in `dbus-send` / `busctl` / `qdbus` /
+  `gdbus` form
 
 ## Install
 
@@ -94,45 +150,6 @@ cargo install --git https://github.com/black-desk/busx
 # git-originating packages are skipped by default.
 cargo install-update -g busx       # or `cargo install-update -ag` for everything
 ```
-
-## Usage
-
-```bash
-# Interactive TUI (bare busx with no subcommand): browse, call, listen, copy-as
-busx
-
-# List services (defaults to the session bus, falling back to the system bus)
-busx list
-
-# Introspect an object
-busx introspect org.freedesktop.systemd1 /org/freedesktop/systemd1
-
-# Call a method (SIG is a distinct required arg; ListUnits takes no args, so SIG is "")
-busx call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
-  org.freedesktop.systemd1.Manager ListUnits ""
-
-# Nested input (a{sv} containing an array — impossible with dbus-send; 'a{sv}' is SIG):
-busx call org.example /obj org.example.Iface Method \
-  'a{sv}' 1 'hint' 'a' 's' 2 'a' 'b'
-
-# Read properties (no property names = GetAll)
-busx get org.freedesktop.systemd1 /org/freedesktop/systemd1 \
-  org.freedesktop.systemd1.Manager
-
-# Monitor signals; --json emits NDJSON to pipe to external jq
-busx --json monitor --signals --interface org.freedesktop.DBus.Properties \
-  --member PropertiesChanged | jq 'select(.args[1] != {})'
-
-# Enable completion: add this to ~/.bashrc (or ~/.zshrc for zsh) and restart
-# your shell — it live-introspects the bus to complete services/paths/etc.
-eval "$(busx completion bash)"     # zsh: eval "$(busx completion zsh)"
-```
-
-Output is human-friendly text by default; `--json` switches to type-tagged JSON
-(`monitor` is NDJSON) — pipe to an external `jq` / python for pretty-printing or
-field transformation. All diagnostics (errors, warnings) go to stderr with the
-`busx:` prefix; exit code is `0` on success, `1` on failure. Piping into
-`less`/`head` does not panic (SIGPIPE is handled the Unix way).
 
 ## License
 
