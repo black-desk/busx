@@ -133,7 +133,7 @@ migrated.
 - Leave `introspect`'s `.{:<16}` alone — validating malformed introspection is
   zbus's job, not ours.
 
-## E. Completion — kill the hand-written Command mirror
+## E. Completion — kill the hand-written Command mirror — DONE (#37)
 
 - Verified against the current deps (clap 4.6.1 + clap_complete 4.6.7 +
   clap_derive 4.6.1): the `#[arg(add = ArgValueCompleter::new(...))]` derive
@@ -157,8 +157,9 @@ migrated.
 
 ## Suggested order
 
-E. (A #33; C #34; B #35; D #36.) E — the completion restructure — is the last
-item.
+All review follow-ups (A–E) are done: A #33, C #34, B #35, D #36, E #37. Only
+the residual micro-item below (B's private `screens`) and the Future item (TUI
+search) remain.
 
 ## Deferred micro-items
 
