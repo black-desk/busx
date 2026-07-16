@@ -17,8 +17,8 @@ use crate::tui::copy::{CopyOp, Tool, generate};
 use crate::tui::msg::{Effect, Msg};
 use crate::tui::state::{
     ActionKind, ActionResult, ClickTarget, CopyAsPopup, DetailFocus, DetailScreen, InterfaceFocus,
-    InterfaceScreen, InterfacesScreen, ListenTarget, MethodMember, ObjectsScreen, ResultScreen,
-    Screen, ServiceScreen, State, flatten_paths,
+    InterfaceScreen, InterfacesScreen, ListenTarget, MethodMember, NavContext, ObjectsScreen,
+    ResultScreen, Screen, ServiceScreen, State, flatten_paths,
 };
 use tui_input::backend::crossterm::EventHandler;
 
@@ -137,7 +137,7 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
     // `c` opens the copy-as popup on a Detail or Result (the screens that carry
     // a copyable operation). No popup is open here, so `c` is unambiguous.
     if matches!(k.code, KeyCode::Char('c')) {
-        if let Some(op) = copy_op_for_screen(state.top()) {
+        if let Some(op) = copy_op_for_screen(state.top(), &state.nav) {
             open_copy_as_popup(state, op);
         }
         return None;
@@ -164,9 +164,7 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
                 return None;
             }
         }
-        if state.screens.len() > 1 {
-            state.screens.pop();
-        } else {
+        if !state.pop_screen() {
             state.quit = true;
         }
         return None;
@@ -174,11 +172,12 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
     if k.code == KeyCode::Enter {
         return handle_enter(state);
     }
+    let nav = state.nav.clone();
     match state.top_mut() {
         Screen::Service(s) => update_service_key(s, k.code),
         Screen::Objects(o) => update_objects_key(o, k.code),
         Screen::Interfaces(i) => update_interfaces_key(i, k.code),
-        Screen::Interface(i) => return update_interface_key(i, k),
+        Screen::Interface(i) => return update_interface_key(i, &nav, k),
         Screen::Detail(d) => return update_detail_key(d, k),
         Screen::Result(r) => update_result_key(r, k.code),
     }
@@ -397,9 +396,9 @@ fn move_selected(sel: &mut usize, len: usize, delta: i32) {
 
 /// Build the `CopyOp` for the top screen: a Detail from its current inputs, or a
 /// Result from its stored `op`. `None` for any other screen (nothing to copy).
-fn copy_op_for_screen(screen: &Screen) -> Option<CopyOp> {
+fn copy_op_for_screen(screen: &Screen, nav: &NavContext) -> Option<CopyOp> {
     match screen {
-        Screen::Detail(d) => Some(copy_op_from_detail(d)),
+        Screen::Detail(d) => Some(copy_op_from_detail(d, nav)),
         Screen::Result(r) => r.op.clone(),
         _ => None,
     }
@@ -428,12 +427,12 @@ fn copy_result_text(r: &ResultScreen) -> Option<String> {
 /// Build the `CopyOp` a Detail's current input values would produce — mirrors the
 /// `Effect` the trigger builds, so copy-as reflects what's typed (not just what
 /// was last invoked).
-fn copy_op_from_detail(d: &DetailScreen) -> CopyOp {
+fn copy_op_from_detail(d: &DetailScreen, nav: &NavContext) -> CopyOp {
     match &d.kind {
         ActionKind::Call { method, signature } => CopyOp::Call {
-            service: d.service.clone(),
-            object: d.object.clone(),
-            iface: d.interface.clone(),
+            service: nav.service.clone(),
+            object: nav.object.clone(),
+            iface: nav.interface.clone(),
             method: method.clone(),
             signature: signature.clone(),
             args: d
@@ -443,18 +442,18 @@ fn copy_op_from_detail(d: &DetailScreen) -> CopyOp {
                 .collect(),
         },
         ActionKind::Get { property } => CopyOp::Get {
-            service: d.service.clone(),
-            object: d.object.clone(),
-            iface: d.interface.clone(),
+            service: nav.service.clone(),
+            object: nav.object.clone(),
+            iface: nav.interface.clone(),
             property: property.clone(),
         },
         ActionKind::Set {
             property,
             signature,
         } => CopyOp::Set {
-            service: d.service.clone(),
-            object: d.object.clone(),
-            iface: d.interface.clone(),
+            service: nav.service.clone(),
+            object: nav.object.clone(),
+            iface: nav.interface.clone(),
             property: property.clone(),
             signature: signature.clone(),
             value: vec![
@@ -468,7 +467,7 @@ fn copy_op_from_detail(d: &DetailScreen) -> CopyOp {
             // Reuse the same match-rule helper the live listen uses; on a rule
             // that can't be built (rare: malformed name) fall back to an empty
             // rule — the popup just shows a degenerate command for each tool.
-            let rule = listen_rule(&d.interface, &d.object, target)
+            let rule = listen_rule(&nav.interface, &nav.object, target)
                 .map(|r| r.to_string())
                 .unwrap_or_default();
             CopyOp::Listen { rule }
@@ -543,14 +542,13 @@ fn enter_interface_action(state: &mut State) -> Option<Effect> {
     // Gather all owned data from the Interface screen in a tight scope so the
     // immutable `state.top()` borrow ends before we mutate `state` (push the
     // Detail / fire the Result).
-    let (svc, obj, iface, kind, inputs, field_labels) = {
+    let (kind, inputs, field_labels) = {
         let i = match state.top() {
             Screen::Interface(i) => i,
             _ => return None,
         };
         let buttons = buttons_for(i.focus);
         let action = *buttons.get(i.button_selected)?;
-        let (svc, obj, iface) = (i.service.clone(), i.object.clone(), i.interface.clone());
         let kind = match i.focus {
             InterfaceFocus::Methods => {
                 let m = i.methods.get(i.selected[0])?;
@@ -613,23 +611,21 @@ fn enter_interface_action(state: &mut State) -> Option<Effect> {
             }
             ActionKind::Get { .. } => (vec![], vec![]),
             ActionKind::Listen { target } => {
-                let rule = listen_rule(&iface, &obj, target).map(|r| r.to_string());
+                let rule = listen_rule(&state.nav.interface, &state.nav.object, target)
+                    .map(|r| r.to_string());
                 (
                     vec![],
                     vec![rule.unwrap_or_else(|e| format!("invalid match rule: {e}"))],
                 )
             }
         };
-        (svc, obj, iface, kind, inputs, field_labels)
+        (kind, inputs, field_labels)
     };
     // A 0-input action (Get / Listen / no-arg Call) needs no form, so skip the
     // Detail screen and fire straight to the Result — like the single-interface
     // auto-skip.
     if inputs.is_empty() {
         let d = DetailScreen {
-            service: svc,
-            object: obj,
-            interface: iface,
             kind,
             inputs: vec![],
             field_labels: vec![],
@@ -638,11 +634,11 @@ fn enter_interface_action(state: &mut State) -> Option<Effect> {
             loading: false,
             error: None,
         };
-        let (rs, effect) = build_detail_result(&d);
-        state.screens.push(Screen::Result(rs));
+        let (rs, effect) = build_detail_result(&d, &state.nav);
+        state.push_screen(Screen::Result(rs));
         return Some(effect);
     }
-    push_detail(state, svc, obj, iface, kind, inputs, field_labels);
+    push_detail(state, kind, inputs, field_labels);
     None
 }
 
@@ -660,8 +656,8 @@ fn enter_detail_trigger(state: &mut State) -> Option<Effect> {
     }
     // Build the owned Result + Effect while borrowing `d`, then release before
     // pushing (which needs `&mut State`).
-    let (rs, effect) = build_detail_result(d);
-    state.screens.push(Screen::Result(rs));
+    let (rs, effect) = build_detail_result(d, &state.nav);
+    state.push_screen(Screen::Result(rs));
     Some(effect)
 }
 
@@ -670,8 +666,8 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
     match state.top() {
         Screen::Service(s) => {
             let svc = s.services.get(s.selected).map(|sv| sv.name.clone())?;
-            state.screens.push(Screen::Objects(ObjectsScreen {
-                service: svc.clone(),
+            state.nav.service = svc.clone();
+            state.push_screen(Screen::Objects(ObjectsScreen {
                 paths: vec![],
                 selected: 0,
                 loading: true,
@@ -681,14 +677,13 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
         }
         Screen::Objects(o) => {
             let path = o.paths.get(o.selected).cloned()?;
-            let svc = o.service.clone();
-            push_interfaces(state, svc.clone(), path.clone());
-            Some(Effect::FetchInterfaces(svc, path))
+            state.nav.object = path.clone();
+            push_interfaces(state);
+            Some(Effect::FetchInterfaces(state.nav.service.clone(), path))
         }
         Screen::Interfaces(i) => {
-            let iface = i.names.get(i.selected).cloned()?;
-            let (svc, obj) = (i.service.clone(), i.object.clone());
-            push_interface(state, svc, obj, iface)
+            state.nav.interface = i.names.get(i.selected).cloned()?;
+            push_interface(state)
         }
         Screen::Interface(_) => enter_interface_action(state),
         Screen::Detail(_) => enter_detail_trigger(state),
@@ -772,7 +767,7 @@ fn update_interfaces_key(i: &mut InterfacesScreen, code: KeyCode) {
 ///   before popping) are handled in `handle_enter` / the global Esc arm — NOT
 ///   here, since they need `&mut State`.
 /// - `r` refreshes the property-value snapshot (GetAll) for this interface.
-fn update_interface_key(i: &mut InterfaceScreen, k: KeyEvent) -> Option<Effect> {
+fn update_interface_key(i: &mut InterfaceScreen, nav: &NavContext, k: KeyEvent) -> Option<Effect> {
     match (k.code, k.modifiers.contains(KeyModifiers::SHIFT)) {
         // Tab (no Shift): leave the button bar if in it, then cycle forward.
         (KeyCode::Tab, false) => {
@@ -810,9 +805,9 @@ fn update_interface_key(i: &mut InterfaceScreen, k: KeyEvent) -> Option<Effect> 
         (KeyCode::Char('r'), _) => {
             i.loading = true;
             return Some(Effect::FetchProperties(
-                i.service.clone(),
-                i.object.clone(),
-                i.interface.clone(),
+                nav.service.clone(),
+                nav.object.clone(),
+                nav.interface.clone(),
             ));
         }
         _ => {}
@@ -936,7 +931,7 @@ fn load_objects(state: &mut State, res: Result<ObjectNode, String>) -> Option<Ef
             Ok(root) => {
                 let paths = flatten_paths(&root);
                 if paths.len() == 1 {
-                    drill = Some((o.service.clone(), paths[0].clone()));
+                    drill = Some(paths[0].clone());
                 }
                 o.selected = 0;
                 o.paths = paths;
@@ -944,9 +939,12 @@ fn load_objects(state: &mut State, res: Result<ObjectNode, String>) -> Option<Ef
             Err(e) => o.error = Some(e),
         }
     }
-    if let Some((svc, path)) = drill {
-        push_interfaces(state, svc.clone(), path.clone());
-        return Some(Effect::FetchInterfaces(svc, path));
+    // Single-object auto-skip: drill straight into Interfaces. The service is
+    // already in `nav` (set when the Objects screen was pushed).
+    if let Some(path) = drill {
+        state.nav.object = path.clone();
+        push_interfaces(state);
+        return Some(Effect::FetchInterfaces(state.nav.service.clone(), path));
     }
     None
 }
@@ -962,8 +960,11 @@ fn load_interfaces(
     let mut drill = None;
     // Read the config before borrowing `state` mutably for the screen.
     let show_standard = state.show_standard_interfaces;
+    // Staleness guard: a fetch can complete after the user navigated away.
+    // Compare the loaded (service, object) against the current nav.
+    let (cur_service, cur_object) = (state.nav.service.clone(), state.nav.object.clone());
     if let Screen::Interfaces(i) = state.top_mut() {
-        if i.service != service || i.object != object {
+        if cur_service != service || cur_object != object {
             return None;
         }
         i.loading = false;
@@ -990,7 +991,8 @@ fn load_interfaces(
         }
     }
     if let Some(iface) = drill {
-        return push_interface(state, service, object, iface);
+        state.nav.interface = iface;
+        return push_interface(state);
     }
     None
 }
@@ -1073,11 +1075,10 @@ fn members_of(node: &Node, iface_name: &str) -> (Methods, Properties, Signals) {
     (methods, properties, signals)
 }
 
-/// Push an Interfaces screen for (service, object) in loading state.
-fn push_interfaces(state: &mut State, service: String, object: String) {
-    state.screens.push(Screen::Interfaces(InterfacesScreen {
-        service,
-        object,
+/// Push an Interfaces screen in loading state. The service/object are already
+/// recorded in [`State::nav`] by the caller.
+fn push_interfaces(state: &mut State) {
+    state.push_screen(Screen::Interfaces(InterfacesScreen {
         names: vec![],
         node: None,
         selected: 0,
@@ -1086,16 +1087,13 @@ fn push_interfaces(state: &mut State, service: String, object: String) {
     }));
 }
 
-/// Push an Interface screen for (service, object, interface). Members are parsed
-/// from the parent Interfaces screen's cached introspection node (no extra fetch).
-fn push_interface(
-    state: &mut State,
-    service: String,
-    object: String,
-    interface: String,
-) -> Option<Effect> {
+/// Push an Interface screen. `state.nav.interface` is set by the caller;
+/// members are parsed from the parent Interfaces screen's cached introspection
+/// node (no extra fetch).
+fn push_interface(state: &mut State) -> Option<Effect> {
+    let iface = state.nav.interface.clone();
     let members = match state.top() {
-        Screen::Interfaces(i) => i.node.as_ref().map(|n| members_of(n, &interface)),
+        Screen::Interfaces(i) => i.node.as_ref().map(|n| members_of(n, &iface)),
         _ => None,
     };
     let (methods, properties, signals) = members.unwrap_or_default();
@@ -1105,10 +1103,7 @@ fn push_interface(
     // track, e.g. the standard org.freedesktop.DBus.* ones). `loading` is true
     // only while such a fetch is in flight.
     let has_props = !properties.is_empty();
-    state.screens.push(Screen::Interface(InterfaceScreen {
-        service: service.clone(),
-        object: object.clone(),
-        interface: interface.clone(),
+    state.push_screen(Screen::Interface(InterfaceScreen {
         methods,
         properties,
         signals,
@@ -1121,7 +1116,11 @@ fn push_interface(
         error: None,
     }));
     if has_props {
-        Some(Effect::FetchProperties(service, object, interface))
+        Some(Effect::FetchProperties(
+            state.nav.service.clone(),
+            state.nav.object.clone(),
+            iface,
+        ))
     } else {
         None
     }
@@ -1147,7 +1146,7 @@ fn call_fields(args: &[(String, String)]) -> (Vec<tui_input::Input>, Vec<String>
 
 /// Build the `(title, Effect)` a Detail action fires, from its kind + inputs.
 /// Shared by the `[Trigger]` Enter and the 0-input auto-trigger.
-fn detail_action(d: &DetailScreen) -> (String, Effect) {
+fn detail_action(d: &DetailScreen, nav: &NavContext) -> (String, Effect) {
     match &d.kind {
         ActionKind::Call { method, signature } => {
             let args: Vec<String> = d
@@ -1156,11 +1155,11 @@ fn detail_action(d: &DetailScreen) -> (String, Effect) {
                 .flat_map(|i| shell_split(i.value()))
                 .collect();
             (
-                format!("{}.{}", d.interface, method),
+                format!("{}.{}", nav.interface, method),
                 Effect::CallMethod {
-                    service: d.service.clone(),
-                    object: d.object.clone(),
-                    iface: d.interface.clone(),
+                    service: nav.service.clone(),
+                    object: nav.object.clone(),
+                    iface: nav.interface.clone(),
                     method: method.clone(),
                     signature: signature.clone(),
                     args,
@@ -1168,11 +1167,11 @@ fn detail_action(d: &DetailScreen) -> (String, Effect) {
             )
         }
         ActionKind::Get { property } => (
-            format!("{}.{}", d.interface, property),
+            format!("{}.{}", nav.interface, property),
             Effect::GetProperty {
-                service: d.service.clone(),
-                object: d.object.clone(),
-                iface: d.interface.clone(),
+                service: nav.service.clone(),
+                object: nav.object.clone(),
+                iface: nav.interface.clone(),
                 property: property.clone(),
             },
         ),
@@ -1186,11 +1185,11 @@ fn detail_action(d: &DetailScreen) -> (String, Effect) {
                 .map(|i| i.value().to_string())
                 .unwrap_or_default();
             (
-                format!("{}.{}", d.interface, property),
+                format!("{}.{}", nav.interface, property),
                 Effect::SetProperty {
-                    service: d.service.clone(),
-                    object: d.object.clone(),
-                    iface: d.interface.clone(),
+                    service: nav.service.clone(),
+                    object: nav.object.clone(),
+                    iface: nav.interface.clone(),
                     property: property.clone(),
                     signature: signature.clone(),
                     value,
@@ -1204,11 +1203,11 @@ fn detail_action(d: &DetailScreen) -> (String, Effect) {
                 ListenTarget::Property { property } => property.clone(),
             };
             (
-                format!("listen {}.{}", d.interface, member_or_prop),
+                format!("listen {}.{}", nav.interface, member_or_prop),
                 Effect::Listen {
-                    service: d.service.clone(),
-                    object: d.object.clone(),
-                    iface: d.interface.clone(),
+                    service: nav.service.clone(),
+                    object: nav.object.clone(),
+                    iface: nav.interface.clone(),
                     target: target.clone(),
                 },
             )
@@ -1220,9 +1219,9 @@ fn detail_action(d: &DetailScreen) -> (String, Effect) {
 /// kind + inputs. Returns owned data so the caller can release the `&State`
 /// borrow before pushing. Shared by the Detail `[Trigger]` and the 0-input
 /// auto-trigger.
-fn build_detail_result(d: &DetailScreen) -> (ResultScreen, Effect) {
-    let copy_op = copy_op_from_detail(d);
-    let (title, effect) = detail_action(d);
+fn build_detail_result(d: &DetailScreen, nav: &NavContext) -> (ResultScreen, Effect) {
+    let copy_op = copy_op_from_detail(d, nav);
+    let (title, effect) = detail_action(d, nav);
     let rs = ResultScreen {
         title,
         result: None,
@@ -1242,17 +1241,11 @@ fn build_detail_result(d: &DetailScreen) -> (ResultScreen, Effect) {
 /// preview as a single label (no inputs).
 fn push_detail(
     state: &mut State,
-    service: String,
-    object: String,
-    interface: String,
     kind: ActionKind,
     inputs: Vec<tui_input::Input>,
     field_labels: Vec<String>,
 ) {
-    state.screens.push(Screen::Detail(DetailScreen {
-        service,
-        object,
-        interface,
+    state.push_screen(Screen::Detail(DetailScreen {
         kind,
         inputs,
         field_labels,

@@ -58,6 +58,43 @@ fn key(code: KeyCode) -> Msg {
     Msg::Key(KeyEvent::new(code, KeyModifiers::NONE))
 }
 
+/// The common "s"/"/o"/"i" nav context — matches `interface_screen()` and the
+/// Detail-screen test fixtures.
+fn nav() -> busx::tui::state::NavContext {
+    busx::tui::state::NavContext {
+        service: "s".into(),
+        object: "/o".into(),
+        interface: "i".into(),
+    }
+}
+
+/// Nav context where the interface is `org.busx.Test` (the listen/call fixtures
+/// that title their action with the interface name).
+fn nav_iface_test() -> busx::tui::state::NavContext {
+    busx::tui::state::NavContext {
+        service: "s".into(),
+        object: "/o".into(),
+        interface: "org.busx.Test".into(),
+    }
+}
+
+/// Nav context reaching the Objects level (service only).
+fn nav_service(service: &str) -> busx::tui::state::NavContext {
+    busx::tui::state::NavContext {
+        service: service.into(),
+        ..Default::default()
+    }
+}
+
+/// Nav context reaching the Interfaces level (service + object).
+fn nav_object(service: &str, object: &str) -> busx::tui::state::NavContext {
+    busx::tui::state::NavContext {
+        service: service.into(),
+        object: object.into(),
+        ..Default::default()
+    }
+}
+
 fn selected_of(state: &State) -> usize {
     match state.top() {
         Screen::Service(s) => s.selected,
@@ -175,12 +212,7 @@ fn service_screen_error_state() {
             loading: false,
             error: Some("org.freedesktop.DBus.Error.ServiceUnknown: no owner".into()),
         })],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 6));
 }
@@ -234,21 +266,16 @@ fn objects_screen_renders_flat_paths() {
     );
     let paths = busx::tui::flatten_paths(&tree);
     let state = busx::tui::State {
+        nav: nav_service("org.busx.Test"),
         screens: vec![busx::tui::Screen::Objects(
             busx::tui::state::ObjectsScreen {
-                service: "org.busx.Test".into(),
                 paths,
                 selected: 0,
                 loading: false,
                 error: None,
             },
         )],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     insta::assert_snapshot!(render_to_string(&state, 48, 9));
 }
@@ -274,9 +301,8 @@ fn flatten_paths_skips_empty_objects() {
 
 // --- Objects screen behavior: Enter / load / auto-skip / error (pure `update`) ---
 
-fn objects_screen(service: &str) -> busx::tui::state::ObjectsScreen {
+fn objects_screen() -> busx::tui::state::ObjectsScreen {
     busx::tui::state::ObjectsScreen {
-        service: service.into(),
         paths: vec![],
         selected: 0,
         loading: true,
@@ -298,7 +324,7 @@ fn service_enter_pushes_objects_and_requests_fetch() {
     assert_eq!(state.screens.len(), 2, "Enter pushed an Objects screen");
     match state.top() {
         Screen::Objects(o) => {
-            assert_eq!(o.service, "org.busx.A");
+            assert_eq!(state.nav.service, "org.busx.A");
             assert!(o.loading, "new Objects screen starts loading");
             assert!(o.paths.is_empty());
         }
@@ -309,13 +335,9 @@ fn service_enter_pushes_objects_and_requests_fetch() {
 #[test]
 fn objects_loaded_populates_paths_without_skip() {
     let mut state = State {
-        screens: vec![Screen::Objects(objects_screen("org.busx.A"))],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        nav: nav_service("org.busx.A"),
+        screens: vec![Screen::Objects(objects_screen())],
+        ..Default::default()
     };
     let tree = obj("/", 1, vec![obj("/a", 1, vec![]), obj("/b", 1, vec![])]);
     let effect = update(&mut state, Msg::ObjectsLoaded(Ok(tree)));
@@ -333,13 +355,9 @@ fn objects_loaded_populates_paths_without_skip() {
 #[test]
 fn objects_loaded_single_path_auto_skips_to_interfaces() {
     let mut state = State {
-        screens: vec![Screen::Objects(objects_screen("org.busx.A"))],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        nav: nav_service("org.busx.A"),
+        screens: vec![Screen::Objects(objects_screen())],
+        ..Default::default()
     };
     // Only the root "/" exposes an object ⇒ one path ⇒ auto-skip into its interfaces.
     let tree = obj("/", 1, vec![]);
@@ -354,8 +372,8 @@ fn objects_loaded_single_path_auto_skips_to_interfaces() {
     assert_eq!(state.screens.len(), 2, "auto-skip pushed Interfaces");
     match state.top() {
         Screen::Interfaces(i) => {
-            assert_eq!(i.service, "org.busx.A");
-            assert_eq!(i.object, "/");
+            assert_eq!(state.nav.service, "org.busx.A");
+            assert_eq!(state.nav.object, "/");
             assert!(i.loading, "Interfaces pushed in loading state");
         }
         _ => panic!("top should be Interfaces after auto-skip"),
@@ -365,21 +383,16 @@ fn objects_loaded_single_path_auto_skips_to_interfaces() {
 #[test]
 fn objects_enter_drills_selected_path() {
     let mut state = busx::tui::State {
+        nav: nav_service("org.busx.A"),
         screens: vec![busx::tui::Screen::Objects(
             busx::tui::state::ObjectsScreen {
-                service: "org.busx.A".into(),
                 paths: vec!["/".into(), "/org".into(), "/org/x".into()],
                 selected: 2, // "/org/x"
                 loading: false,
                 error: None,
             },
         )],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let effect = update(&mut state, key(KeyCode::Enter));
     match effect {
@@ -390,7 +403,7 @@ fn objects_enter_drills_selected_path() {
         _ => panic!("Enter drills the selected path"),
     }
     match state.top() {
-        Screen::Interfaces(i) => assert_eq!(i.object, "/org/x"),
+        Screen::Interfaces(_) => assert_eq!(state.nav.object, "/org/x"),
         _ => panic!("pushed an Interfaces screen"),
     }
 }
@@ -398,13 +411,9 @@ fn objects_enter_drills_selected_path() {
 #[test]
 fn objects_loaded_error_sets_error_without_skip() {
     let mut state = State {
-        screens: vec![Screen::Objects(objects_screen("org.busx.A"))],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        nav: nav_service("org.busx.A"),
+        screens: vec![Screen::Objects(objects_screen())],
+        ..Default::default()
     };
     let effect = update(&mut state, Msg::ObjectsLoaded(Err("boom".into())));
     assert!(effect.is_none(), "error path requests no fetch");
@@ -420,10 +429,9 @@ fn objects_loaded_error_sets_error_without_skip() {
 #[test]
 fn interfaces_screen_lists_interfaces() {
     let state = busx::tui::State {
+        nav: nav_object("org.busx.Test", "/org/busx/Test"),
         screens: vec![busx::tui::Screen::Interfaces(
             busx::tui::state::InterfacesScreen {
-                service: "org.busx.Test".into(),
-                object: "/org/busx/Test".into(),
                 names: vec!["org.busx.Test".into()],
                 node: None,
                 selected: 0,
@@ -431,12 +439,7 @@ fn interfaces_screen_lists_interfaces() {
                 error: None,
             },
         )],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     insta::assert_snapshot!(render_to_string(&state, 44, 7));
 }
@@ -459,10 +462,9 @@ fn interfaces_loaded_hides_standard_by_default() {
          </node>",
     );
     let mut state = busx::tui::State {
+        nav: nav_object("org.busx.Test", "/o"),
         screens: vec![busx::tui::Screen::Interfaces(
             busx::tui::state::InterfacesScreen {
-                service: "org.busx.Test".into(),
-                object: "/o".into(),
                 names: vec![],
                 node: None,
                 selected: 0,
@@ -470,12 +472,7 @@ fn interfaces_loaded_hides_standard_by_default() {
                 error: None,
             },
         )],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let effect = update(
         &mut state,
@@ -510,10 +507,9 @@ fn interfaces_loaded_shows_standard_with_flag() {
          </node>",
     );
     let mut state = busx::tui::State {
+        nav: nav_object("org.busx.Test", "/o"),
         screens: vec![busx::tui::Screen::Interfaces(
             busx::tui::state::InterfacesScreen {
-                service: "org.busx.Test".into(),
-                object: "/o".into(),
                 names: vec![],
                 node: None,
                 selected: 0,
@@ -554,10 +550,9 @@ fn interfaces_loaded_single_interface_auto_skips() {
          </interface></node>",
     );
     let mut state = busx::tui::State {
+        nav: nav_object("org.busx.Test", "/o"),
         screens: vec![busx::tui::Screen::Interfaces(
             busx::tui::state::InterfacesScreen {
-                service: "org.busx.Test".into(),
-                object: "/o".into(),
                 names: vec![],
                 node: None,
                 selected: 0,
@@ -565,12 +560,7 @@ fn interfaces_loaded_single_interface_auto_skips() {
                 error: None,
             },
         )],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let effect = update(
         &mut state,
@@ -581,7 +571,7 @@ fn interfaces_loaded_single_interface_auto_skips() {
         _ => panic!("single interface ⇒ FetchProperties"),
     }
     match state.top() {
-        Screen::Interface(i) => assert_eq!(i.interface, "org.busx.Test"),
+        Screen::Interface(_) => assert_eq!(state.nav.interface, "org.busx.Test"),
         _ => panic!("auto-skip pushed an Interface screen"),
     }
 }
@@ -593,10 +583,9 @@ fn interfaces_loaded_propertyless_interface_skips_getall() {
     // interface, and some objects' GetAll rejects such interfaces. So no Effect.
     let node = introspect_node("<node><interface name=\"org.busx.Test\"/></node>");
     let mut state = busx::tui::State {
+        nav: nav_object("org.busx.Test", "/o"),
         screens: vec![busx::tui::Screen::Interfaces(
             busx::tui::state::InterfacesScreen {
-                service: "org.busx.Test".into(),
-                object: "/o".into(),
                 names: vec![],
                 node: None,
                 selected: 0,
@@ -604,12 +593,7 @@ fn interfaces_loaded_propertyless_interface_skips_getall() {
                 error: None,
             },
         )],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let effect = update(
         &mut state,
@@ -621,7 +605,7 @@ fn interfaces_loaded_propertyless_interface_skips_getall() {
     );
     match state.top() {
         Screen::Interface(i) => {
-            assert_eq!(i.interface, "org.busx.Test");
+            assert_eq!(state.nav.interface, "org.busx.Test");
             assert!(!i.loading, "no fetch in flight ⇒ not loading");
             assert!(i.properties.is_empty());
         }
@@ -634,11 +618,13 @@ use busx::tui::state::InterfaceFocus;
 #[test]
 fn interface_screen_renders_three_columns() {
     let state = busx::tui::State {
+        nav: busx::tui::state::NavContext {
+            service: "org.busx.Test".into(),
+            object: "/org/busx/Test".into(),
+            interface: "org.busx.Test".into(),
+        },
         screens: vec![busx::tui::Screen::Interface(
             busx::tui::state::InterfaceScreen {
-                service: "org.busx.Test".into(),
-                object: "/org/busx/Test".into(),
-                interface: "org.busx.Test".into(),
                 methods: vec![method("BumpVolume", ""), method("Join", "as")],
                 properties: vec![
                     ("volume".into(), "d".into(), "readwrite".into()),
@@ -657,12 +643,7 @@ fn interface_screen_renders_three_columns() {
                 error: None,
             },
         )],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     insta::assert_snapshot!(render_to_string(&state, 60, 16));
 }
@@ -671,11 +652,9 @@ fn interface_screen_renders_three_columns() {
 fn properties_loaded_fills_pretty_values() {
     use zvariant::Value;
     let mut state = busx::tui::State {
+        nav: nav(),
         screens: vec![busx::tui::Screen::Interface(
             busx::tui::state::InterfaceScreen {
-                service: "s".into(),
-                object: "/o".into(),
-                interface: "i".into(),
                 methods: vec![],
                 properties: vec![("volume".into(), "d".into(), "readwrite".into())],
                 signals: vec![],
@@ -688,12 +667,7 @@ fn properties_loaded_fills_pretty_values() {
                 error: None,
             },
         )],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let vals = vec![("volume".into(), Value::F64(0.5).try_to_owned().unwrap())];
     let effect = update(&mut state, Msg::PropertiesLoaded(Ok(vals)));
@@ -712,9 +686,6 @@ fn properties_loaded_fills_pretty_values() {
 
 fn interface_screen() -> busx::tui::state::InterfaceScreen {
     busx::tui::state::InterfaceScreen {
-        service: "s".into(),
-        object: "/o".into(),
-        interface: "i".into(),
         methods: vec![method("m1", "u"), method("m2", "")],
         properties: vec![("p1".into(), "s".into(), "read".into())],
         signals: vec![("sig1".into(), "u".into())],
@@ -737,13 +708,9 @@ fn interface_screen_shows_getall_error_scoped_to_properties() {
     let mut screen = interface_screen();
     screen.error = Some("org.freedesktop.DBus.Error.InvalidArgs: 无此接口\"i\"".into());
     let state = busx::tui::State {
+        nav: nav(),
         screens: vec![busx::tui::Screen::Interface(screen)],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let rendered = render_to_string(&state, 64, 16);
     assert!(rendered.contains("m1"), "methods still visible: {rendered}");
@@ -789,13 +756,9 @@ fn method_with_args(name: &str, args: &[(&str, &str)]) -> busx::tui::state::Meth
 #[test]
 fn interface_tab_cycles_columns() {
     let mut state = busx::tui::State {
+        nav: nav(),
         screens: vec![Screen::Interface(interface_screen())],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     // Start on the Methods column, not in the button bar.
     assert_eq!(state.top_focus(), InterfaceFocus::Methods);
@@ -831,13 +794,9 @@ fn interface_tab_leaves_buttons_before_cycling() {
     screen.in_buttons = true;
     screen.focus = InterfaceFocus::Methods;
     let mut state = busx::tui::State {
+        nav: nav(),
         screens: vec![Screen::Interface(screen)],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     assert!(top_in_buttons(&state));
     update(&mut state, key(KeyCode::Tab));
@@ -852,13 +811,9 @@ fn interface_tab_leaves_buttons_before_cycling() {
 #[test]
 fn interface_backtab_cycles_columns() {
     let mut state = busx::tui::State {
+        nav: nav(),
         screens: vec![Screen::Interface(interface_screen())],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     // Shift+Tab (BackTab) cycles the column Methods→Signals→Properties→Methods
     // (reverse of Tab). Three presses return to Methods.
@@ -873,13 +828,9 @@ fn interface_backtab_cycles_columns() {
 #[test]
 fn interface_arrows_move_within_focused_column() {
     let mut state = busx::tui::State {
+        nav: nav(),
         screens: vec![Screen::Interface(interface_screen())],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     // Methods focus, two methods, starts at 0.
     update(&mut state, key(KeyCode::Down));
@@ -911,13 +862,9 @@ fn top_in_buttons(state: &busx::tui::State) -> bool {
 #[test]
 fn interface_enter_drills_then_fires_and_esc_backs_out() {
     let mut state = busx::tui::State {
+        nav: nav(),
         screens: vec![Screen::Interface(interface_screen())],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     // Start on the Methods column, not in the button bar.
     assert_eq!(state.top_focus(), InterfaceFocus::Methods);
@@ -953,16 +900,12 @@ fn interface_enter_drills_then_fires_and_esc_backs_out() {
 #[test]
 fn interface_esc_from_column_pops_screen() {
     let mut state = busx::tui::State {
+        nav: nav(),
         screens: vec![
-            Screen::Objects(objects_screen("s")),
+            Screen::Objects(objects_screen()),
             Screen::Interface(interface_screen()),
         ],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     assert!(!top_in_buttons(&state));
     assert_eq!(state.screens.len(), 2);
@@ -988,13 +931,9 @@ fn interface_arrows_in_buttons_move_button_selected() {
     screen.button_selected = 0;
     screen.selected = [0, 0, 0];
     let mut state = busx::tui::State {
+        nav: nav(),
         screens: vec![Screen::Interface(screen)],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
 
     // In the button bar, Down moves button_selected (0→1→2, clamped at 2).
@@ -1026,13 +965,9 @@ fn button_selected(state: &busx::tui::State) -> usize {
 #[test]
 fn interface_r_requests_property_refresh() {
     let mut state = busx::tui::State {
+        nav: nav(),
         screens: vec![Screen::Interface(interface_screen())],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let effect = update(&mut state, key(KeyCode::Char('r')));
     match effect {
@@ -1078,9 +1013,9 @@ fn drill_down_auto_skips_service_to_interface() {
     app.run_loop(&mut term, events.into_iter(), |_| {}).unwrap();
     match app.state.top() {
         Screen::Interface(i) => {
-            assert_eq!(i.service, "org.busx.Test");
-            assert_eq!(i.object, "/");
-            assert_eq!(i.interface, "org.busx.Test");
+            assert_eq!(app.state.nav.service, "org.busx.Test");
+            assert_eq!(app.state.nav.object, "/");
+            assert_eq!(app.state.nav.interface, "org.busx.Test");
             assert_eq!(i.methods.len(), 1, "Ping parsed from the node");
             assert_eq!(i.properties.len(), 1, "Name parsed from the node");
         }
@@ -1102,13 +1037,9 @@ fn interface_button_enter_auto_fires_call() {
     screen.button_selected = 0;
     screen.selected = [0, 0, 0]; // m1 (signature "u", no IN-args)
     let mut state = busx::tui::State {
+        nav: nav(),
         screens: vec![Screen::Interface(screen)],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let effect = update(&mut state, key(KeyCode::Enter));
     match effect {
@@ -1144,13 +1075,9 @@ fn interface_button_enter_auto_fires_get() {
     screen.button_selected = 0;
     screen.selected = [0, 0, 0]; // p1
     let mut state = busx::tui::State {
+        nav: nav(),
         screens: vec![Screen::Interface(screen)],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let effect = update(&mut state, key(KeyCode::Enter));
     match effect {
@@ -1175,13 +1102,9 @@ fn interface_button_enter_pushes_set_detail() {
     screen.button_selected = 1; // Set
     screen.selected = [0, 0, 0];
     let mut state = busx::tui::State {
+        nav: nav(),
         screens: vec![Screen::Interface(screen)],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     update(&mut state, key(KeyCode::Enter));
     match state.top() {
@@ -1205,11 +1128,13 @@ fn interface_renders_action_button_bar() {
     // (`in_buttons = true`) → the right panel shows the buttons with `Call`
     // highlighted.
     let state = busx::tui::State {
+        nav: busx::tui::state::NavContext {
+            service: "org.busx.Test".into(),
+            object: "/org/busx/Test".into(),
+            interface: "org.busx.Test".into(),
+        },
         screens: vec![busx::tui::Screen::Interface(
             busx::tui::state::InterfaceScreen {
-                service: "org.busx.Test".into(),
-                object: "/org/busx/Test".into(),
-                interface: "org.busx.Test".into(),
                 methods: vec![method("Ping", ""), method("Echo", "ss")],
                 properties: vec![("Name".into(), "s".into(), "read".into())],
                 signals: vec![],
@@ -1222,12 +1147,7 @@ fn interface_renders_action_button_bar() {
                 error: None,
             },
         )],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     insta::assert_snapshot!(render_to_string(&state, 64, 16));
 }
@@ -1245,9 +1165,6 @@ fn interface_on_button(
     button: usize,
 ) -> busx::tui::State {
     let screen = busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
-        service: "s".into(),
-        object: "/o".into(),
-        interface: "i".into(),
         methods,
         properties: vec![],
         signals: vec![],
@@ -1260,6 +1177,7 @@ fn interface_on_button(
         error: None,
     });
     busx::tui::State {
+        nav: nav(),
         screens: vec![screen],
         quit: false,
         popup: None,
@@ -1514,12 +1432,7 @@ fn action_result_populates_result_screen() {
             cancel: None,
             op: None,
         })],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let effect = update(
         &mut state,
@@ -1542,10 +1455,8 @@ fn action_result_populates_result_screen() {
 fn call_detail_form_renders_field_and_trigger() {
     // The 1-arg call Detail, with the field focused: the field row + `[Trigger]`.
     let state = busx::tui::State {
+        nav: nav(),
         screens: vec![busx::tui::Screen::Detail(DetailScreen {
-            service: "s".into(),
-            object: "/o".into(),
-            interface: "i".into(),
             kind: ActionKind::Call {
                 method: "Add".into(),
                 signature: "u".into(),
@@ -1557,12 +1468,7 @@ fn call_detail_form_renders_field_and_trigger() {
             loading: false,
             error: None,
         })],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 8));
 }
@@ -1573,10 +1479,8 @@ fn call_detail_aligns_arg_labels() {
     // value (input) column lines up across rows regardless of name/signature
     // width.
     let state = busx::tui::State {
+        nav: nav(),
         screens: vec![busx::tui::Screen::Detail(DetailScreen {
-            service: "s".into(),
-            object: "/o".into(),
-            interface: "i".into(),
             kind: ActionKind::Call {
                 method: "Move".into(),
                 signature: "us".into(),
@@ -1588,12 +1492,7 @@ fn call_detail_aligns_arg_labels() {
             loading: false,
             error: None,
         })],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 8));
 }
@@ -1612,12 +1511,7 @@ fn call_result_renders_reply_value() {
             cancel: None,
             op: None,
         })],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 8));
 }
@@ -1629,9 +1523,6 @@ fn call_result_renders_reply_value() {
 /// action (`Get`=0 / `Set`=1).
 fn interface_on_prop_button(button: usize, sig: &str) -> busx::tui::State {
     let screen = busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
-        service: "s".into(),
-        object: "/o".into(),
-        interface: "i".into(),
         methods: vec![],
         properties: vec![("p1".into(), sig.into(), "readwrite".into())],
         signals: vec![],
@@ -1644,6 +1535,7 @@ fn interface_on_prop_button(button: usize, sig: &str) -> busx::tui::State {
         error: None,
     });
     busx::tui::State {
+        nav: nav(),
         screens: vec![screen],
         quit: false,
         popup: None,
@@ -1795,10 +1687,8 @@ fn set_trigger_pushes_result_with_typed_value() {
 fn set_detail_form_renders_one_field() {
     // A Set Detail with one field (label "s"), field focused.
     let state = busx::tui::State {
+        nav: nav(),
         screens: vec![busx::tui::Screen::Detail(DetailScreen {
-            service: "s".into(),
-            object: "/o".into(),
-            interface: "i".into(),
             kind: ActionKind::Set {
                 property: "p1".into(),
                 signature: "s".into(),
@@ -1810,12 +1700,7 @@ fn set_detail_form_renders_one_field() {
             loading: false,
             error: None,
         })],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 8));
 }
@@ -1834,12 +1719,7 @@ fn get_result_renders_value() {
             cancel: None,
             op: None,
         })],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     insta::assert_snapshot!(render_to_string(&state, 40, 8));
 }
@@ -1855,11 +1735,9 @@ fn get_result_renders_value() {
 #[test]
 fn call_action_flows_interface_to_result() {
     let state = busx::tui::State {
+        nav: nav(),
         screens: vec![busx::tui::Screen::Interface(
             busx::tui::state::InterfaceScreen {
-                service: "s".into(),
-                object: "/o".into(),
-                interface: "i".into(),
                 // One method "Add(n: u)" → signature "u", one IN-arg input field.
                 methods: vec![method_with_args("Add", &[("n", "u")])],
                 properties: vec![],
@@ -1873,12 +1751,7 @@ fn call_action_flows_interface_to_result() {
                 error: None,
             },
         )],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let events = vec![
         key(KeyCode::Enter),     // Methods column → drill into the button bar
@@ -1914,9 +1787,6 @@ fn call_action_flows_interface_to_result() {
 /// valid D-Bus interface name so the match-rule preview parses cleanly.
 fn interface_on_signal_button() -> busx::tui::State {
     let screen = busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
-        service: "s".into(),
-        object: "/o".into(),
-        interface: "org.busx.Test".into(),
         methods: vec![],
         properties: vec![],
         signals: vec![("Changed".into(), "u".into())],
@@ -1929,6 +1799,11 @@ fn interface_on_signal_button() -> busx::tui::State {
         error: None,
     });
     busx::tui::State {
+        nav: busx::tui::state::NavContext {
+            service: "s".into(),
+            object: "/o".into(),
+            interface: "org.busx.Test".into(),
+        },
         screens: vec![screen],
         quit: false,
         popup: None,
@@ -1971,9 +1846,6 @@ fn property_listen_button_auto_fires_property_listen() {
     // PropertiesChanged signal subscription that the old match-rule preview
     // described is now built internally from the target, not shown as a label.
     let screen = busx::tui::state::InterfaceScreen {
-        service: "s".into(),
-        object: "/o".into(),
-        interface: "org.busx.Test".into(),
         methods: vec![],
         properties: vec![("volume".into(), "d".into(), "readwrite".into())],
         signals: vec![],
@@ -1986,13 +1858,9 @@ fn property_listen_button_auto_fires_property_listen() {
         error: None,
     };
     let mut state = busx::tui::State {
+        nav: nav_iface_test(),
         screens: vec![busx::tui::Screen::Interface(screen)],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let effect = update(&mut state, key(KeyCode::Enter));
     match effect {
@@ -2123,12 +1991,7 @@ fn listen_result_renders_streaming_messages() {
             cancel: None,
             op: None,
         })],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     insta::assert_snapshot!(render_to_string(&state, 52, 10));
 }
@@ -2142,9 +2005,6 @@ fn method_listen_button_auto_fires_method_listen() {
     // here). The method_call match-rule preview is a Detail-form artifact and is
     // no longer shown.
     let screen = busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
-        service: "s".into(),
-        object: "/o".into(),
-        interface: "org.busx.Test".into(),
         methods: vec![method("Ping", "")],
         properties: vec![],
         signals: vec![],
@@ -2157,13 +2017,9 @@ fn method_listen_button_auto_fires_method_listen() {
         error: None,
     });
     let mut state = busx::tui::State {
+        nav: nav_iface_test(),
         screens: vec![screen],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     // 0 inputs → Enter fires straight to the Result (no Detail form).
     let effect = update(&mut state, key(KeyCode::Enter));
@@ -2205,9 +2061,6 @@ fn listen_action_flows_interface_to_streaming_result() {
     // Start on the Signals column (not yet on the button bar) so the first Enter
     // exercises the column→button-bar drill, just as a real user would.
     let screen = busx::tui::Screen::Interface(busx::tui::state::InterfaceScreen {
-        service: "s".into(),
-        object: "/o".into(),
-        interface: "org.busx.Test".into(),
         methods: vec![],
         properties: vec![],
         signals: vec![("Changed".into(), "u".into())],
@@ -2221,12 +2074,7 @@ fn listen_action_flows_interface_to_streaming_result() {
     });
     let state = busx::tui::State {
         screens: vec![screen],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
 
     // Arm a real cancel pair we keep the receiver of, so the Esc-drop assertion
@@ -2298,12 +2146,7 @@ fn listen_refused_renders_error_on_result() {
             cancel: Some(cancel_tx),
             op: None,
         })],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     update(
         &mut state,
@@ -2327,10 +2170,8 @@ use busx::tui::copy::{CopyOp, Tool, generate};
 /// A call Detail for `Add(n: u)` with "42" typed, so `c` reflects the typed value.
 fn call_detail_with_input() -> busx::tui::State {
     busx::tui::State {
+        nav: nav(),
         screens: vec![busx::tui::Screen::Detail(DetailScreen {
-            service: "s".into(),
-            object: "/o".into(),
-            interface: "i".into(),
             kind: ActionKind::Call {
                 method: "Add".into(),
                 signature: "u".into(),
@@ -2579,9 +2420,6 @@ fn popup_enter_on_unsupported_tool_is_noop() {
     // A Listen op: qdbus can't express it (returns None). Selecting qdbus and
     // pressing Enter is a no-op — the popup stays open and no Effect is emitted.
     let screen = busx::tui::Screen::Detail(DetailScreen {
-        service: "s".into(),
-        object: "/o".into(),
-        interface: "org.busx.Test".into(),
         kind: ActionKind::Listen {
             target: ListenTarget::Signal {
                 member: "Changed".into(),
@@ -2596,12 +2434,7 @@ fn popup_enter_on_unsupported_tool_is_noop() {
     });
     let mut state = busx::tui::State {
         screens: vec![screen],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     update(&mut state, key(KeyCode::Char('c')));
     // Move to qdbus (row 2).
@@ -2664,12 +2497,7 @@ fn c_on_result_without_op_is_noop() {
             cancel: None,
             op: None,
         })],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     update(&mut state, key(KeyCode::Char('c')));
     assert!(state.popup.is_none(), "no op → no popup");
@@ -2707,11 +2535,9 @@ fn copy_as_popup_renders_over_detail() {
 #[test]
 fn copy_as_capstone_loop_closes_popup_over_result() {
     let state = busx::tui::State {
+        nav: nav(),
         screens: vec![busx::tui::Screen::Interface(
             busx::tui::state::InterfaceScreen {
-                service: "s".into(),
-                object: "/o".into(),
-                interface: "i".into(),
                 methods: vec![method_with_args("Add", &[("n", "u")])],
                 properties: vec![],
                 signals: vec![],
@@ -2724,12 +2550,7 @@ fn copy_as_capstone_loop_closes_popup_over_result() {
                 error: None,
             },
         )],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let events = vec![
         key(KeyCode::Enter),     // Methods column → drill into the button bar
@@ -2770,11 +2591,9 @@ fn copy_as_capstone_loop_closes_popup_over_result() {
 fn copy_as_capstone_copies_busctl_command() {
     // Drive a call to a completed Result carrying a Call CopyOp (Add(n:u) = 42).
     let mut state = busx::tui::State {
+        nav: nav(),
         screens: vec![busx::tui::Screen::Interface(
             busx::tui::state::InterfaceScreen {
-                service: "s".into(),
-                object: "/o".into(),
-                interface: "i".into(),
                 methods: vec![method_with_args("Add", &[("n", "u")])],
                 properties: vec![],
                 signals: vec![],
@@ -2787,12 +2606,7 @@ fn copy_as_capstone_copies_busctl_command() {
                 error: None,
             },
         )],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     update(&mut state, key(KeyCode::Enter)); // Methods column → drill into the button bar
     update(&mut state, key(KeyCode::Enter)); // Call → push the Call Detail
@@ -2850,12 +2664,7 @@ fn y_copies_call_result_text_joined() {
             cancel: None,
             op: None,
         })],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let effect = update(&mut state, key(KeyCode::Char('y')));
     match effect {
@@ -2878,12 +2687,7 @@ fn y_copies_get_and_set_result_text() {
             cancel: None,
             op: None,
         })],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     match update(&mut get_state, key(KeyCode::Char('y'))) {
         Some(Effect::CopyToClipboard(text)) => assert_eq!(text, "0.5"),
@@ -2901,12 +2705,7 @@ fn y_copies_get_and_set_result_text() {
             cancel: None,
             op: None,
         })],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     match update(&mut set_state, key(KeyCode::Char('y'))) {
         Some(Effect::CopyToClipboard(text)) => assert_eq!(text, "ok"),
@@ -2931,12 +2730,7 @@ fn y_copies_streaming_result_text_joined() {
             cancel: None,
             op: None,
         })],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let effect = update(&mut state, key(KeyCode::Char('y')));
     match effect {
@@ -2963,12 +2757,7 @@ fn y_on_result_without_result_is_noop() {
             cancel: None,
             op: None,
         })],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let effect = update(&mut state, key(KeyCode::Char('y')));
     assert!(effect.is_none(), "no result yet → nothing to copy");
@@ -2988,12 +2777,7 @@ fn y_on_result_with_error_is_noop() {
             cancel: None,
             op: None,
         })],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let effect = update(&mut state, key(KeyCode::Char('y')));
     assert!(effect.is_none(), "error showing → don't copy error text");
@@ -3135,19 +2919,13 @@ fn mouse_click_selects_objects_row() {
     let mut state = busx::tui::State {
         screens: vec![busx::tui::Screen::Objects(
             busx::tui::state::ObjectsScreen {
-                service: "s".into(),
                 paths: vec!["/a".into(), "/b".into(), "/c".into()],
                 selected: 0,
                 loading: false,
                 error: None,
             },
         )],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     click(&mut state, &ClickTarget::ObjectsRow(1), 40, 7);
     match state.top() {
@@ -3159,10 +2937,9 @@ fn mouse_click_selects_objects_row() {
 #[test]
 fn mouse_click_selects_interfaces_row() {
     let mut state = busx::tui::State {
+        nav: nav_object("s", "/o"),
         screens: vec![busx::tui::Screen::Interfaces(
             busx::tui::state::InterfacesScreen {
-                service: "s".into(),
-                object: "/o".into(),
                 names: vec!["i0".into(), "i1".into(), "i2".into()],
                 node: None,
                 selected: 0,
@@ -3170,12 +2947,7 @@ fn mouse_click_selects_interfaces_row() {
                 error: None,
             },
         )],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     click(&mut state, &ClickTarget::InterfacesRow(2), 44, 7);
     match state.top() {
@@ -3192,13 +2964,9 @@ fn mouse_click_on_interface_method_row_switches_focus() {
     // MethodRow(1) moves the selection to m2 AND keeps focus on Methods with the
     // focus out of the button bar.
     let mut state = busx::tui::State {
+        nav: nav(),
         screens: vec![Screen::Interface(interface_screen())],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     click(&mut state, &ClickTarget::MethodRow(1), 64, 16);
     match state.top() {
@@ -3218,13 +2986,9 @@ fn mouse_click_on_action_button_fires() {
     // IN-args, so the fire auto-skips the Detail form and pushes a Result.
     // Assert the stack grew and landed on a Call Result for "m1".
     let mut state = busx::tui::State {
+        nav: nav(),
         screens: vec![Screen::Interface(interface_screen())],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let before = state.screens.len();
     click(&mut state, &ClickTarget::ActionButton(0), 64, 16);
@@ -3321,12 +3085,7 @@ fn mouse_scroll_on_result_changes_scroll() {
             cancel: None,
             op: None,
         })],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     // ScrollDown twice: 0 → 1 → 2.
     update(&mut state, scroll_msg(MouseEventKind::ScrollDown));
@@ -3381,19 +3140,13 @@ fn mouse_scroll_moves_objects_selection() {
     let mut state = busx::tui::State {
         screens: vec![busx::tui::Screen::Objects(
             busx::tui::state::ObjectsScreen {
-                service: "s".into(),
                 paths: vec!["/a".into(), "/b".into(), "/c".into(), "/d".into()],
                 selected: 0,
                 loading: false,
                 error: None,
             },
         )],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     update(&mut state, scroll_msg(MouseEventKind::ScrollDown));
     update(&mut state, scroll_msg(MouseEventKind::ScrollDown));
@@ -3502,9 +3255,6 @@ fn call_as_arg_shell_splits_field_value() {
     use busx::tui::state::{ActionKind, DetailFocus};
     let mut state = busx::tui::State {
         screens: vec![busx::tui::Screen::Detail(busx::tui::state::DetailScreen {
-            service: "s".into(),
-            object: "/o".into(),
-            interface: "i".into(),
             kind: ActionKind::Call {
                 method: "M".into(),
                 signature: "as".into(),
@@ -3516,12 +3266,7 @@ fn call_as_arg_shell_splits_field_value() {
             loading: false,
             error: None,
         })],
-        quit: false,
-        popup: None,
-        click_targets: Vec::new(),
-        help_open: false,
-        bus: Bus::Session,
-        show_standard_interfaces: false,
+        ..Default::default()
     };
     let effect = update(&mut state, key(KeyCode::Enter));
     match effect {

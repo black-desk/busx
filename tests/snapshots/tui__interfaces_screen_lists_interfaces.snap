@@ -2,7 +2,7 @@
 source: tests/tui.rs
 expression: "render_to_string(&state, 44, 7)"
 ---
-"/org/busx/Test                              "
+"org.busx.Test > /org/busx/Test              "
 "┌Interfaces────────────────────────────────┐"
 "│org.busx.Test                             │"
 "│                                          │"

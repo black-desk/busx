@@ -10,8 +10,24 @@ use crate::dbus::types::{ObjectNode, ServiceInfo};
 use crate::tui::copy::{CopyOp, Tool};
 use ratatui::layout::Rect;
 
+/// The navigation context: the service / object / interface the user has
+/// drilled into. Each field is set as the user descends one level (service at
+/// the Objects screen, object at Interfaces, interface at Interface) and
+/// cleared on the way back up, so the context always reflects the current
+/// screen's depth. This is the single source of truth — screens carry only view
+/// state, never these strings (which is what removes the clone-on-push dance in
+/// `update` and lets `render`/copy-op read one consistent context).
+#[derive(Clone, Debug, Default)]
+pub struct NavContext {
+    pub service: String,
+    pub object: String,
+    pub interface: String,
+}
+
 #[derive(Default)]
 pub struct State {
+    /// The accumulated service/object/interface of the current drill path.
+    pub nav: NavContext,
     /// Navigation stack; the last element is the currently-shown screen.
     /// Never empty (the initial Service screen is pushed at construction).
     pub screens: Vec<Screen>,
@@ -91,19 +107,18 @@ pub struct ServiceScreen {
 
 /// The object paths of one service, shown as a flat list (d-feet style): each
 /// row is a full path like `/org/freedesktop/DBus` — multi-level paths expanded
-/// rather than collapsed into a tree.
+/// rather than collapsed into a tree. The service itself lives in
+/// [`State::nav`].
 pub struct ObjectsScreen {
-    pub service: String,
     pub paths: Vec<String>,
     pub selected: usize,
     pub loading: bool,
     pub error: Option<String>,
 }
 
-/// The non-standard interfaces of one object.
+/// The non-standard interfaces of one object. The service/object live in
+/// [`State::nav`].
 pub struct InterfacesScreen {
-    pub service: String,
-    pub object: String,
     pub names: Vec<String>,
     /// Cached introspection of this object — the source of `names` now and of the
     /// interface members (methods/properties/signals) when drilling in.
@@ -124,10 +139,8 @@ pub struct MethodMember {
 
 /// One interface: methods / properties (with values) / signals, three columns,
 /// plus a right-side action-button bar for the focused column's selected member.
+/// The service/object/interface live in [`State::nav`].
 pub struct InterfaceScreen {
-    pub service: String,
-    pub object: String,
-    pub interface: String,
     pub methods: Vec<MethodMember>,
     /// (name, signature, access) per property.
     pub properties: Vec<(String, String, String)>,
@@ -157,10 +170,8 @@ pub enum InterfaceFocus {
 }
 
 /// An action form. Call = one input per IN-arg; Set = one input; Get = no inputs.
+/// The service/object/interface live in [`State::nav`].
 pub struct DetailScreen {
-    pub service: String,
-    pub object: String,
-    pub interface: String,
     pub kind: ActionKind,
     /// One `tui-input` per form field (call args / set value). Empty for get /
     /// zero-arg calls.
@@ -225,6 +236,7 @@ impl State {
     /// A Service screen in the loading state (the TUI's initial screen).
     pub fn loading_service() -> Self {
         State {
+            nav: NavContext::default(),
             screens: vec![Screen::Service(ServiceScreen {
                 services: vec![],
                 selected: 0,
@@ -243,6 +255,7 @@ impl State {
     /// Build a State with a single populated Service screen (tests / default).
     pub fn service(services: Vec<ServiceInfo>) -> Self {
         State {
+            nav: NavContext::default(),
             screens: vec![Screen::Service(ServiceScreen {
                 services,
                 selected: 0,
@@ -265,6 +278,29 @@ impl State {
 
     pub fn top_mut(&mut self) -> &mut Screen {
         self.screens.last_mut().expect("screen stack never empty")
+    }
+
+    /// Push a screen onto the navigation stack.
+    pub fn push_screen(&mut self, screen: Screen) {
+        self.screens.push(screen);
+    }
+
+    /// Pop the top screen, clearing the nav field it owns (service at Objects,
+    /// object at Interfaces, interface at Interface). Detail/Result own no nav
+    /// field (they sit above Interface). Returns `false` at the root screen,
+    /// where there is nothing to pop — the caller then quits instead.
+    pub fn pop_screen(&mut self) -> bool {
+        if self.screens.len() <= 1 {
+            return false;
+        }
+        match self.screens.last() {
+            Some(Screen::Objects(_)) => self.nav.service.clear(),
+            Some(Screen::Interfaces(_)) => self.nav.object.clear(),
+            Some(Screen::Interface(_)) => self.nav.interface.clear(),
+            _ => {}
+        }
+        self.screens.pop();
+        true
     }
 
     /// The focus of the top Interface screen (test convenience).
