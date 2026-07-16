@@ -31,7 +31,7 @@ use zbus_xml::{ArgDirection, Node};
 use crate::error::Result;
 
 /// Names of subcommands that take a service as their first positional.
-const SERVICE_SUBS: &[&str] = &["call", "get", "set", "introspect", "tree", "monitor"];
+const SERVICE_SUBS: &[&str] = &["call", "get", "set", "introspect", "monitor"];
 
 /// Entry point invoked very early in `main`. If `COMPLETE=<shell>` is set the
 /// shell is asking us to produce candidates (or the registration script); we do
@@ -122,7 +122,6 @@ fn command() -> Command {
                 .arg(flag("unique"))
                 .arg(flag("acquired"))
                 .arg(flag("activatable")),
-            subcommand("tree").arg(positional("service", Service)),
             subcommand("introspect")
                 .arg(positional("service", Service))
                 .arg(positional("object", Path))
@@ -212,7 +211,6 @@ const Property: Option<Kind> = Some(Kind::Property);
 fn subcommand(name: &'static str) -> Command {
     Command::new(name).about(match name {
         "list" => "List service names on the bus",
-        "tree" => "Show the object path tree of a service",
         "introspect" => "Show interfaces/methods/signals/properties of an object",
         "call" => "Call a method",
         "get" => "Get properties",
@@ -381,7 +379,6 @@ fn parse_args() -> Option<ParsedArgs> {
                         "get" => "get",
                         "set" => "set",
                         "introspect" => "introspect",
-                        "tree" => "tree",
                         "monitor" => "monitor",
                         _ => "call",
                     });

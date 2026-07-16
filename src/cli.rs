@@ -69,8 +69,6 @@ pub enum Command {
         #[arg(long)]
         activatable: bool,
     },
-    /// Show the object path tree of a service.
-    Tree { service: String },
     /// Show interfaces/methods/signals/properties of an object.
     Introspect {
         service: String,

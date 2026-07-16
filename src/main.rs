@@ -164,9 +164,6 @@ fn run_command(
             &object,
             interface.as_deref(),
         ),
-        Command::Tree { service } => {
-            ops::tree::run(user, system, address.as_deref(), json, &service)
-        }
         Command::Monitor {
             services,
             interface,
