@@ -9,7 +9,7 @@ use crate::error::{Error, Result};
 use zbus_xml::Node;
 
 /// The interface whose `Introspect` method we call. Every object implements it.
-const INTROSPECTABLE: &str = "org.freedesktop.DBus.Introspectable";
+pub const INTROSPECTABLE: &str = "org.freedesktop.DBus.Introspectable";
 
 /// The standard D-Bus interfaces every object implements (`Properties`,
 /// `Introspectable`, `Peer`). They're noise when browsing, so the TUI hides
