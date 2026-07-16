@@ -50,7 +50,7 @@ migrated.
   ~65-clone borrow dance in `update.rs` (pushing a child screen no longer copies
   the parent's context strings).
 
-## C. Effects & logging (do together — the logging sink is the prerequisite)
+## C. Effects & logging (do together — the logging sink is the prerequisite) — DONE (#34)
 
 ### Logging system
 
@@ -157,6 +157,5 @@ migrated.
 
 ## Suggested order
 
-C (logging first) → B → D / E. (A is done, #33.) C untangles the monitor /
-clipboard / error / logging knot; B's state refactor is cleaner once that's
-done; D and E are independent cleanups.
+B → D / E. (A done in #33; C done in #34.) B's state refactor is next; D and
+E are independent cleanups.
