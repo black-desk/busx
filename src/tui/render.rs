@@ -88,7 +88,7 @@ fn render_breadcrumb(frame: &mut Frame, area: Rect, state: &State) {
         parts.push(nav.interface.clone());
     }
     // The action screens (Detail/Result) layer their own label on top.
-    for screen in &state.screens {
+    for screen in state.screens() {
         if let Some(label) = screen_action_label(screen) {
             parts.push(label);
         }

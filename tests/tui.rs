@@ -321,7 +321,7 @@ fn service_enter_pushes_objects_and_requests_fetch() {
         Some(Effect::FetchObjects(s)) => assert_eq!(s, "org.busx.A"),
         _ => panic!("Enter should request FetchObjects"),
     }
-    assert_eq!(state.screens.len(), 2, "Enter pushed an Objects screen");
+    assert_eq!(state.screens().len(), 2, "Enter pushed an Objects screen");
     match state.top() {
         Screen::Objects(o) => {
             assert_eq!(state.nav.service, "org.busx.A");
@@ -369,7 +369,7 @@ fn objects_loaded_single_path_auto_skips_to_interfaces() {
         }
         _ => panic!("single path ⇒ FetchInterfaces"),
     }
-    assert_eq!(state.screens.len(), 2, "auto-skip pushed Interfaces");
+    assert_eq!(state.screens().len(), 2, "auto-skip pushed Interfaces");
     match state.top() {
         Screen::Interfaces(i) => {
             assert_eq!(state.nav.service, "org.busx.A");
@@ -869,19 +869,23 @@ fn interface_enter_drills_then_fires_and_esc_backs_out() {
     // Start on the Methods column, not in the button bar.
     assert_eq!(state.top_focus(), InterfaceFocus::Methods);
     assert!(!top_in_buttons(&state));
-    assert_eq!(state.screens.len(), 1);
+    assert_eq!(state.screens().len(), 1);
 
     // Enter from the column → drill into the button bar (no Detail pushed).
     let effect = update(&mut state, key(KeyCode::Enter));
     assert!(effect.is_none(), "drill-Enter fires nothing");
     assert!(top_in_buttons(&state), "Enter set in_buttons = true");
-    assert_eq!(state.screens.len(), 1, "drill-Enter does not push a screen");
+    assert_eq!(
+        state.screens().len(),
+        1,
+        "drill-Enter does not push a screen"
+    );
 
     // Esc inside the button bar → back out, screen NOT popped.
     update(&mut state, key(KeyCode::Esc));
     assert!(!top_in_buttons(&state), "Esc backed out of the button bar");
     assert_eq!(
-        state.screens.len(),
+        state.screens().len(),
         1,
         "Esc from the button bar does not pop"
     );
@@ -892,7 +896,11 @@ fn interface_enter_drills_then_fires_and_esc_backs_out() {
     assert!(top_in_buttons(&state));
     let effect = update(&mut state, key(KeyCode::Enter)); // fire Call (m1, 0 inputs)
     assert!(effect.is_some(), "fire-Enter returns the Call effect");
-    assert_eq!(state.screens.len(), 2, "fire-Enter pushed a Result screen");
+    assert_eq!(
+        state.screens().len(),
+        2,
+        "fire-Enter pushed a Result screen"
+    );
     assert!(matches!(state.top(), Screen::Result(_)));
 }
 
@@ -908,10 +916,10 @@ fn interface_esc_from_column_pops_screen() {
         ..Default::default()
     };
     assert!(!top_in_buttons(&state));
-    assert_eq!(state.screens.len(), 2);
+    assert_eq!(state.screens().len(), 2);
     update(&mut state, key(KeyCode::Esc));
     assert_eq!(
-        state.screens.len(),
+        state.screens().len(),
         1,
         "Esc from a column pops the Interface screen"
     );
@@ -2390,13 +2398,13 @@ fn popup_esc_closes_without_popping_the_screen() {
     // Esc on the popup closes it but must NOT pop the underlying screen — the
     // popup routing runs before the global Esc handler. The Detail stays on top.
     let mut state = call_detail_with_input();
-    let depth_before = state.screens.len();
+    let depth_before = state.screens().len();
     update(&mut state, key(KeyCode::Char('c')));
     assert!(state.popup.is_some());
     update(&mut state, key(KeyCode::Esc));
     assert!(state.popup.is_none(), "Esc closed the popup");
     assert_eq!(
-        state.screens.len(),
+        state.screens().len(),
         depth_before,
         "Esc did not pop the screen"
     );
@@ -2990,10 +2998,10 @@ fn mouse_click_on_action_button_fires() {
         screens: vec![Screen::Interface(interface_screen())],
         ..Default::default()
     };
-    let before = state.screens.len();
+    let before = state.screens().len();
     click(&mut state, &ClickTarget::ActionButton(0), 64, 16);
     assert_eq!(
-        state.screens.len(),
+        state.screens().len(),
         before + 1,
         "ActionButton click pushed a Result"
     );
@@ -3233,7 +3241,7 @@ fn mouse_click_on_unrendered_rect_is_noop() {
     // A left-click that hits no recorded Rect does nothing (no panic, no state
     // change). Guards the hit-test's `None` path.
     let mut state = State::service(vec![svc("a", None, None)]);
-    let before = state.screens.len();
+    let before = state.screens().len();
     update(
         &mut state,
         Msg::Mouse(MouseEvent {
@@ -3244,7 +3252,7 @@ fn mouse_click_on_unrendered_rect_is_noop() {
             modifiers: KeyModifiers::NONE,
         }),
     );
-    assert_eq!(state.screens.len(), before, "missed click is a no-op");
+    assert_eq!(state.screens().len(), before, "missed click is a no-op");
     assert_eq!(selected_of(&state), 0, "selection unchanged");
 }
 
