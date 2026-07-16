@@ -112,5 +112,6 @@ pub enum Command {
         timeout: Option<String>,
     },
     /// Generate shell completion script.
+    #[command(hide = true)]
     Completion { shell: clap_complete::Shell },
 }
