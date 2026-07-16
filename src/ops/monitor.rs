@@ -17,7 +17,7 @@
 //!
 //! * `--signals` (and the default "all messages" mode): a D-Bus match rule is
 //!   built from the convenience flags and `--match`, then either registered via
-//!   `MessageIterator::for_match_rule` (signal subscription) or handed to
+//!   `MessageStream::for_match_rule` (signal subscription) or handed to
 //!   [`org.freedesktop.DBus.Monitoring.BecomeMonitor`].
 //! * Default (no `--signals`): the connection is converted into a bus monitor
 //!   via `BecomeMonitor`, so it sees every message crossing the bus
@@ -26,13 +26,14 @@
 //!   some bus configurations; when that happens we fall back to a signal-only
 //!   match rule so the command degrades gracefully instead of hard-failing.
 
-use crate::conn::connect;
+use crate::dbus;
 use crate::error::{Error, Result};
+use futures::future::OptionFuture;
+use futures::{FutureExt, StreamExt};
 use serde_json::{Value as Json, json};
 use std::io::{BufWriter, Write};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use zbus::MatchRule;
-use zbus::blocking::MessageIterator;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use zbus::MessageStream;
 use zbus::message::{Flags, Type};
 use zvariant::Structure;
 
@@ -173,111 +174,105 @@ pub fn run(
     limit_messages: Option<u64>,
     timeout: Option<&str>,
 ) -> Result<()> {
-    let conn = connect(user, system, address, verbose)?;
+    async_global_executor::block_on(async {
+        let conn = dbus::conn::connect(user, system, address, verbose).await?;
 
-    let rule = crate::dbus::monitor::build_match_rule(
-        interface.as_deref(),
-        member.as_deref(),
-        path.as_deref(),
-        sender.as_deref(),
-        raw_match.as_deref(),
-        if signals { Some(Type::Signal) } else { None },
-    )?;
+        let rule = crate::dbus::monitor::build_match_rule(
+            interface.as_deref(),
+            member.as_deref(),
+            path.as_deref(),
+            sender.as_deref(),
+            raw_match.as_deref(),
+            if signals { Some(Type::Signal) } else { None },
+        )?;
 
-    // In signal-only mode we subscribe via the match rule. In all-messages
-    // mode we try BecomeMonitor (which sees method_call/return/error too);
-    // if the bus refuses it (some daemons/configs disallow monitoring) we
-    // fall back to a signal subscription so the command still works.
-    if signals {
-        // Pure signal subscription; for_match_rule does the right thing.
-        let iter = MessageIterator::for_match_rule(rule.clone(), &conn, None)?;
-        stream(iter, &services, limit_messages, timeout, json)
-    } else {
-        match become_monitor(&conn, Some(&rule)) {
-            Ok(()) => {
-                let iter = MessageIterator::from(&conn);
-                stream(iter, &services, limit_messages, timeout, json)
-            }
-            Err(e) => {
-                if verbose {
-                    eprintln!(
-                        "busx: warning: BecomeMonitor failed ({e}); \
-                         falling back to signal subscription"
-                    );
+        // In signal-only mode we subscribe via the match rule. In all-messages
+        // mode we try BecomeMonitor (which sees method_call/return/error too);
+        // if the bus refuses it (some daemons/configs disallow monitoring) we
+        // fall back to a signal subscription so the command still works.
+        let stream = if signals {
+            // Pure signal subscription; for_match_rule does the right thing.
+            MessageStream::for_match_rule(rule.clone(), &conn, None).await?
+        } else {
+            match dbus::monitor::become_monitor(&conn, Some(&rule)).await {
+                Ok(()) => MessageStream::from(&conn),
+                Err(e) => {
+                    if verbose {
+                        eprintln!(
+                            "busx: warning: BecomeMonitor failed ({e}); \
+                             falling back to signal subscription"
+                        );
+                    }
+                    MessageStream::for_match_rule(rule.clone(), &conn, None).await?
                 }
-                let iter = MessageIterator::for_match_rule(rule.clone(), &conn, None)?;
-                stream(iter, &services, limit_messages, timeout, json)
             }
-        }
-    }
+        };
+
+        stream_msgs(stream, &services, limit_messages, timeout, json).await
+    })
 }
 
-/// Ask the bus to send us every message matching `rule` (or all messages if
-/// `rule` is `None`). After this returns the connection is a monitor: it can
-/// only receive messages, not send them.
-fn become_monitor(conn: &zbus::blocking::Connection, rule: Option<&MatchRule<'_>>) -> Result<()> {
-    let proxy = zbus::blocking::fdo::MonitoringProxy::new(conn)?;
-    let rules: Vec<MatchRule<'_>> = match rule {
-        Some(r) => vec![r.clone()],
-        None => vec![],
-    };
-    // The generated blocking proxy consumes `self` here (mirroring the async
-    // trait that takes `self`): once BecomeMonitor succeeds the proxy is
-    // useless anyway.
-    proxy.become_monitor(&rules, 0)?;
-    Ok(())
-}
-
-/// Drive the iterator, printing each message. In JSON mode that's NDJSON (one
+/// Drive the stream, printing each message. In JSON mode that's NDJSON (one
 /// object per line); in human mode a multi-line block per message. Honours
-/// `--limit-messages` and `--timeout`; whichever triggers first ends the stream.
-fn stream(
-    iter: MessageIterator,
+/// `--limit-messages` and `--timeout`; whichever triggers first ends the
+/// stream.
+///
+/// `--timeout` is a wall-clock backstop: the stream is raced against a timer
+/// future via `select!`, so the timeout fires even when no matching traffic
+/// arrives. (The old blocking `MessageIterator::next()` dead-waited, so its
+/// deadline check — inside the loop body — only ran after a message landed,
+/// making `--timeout` hang forever on an idle bus.)
+async fn stream_msgs(
+    stream: MessageStream,
     services: &[String],
     limit: Option<u64>,
     timeout: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    // `--timeout` is a wall-clock backstop: even with no matching traffic we
-    // exit once it elapses. The iterator blocks between messages, so the
-    // deadline is re-checked at the top of each iteration.
-    let deadline = timeout
-        .map(parse_duration)
-        .transpose()?
-        .map(|d| Instant::now() + d);
+    let deadline = timeout.map(parse_duration).transpose()?;
 
     let stdout = std::io::stdout();
     let mut out = BufWriter::new(stdout.lock());
 
-    let mut count: u64 = 0;
-    for msg in iter {
-        if deadline.is_some_and(|d| Instant::now() >= d) {
-            break;
-        }
-        let msg = match msg {
-            Ok(m) => m,
-            Err(e) => {
-                // A single malformed message shouldn't kill the stream.
-                eprintln!("busx: warning: dropped message: {e}");
-                continue;
-            }
-        };
-        if !matches_service(&msg, services) {
-            continue;
-        }
-        if json {
-            let line = serde_json::to_string(&msg_to_json(&msg))?;
-            writeln!(out, "{line}")?;
-        } else {
-            write!(out, "{}", crate::dbus::monitor::format_message(&msg))?;
-        }
-        out.flush()?; // line-buffered so a pipe consumer sees each line promptly
+    // `OptionFuture` wraps `Option<Future>`: `Some(timer)` resolves when the
+    // timeout elapses and breaks the loop; `None` (no `--timeout`) is pending
+    // forever, so the `select!` arm never fires — one loop body covers both
+    // cases. The blocking `become_monitor` that used to live here is gone; the
+    // async `dbus::monitor::become_monitor` is reused instead.
+    let mut timer = OptionFuture::from(deadline.map(async_io::Timer::after)).fuse();
+    let mut stream = stream.fuse();
 
-        count += 1;
-        if let Some(n) = limit {
-            if count >= n {
-                break;
-            }
+    let mut count: u64 = 0;
+    loop {
+        futures::select! {
+            msg = stream.next() => match msg {
+                None => break,
+                Some(Err(e)) => {
+                    // A single malformed message shouldn't kill the stream.
+                    eprintln!("busx: warning: dropped message: {e}");
+                    continue;
+                }
+                Some(Ok(msg)) => {
+                    if !matches_service(&msg, services) {
+                        continue;
+                    }
+                    if json {
+                        let line = serde_json::to_string(&msg_to_json(&msg))?;
+                        writeln!(out, "{line}")?;
+                    } else {
+                        write!(out, "{}", crate::dbus::monitor::format_message(&msg))?;
+                    }
+                    out.flush()?; // line-buffered so a pipe consumer sees each line promptly
+
+                    count += 1;
+                    if let Some(n) = limit {
+                        if count >= n {
+                            break;
+                        }
+                    }
+                }
+            },
+            _ = timer => break, // `--timeout` elapsed
         }
     }
     Ok(())

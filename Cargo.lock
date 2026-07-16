@@ -360,6 +360,7 @@ dependencies = [
  "arboard",
  "assert_cmd",
  "async-global-executor",
+ "async-io",
  "clap",
  "clap_complete",
  "crossterm",
