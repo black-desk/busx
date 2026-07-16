@@ -32,7 +32,7 @@ shows blocking was the original; the async core was added later for the TUI and
 the two blocking consumers (`complete.rs`, `ops/monitor.rs`) were never
 migrated.
 
-## B. TUI state — split domain context from view state
+## B. TUI state — split domain context from view state — DONE (#35)
 
 - `State` holds a single `NavContext { service, object, interface }` — the
   single source of truth for the navigation context.
@@ -157,5 +157,14 @@ migrated.
 
 ## Suggested order
 
-B → D / E. (A done in #33; C done in #34.) B's state refactor is next; D and E
-are independent cleanups.
+D / E. (A done #33; C done #34; B done #35.) D and E are the remaining
+independent cleanups.
+
+## Deferred micro-items
+
+- **B (residual): make `State::screens` private + NonEmpty invariant.** The
+  context split (NavContext single source of truth, screens stripped of
+  service/object/interface, clone-dance removed) is done (#35); the field is
+  still `pub` because integration tests build `State` literals directly.
+  Privatizing it needs those ~60 fixtures moved to a constructor. `pop_screen`
+  already refuses at the root, so the never-empty invariant holds in practice.
