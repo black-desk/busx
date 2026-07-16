@@ -306,3 +306,75 @@ fn call_renders_pipe_fd() {
         "readlink of a pipe end is pipe:[ino]: {target}"
     );
 }
+
+/// A byte array (`ay`) renders as a Rust-style bytestring in human output.
+#[test]
+fn call_renders_ay_bytestring() {
+    let addr = common::bus().address.clone();
+    let out = Command::cargo_bin("busx")
+        .unwrap()
+        .args([
+            "--address",
+            &addr,
+            "call",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "MakeBytes",
+            "",
+        ])
+        .ok()
+        .unwrap();
+    let s = String::from_utf8(out.stdout).expect("utf8");
+    assert!(s.contains("b\"hello\""), "ay renders as a bytestring: {s}");
+}
+
+/// Non-printable bytes in `ay` are `\xNN`-escaped.
+#[test]
+fn call_renders_ay_nonprintable() {
+    let addr = common::bus().address.clone();
+    let out = Command::cargo_bin("busx")
+        .unwrap()
+        .args([
+            "--address",
+            &addr,
+            "call",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "MakeRawBytes",
+            "",
+        ])
+        .ok()
+        .unwrap();
+    let s = String::from_utf8(out.stdout).expect("utf8");
+    assert!(
+        s.contains("b\"\\x00\\xabc\\xff\""),
+        "ay non-printable escapes: {s}"
+    );
+}
+
+/// The JSON path keeps `ay` as a type-tagged array of bytes (unchanged).
+#[test]
+fn call_ay_json_stays_tagged_bytes() {
+    let addr = common::bus().address.clone();
+    let out = Command::cargo_bin("busx")
+        .unwrap()
+        .args([
+            "--json",
+            "--address",
+            &addr,
+            "call",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "MakeBytes",
+            "",
+        ])
+        .ok()
+        .unwrap();
+    let v: Value = serde_json::from_slice(&out.stdout).expect("valid json");
+    assert_eq!(v[0]["type"], "ay", "ay tags the array: {v}");
+    assert_eq!(v[0]["data"][0]["type"], "y", "elements stay tagged bytes");
+    assert_eq!(v[0]["data"][0]["data"], 104, "'h' as a bare byte");
+}

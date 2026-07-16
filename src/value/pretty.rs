@@ -13,7 +13,8 @@
 //! - Bool → `true`/`false`.
 //! - Str / ObjectPath / Signature → `"..."` (with `"` and `\` escaped).
 //! - Variant → `<{inner_type_sig} {pretty(inner)}>` (e.g. `<d 0.5>`).
-//! - Array → `[e0, e1, ...]`.
+//! - Array → `[e0, e1, ...]`; a byte array (`ay`) → `b"..."` (printable ASCII
+//!   verbatim, else `\xNN`).
 //! - Dict → `{k0: v0, k1: v1, ...}` (works for every key type — the human form
 //!   has no JSON object-key limit, so even `a{uu}` renders as `{1:10, 2:20}`).
 //! - Structure → `(f0, f1, ...)`.
@@ -42,7 +43,24 @@ pub fn pretty(v: &Value<'_>) -> String {
         // `value_signature()` gives the enclosed type (e.g. `d`), whereas the
         // trait `DynamicType::signature` would always return `v`.
         Value::Value(inner) => format!("<{} {}>", inner.value_signature(), pretty(inner)),
-        Value::Array(a) => bracket('[', ']', a.inner().iter().map(pretty)),
+        Value::Array(a) => {
+            // A byte array (`ay`) renders as a Rust-style bytestring
+            // (`b"..."`): printable ASCII verbatim, the rest `\xNN`. Other
+            // arrays stay `[e0, e1, ...]`.
+            if a.element_signature().to_string() == "y" {
+                let bytes: Vec<u8> = a
+                    .inner()
+                    .iter()
+                    .filter_map(|v| match v {
+                        Value::U8(b) => Some(*b),
+                        _ => None,
+                    })
+                    .collect();
+                format_bytestring(&bytes)
+            } else {
+                bracket('[', ']', a.inner().iter().map(pretty))
+            }
+        }
         Value::Structure(s) => bracket('(', ')', s.fields().iter().map(pretty)),
         Value::Dict(d) => bracket(
             '{',
@@ -77,6 +95,24 @@ fn format_fd(info: &crate::value::fdinfo::FdInfo) -> String {
         s.push_str(&format!(" {note}"));
     }
     s.push('>');
+    s
+}
+
+/// Render a byte array (`ay`) as a Rust-style bytestring `b"..."`: printable
+/// ASCII (0x20–0x7e) is shown verbatim, every other byte as lowercase `\xNN`,
+/// and `"` / `\` are escaped — mirroring Rust's own byte-string literal syntax.
+fn format_bytestring(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() + 3);
+    s.push_str("b\"");
+    for &b in bytes {
+        match b {
+            b'"' => s.push_str("\\\""),
+            b'\\' => s.push_str("\\\\"),
+            0x20..=0x7e => s.push(b as char),
+            _ => s.push_str(&format!("\\x{b:02x}")),
+        }
+    }
+    s.push('"');
     s
 }
 
