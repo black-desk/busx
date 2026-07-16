@@ -101,25 +101,20 @@ pub fn run(
         async_global_executor::block_on(dbus::conn::connect_with_bus(user, system, address))?;
     let (tx, rx) = flume::unbounded::<Msg>();
     let (user_arg, system_arg, address_arg) = (user, system, address.map(String::from));
-    // `CopyToClipboard` is NOT a dbus op — intercept it before `run_effect`,
-    // write via the most reliable available method, and send the result back as
-    // `Msg::ClipboardResult` so it surfaces in the popup. NEVER prints to the
-    // TTY (the TUI runs in raw mode + the alternate screen — any stray stdout
-    // /stderr write corrupts the display). The clipboard tooling lives ONLY here
-    // (never in `update`/`render`/tests).
-    let on_effect = move |effect: Effect| match effect {
-        Effect::CopyToClipboard(s) => {
-            let res = write_to_clipboard(&s);
-            let _ = tx.send(Msg::ClipboardResult(res));
-        }
-        other => run_effect(
-            other,
+    // Every effect — including `CopyToClipboard` — is dispatched by `run_effect`
+    // on a background thread/task, so the event loop never blocks on IO. NEVER
+    // print from any of these: the TUI runs in raw mode + the alternate screen,
+    // and any stray stdout/stderr write corrupts the display. The clipboard
+    // tooling lives ONLY here (never in `update`/`render`/tests).
+    let on_effect = move |effect: Effect| {
+        run_effect(
+            effect,
             conn.clone(),
             tx.clone(),
             user_arg,
             system_arg,
             address_arg.as_deref(),
-        ),
+        )
     };
     on_effect(Effect::FetchServices); // initial service-list fetch
 
@@ -396,11 +391,17 @@ fn run_effect(
             })
             .detach();
         }
-        // `CopyToClipboard` is intercepted by the `on_effect` closure in `run`
-        // before it reaches here — `run_effect` never sees it (it has no bus
-        // work). This arm exists only for match exhaustiveness; reaching it
-        // would be a bug in the closure's routing, so it's a quiet no-op.
-        Effect::CopyToClipboard(_) => {}
+        // Clipboard write is an inherently blocking operation (subprocess +
+        // compositor round-trip), so run it on a dedicated OS thread — never on
+        // the event loop, which must stay responsive (an arboard fallback with
+        // no compositor timeout otherwise freezes the whole TUI). The result
+        // comes back as `Msg::ClipboardResult`, identical to the dbus effects.
+        Effect::CopyToClipboard(text) => {
+            std::thread::spawn(move || {
+                let res = write_to_clipboard(&text);
+                let _ = tx.send(Msg::ClipboardResult(res));
+            });
+        }
     }
 }
 
