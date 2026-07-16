@@ -3,9 +3,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Monitor support shared by the CLI `monitor` op and the TUI monitor.
-//! The pure match-rule builder and the `dbus-send`-style message
-//! formatter (`format_message`) live here; the async `become_monitor` mirrors
-//! the blocking CLI op.
+//! The pure match-rule builder, the `dbus-send`-style message formatter
+//! (`format_message`), and the async `become_monitor` all live here.
 
 use crate::error::{Error, Result};
 use zbus::MatchRule;
@@ -56,7 +55,7 @@ pub fn build_match_rule(
 }
 
 /// Async `BecomeMonitor`. After this the connection only receives messages
-/// (it can no longer send). Mirrors the blocking `ops::monitor::become_monitor`.
+/// (it can no longer send). Shared by the CLI `monitor` op and the TUI listen.
 pub async fn become_monitor(conn: &zbus::Connection, rule: Option<&MatchRule<'_>>) -> Result<()> {
     let proxy = MonitoringProxy::new(conn).await?;
     let rules: Vec<MatchRule<'_>> = match rule {
