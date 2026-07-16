@@ -5,10 +5,7 @@
 //! `object_tree` — recursively introspect a service's object paths.
 
 use crate::dbus::types::ObjectNode;
-use crate::error::{Error, Result};
-use zbus_xml::Node;
-
-const INTROSPECTABLE: &str = "org.freedesktop.DBus.Introspectable";
+use crate::error::Result;
 
 pub async fn object_tree(conn: &zbus::Connection, service: &str) -> Result<ObjectNode> {
     let mut root = ObjectNode {
@@ -29,14 +26,9 @@ async fn walk(
     node: &mut ObjectNode,
     visited: &mut std::collections::HashSet<String>,
 ) -> Result<()> {
-    let proxy = zbus::Proxy::new(conn, service, &node.path[..], INTROSPECTABLE).await?;
-    let xml: String = proxy
-        .call_method("Introspect", &())
-        .await?
-        .body()
-        .deserialize()?;
-    let parsed = Node::from_reader(xml.as_bytes())
-        .map_err(|e| Error::Msg(format!("parse introspection XML: {e}")))?;
+    // Reuse the shared introspection helper (proxy + Introspect + XML parse) so
+    // the bus access path lives in exactly one place.
+    let parsed = crate::dbus::introspect::introspect(conn, service, &node.path).await?;
     // How many interfaces this object exposes. 0 ⇒ a pure container path (exists
     // only to host sub-objects); the flat TUI view filters such paths out.
     node.interfaces = parsed.interfaces().len();
