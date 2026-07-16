@@ -75,7 +75,7 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
 
 Options:
-      --user                      Connect to the session bus; if that fails, fall back to the system bus (default)
+      --user                      Connect to the session bus (the default falls back to the system bus on failure)
       --system                    Connect to the system bus
       --address <ADDRESS>         Connect to the bus at ADDRESS (e.g. unix:path=...)
       --verbose                   Verbose diagnostics on stderr
