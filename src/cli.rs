@@ -13,7 +13,7 @@ use clap::{Parser, Subcommand};
 pub struct Cli {
     #[arg(
         long,
-        help = "Connect to the session bus; if that fails, fall back to the system bus (default)"
+        help = "Connect to the session bus (the default falls back to the system bus on failure)"
     )]
     pub user: bool,
     #[arg(long, help = "Connect to the system bus")]
