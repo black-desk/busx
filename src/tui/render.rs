@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragra
 use crate::tui::copy::Tool;
 use crate::tui::state::{
     ActionKind, ActionResult, ClickTarget, CopyAsPopup, DetailFocus, DetailScreen, InterfaceFocus,
-    ListenTarget, ResultScreen, Screen, ServiceScreen, State,
+    ListenTarget, NavContext, ResultScreen, Screen, ServiceScreen, State,
 };
 
 /// `scroll` carries the persisted list-scroll offsets for the *top* screen's
@@ -53,7 +53,7 @@ pub fn render(
         Screen::Objects(o) => render_objects(frame, main, o, targets, scroll),
         Screen::Interfaces(i) => render_interfaces(frame, main, i, targets, scroll),
         Screen::Interface(i) => render_interface(frame, main, i, targets, scroll),
-        Screen::Detail(d) => render_detail(frame, main, d, targets),
+        Screen::Detail(d) => render_detail(frame, main, d, &state.nav, targets),
         Screen::Result(r) => render_result(frame, main, r),
     }
     render_keyhint(frame, footer, state.top());
@@ -72,23 +72,39 @@ pub fn render(
 }
 
 fn render_breadcrumb(frame: &mut Frame, area: Rect, state: &State) {
-    let parts: Vec<String> = state.screens.iter().filter_map(screen_crumb).collect();
+    let mut parts: Vec<String> = Vec::new();
+    // The drill path comes from the single source of truth (`nav`), one crumb
+    // per level the user has descended — so the breadcrumb reads
+    // `service > object > interface > call Method > Result` without any screen
+    // re-stating its parent's context.
+    let nav = &state.nav;
+    if !nav.service.is_empty() {
+        parts.push(nav.service.clone());
+    }
+    if !nav.object.is_empty() {
+        parts.push(nav.object.clone());
+    }
+    if !nav.interface.is_empty() {
+        parts.push(nav.interface.clone());
+    }
+    // The action screens (Detail/Result) layer their own label on top.
+    for screen in &state.screens {
+        if let Some(label) = screen_action_label(screen) {
+            parts.push(label);
+        }
+    }
     let text = parts.join(" > ");
     frame.render_widget(Paragraph::new(text), area);
 }
 
-fn screen_crumb(s: &Screen) -> Option<String> {
-    // One crumb per level, each showing only the context it adds — so the
-    // breadcrumb reads `service > object > interface > call Method > Result`
-    // instead of re-stating service/object/interface at every step. (The root
-    // Service list has no label of its own and is dropped.)
+/// The label an action screen contributes to the breadcrumb: Detail → its
+/// action, Result → "Result". The context screens (Service/Objects/Interfaces/
+/// Interface) contribute via `State::nav` instead, so they return `None` here.
+fn screen_action_label(s: &Screen) -> Option<String> {
     match s {
-        Screen::Service(_) => None,
-        Screen::Objects(o) => Some(o.service.clone()),
-        Screen::Interfaces(i) => Some(i.object.clone()),
-        Screen::Interface(i) => Some(i.interface.clone()),
         Screen::Detail(d) => Some(action_label(&d.kind)),
         Screen::Result(_) => Some("Result".to_string()),
+        _ => None,
     }
 }
 
@@ -519,12 +535,13 @@ fn render_detail(
     frame: &mut Frame,
     area: Rect,
     d: &DetailScreen,
+    nav: &NavContext,
     targets: &mut Vec<(Rect, ClickTarget)>,
 ) {
     let title = if d.loading {
-        format!("{} (loading…)", action_title(&d.kind, &d.interface))
+        format!("{} (loading…)", action_title(&d.kind, &nav.interface))
     } else {
-        action_title(&d.kind, &d.interface)
+        action_title(&d.kind, &nav.interface)
     };
     let block = Block::default().borders(Borders::ALL).title(title);
 

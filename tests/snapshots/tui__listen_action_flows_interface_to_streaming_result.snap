@@ -2,8 +2,8 @@
 source: tests/tui.rs
 expression: "format!(\"{}\", term.backend())"
 ---
-"org.busx.Test > Result                  "
-"┌listen org.busx.Test.Changed──────────┐"
+"Result                                  "
+"┌listen .Changed───────────────────────┐"
 "│signal  sender=:1.1                   │"
 "│  …block1                             │"
 "│                                      │"

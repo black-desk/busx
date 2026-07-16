@@ -2,7 +2,7 @@
 source: tests/tui.rs
 expression: "render_to_string(&state, 40, 8)"
 ---
-"call Move                               "
+"s > /o > i > call Move                  "
 "┌call i.Move───────────────────────────┐"
 "│▶ count  u  3▏                        │"
 "│  name   s  x                         │"
