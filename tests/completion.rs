@@ -40,7 +40,6 @@ fn complete_subcommand_position_lists_subcommands() {
         "get",
         "set",
         "list",
-        "tree",
         "introspect",
         "monitor",
         "completion",
@@ -61,7 +60,7 @@ fn complete_subcommand_position_filters_by_prefix() {
     assert!(cands.contains(&"call"), "call missing: {out}");
     assert!(cands.contains(&"completion"), "completion missing: {out}");
     assert!(
-        !cands.iter().any(|l| *l == "list" || *l == "tree"),
+        !cands.contains(&"list"),
         "non-matching subcommands leaked: {out}"
     );
 }

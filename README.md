@@ -66,7 +66,6 @@ Usage: busx [OPTIONS] [COMMAND]
 
 Commands:
   list        List service names on the bus
-  tree        Show the object path tree of a service
   introspect  Show interfaces/methods/signals/properties of an object
   call        Call a method
   get         Get properties (no property names => GetAll)
@@ -140,6 +139,9 @@ is `0` on success, `1` on failure; piping into `less`/`head` does not panic
 ## Roadmap
 
 Planned refactors and known issues are tracked in [TODO.md](TODO.md).
+
+The `tree` subcommand was removed; its capability (locating objects under a
+service) will return as an in-TUI search.
 
 ## Install
 
