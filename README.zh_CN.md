@@ -120,10 +120,6 @@ eval "$(busx completion bash)"     # zsh: eval "$(busx completion zsh)"
 python。所有诊断（错误、警告）打到stderr，前缀 `busx:`；退出码 `0` 成功 / `1`
 失败。管道到 `less`/`head` 也不会 panic（SIGPIPE 按常规处理）。
 
-## 路线图
-
-1. pcapng `capture`。
-
 ## 许可证
 
 如无特殊说明，该项目的代码以 GNU 通用公共许可协议第三版或任何更新的版本开源，文档、配置文件以及开发维护过程中使用的脚本等以 MIT 许可证开源。

@@ -134,10 +134,6 @@ field transformation. All diagnostics (errors, warnings) go to stderr with the
 `busx:` prefix; exit code is `0` on success, `1` on failure. Piping into
 `less`/`head` does not panic (SIGPIPE is handled the Unix way).
 
-## Roadmap
-
-1. pcapng `capture`.
-
 ## License
 
 Unless otherwise specified, the code of this project is open source under the
