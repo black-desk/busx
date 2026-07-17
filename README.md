@@ -135,15 +135,9 @@ is `0` on success, `1` on failure; piping into `less`/`head` does not panic
 - **copy-as**: any operation (method call, get / set property, listen for
   signals) can be copied as a command line in `dbus-send` / `busctl` / `qdbus` /
   `gdbus` form
-
-## Roadmap
-
-Planned refactors and known issues are tracked in [TODO.md](TODO.md).
-
-The `tree` subcommand was removed; its capability now lives in the TUI: press
-`/` on any list screen (services / objects / interfaces) to filter by substring
-(case-insensitive) — type to narrow, `↑↓` to pick, `Enter` to open, `Esc` to
-clear.
+- **inline filter**: press `/` on any list screen (services / objects /
+  interfaces) to filter by substring (case-insensitive) — type to narrow, `↑↓`
+  to pick, `Enter` to open, `Esc` to clear
 
 ## Install
 
