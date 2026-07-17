@@ -157,15 +157,6 @@ migrated.
 
 ## Suggested order
 
-All review follow-ups (A–E) are done: A #33, C #34, B #35, D #36, E #37. Only
-the residual micro-item below (B's private `screens`) and the Future item (TUI
-search) remain.
-
-## Deferred micro-items
-
-- **B (residual): make `State::screens` private + NonEmpty invariant.** The
-  context split (NavContext single source of truth, screens stripped of
-  service/object/interface, clone-dance removed) is done (#35); the field is
-  still `pub` because integration tests build `State` literals directly.
-  Privatizing it needs those ~60 fixtures moved to a constructor. `pop_screen`
-  already refuses at the root, so the never-empty invariant holds in practice.
+All review follow-ups (A–E) are done, including B's residual private-`screens`
+item: A #33, C #34, B #35 + #39, D #36, E #37. Only the Future item (TUI search)
+remains.
