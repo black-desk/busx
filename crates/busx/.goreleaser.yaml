@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+#
+# SPDX-License-Identifier: MIT
+
+version: 2
+
+before:
+  hooks:
+    # The goreleaser action sets up the Rust and Zig toolchains, but not
+    # cargo-zigbuild, which the Rust builder needs for cross-compilation.
+    - cargo install --locked cargo-zigbuild
+
+builds:
+  - id: busx
+    builder: rust
+    binary: busx
+    # busx is a D-Bus tool; D-Bus has no system presence on Windows, so only
+    # build for Linux (glibc) and macOS. goreleaser runs `rustup target add`
+    # for each entry automatically.
+    targets:
+      - x86_64-unknown-linux-gnu
+      - aarch64-unknown-linux-gnu
+      - x86_64-apple-darwin
+      - aarch64-apple-darwin
+
+release:
+  prerelease: auto
