@@ -219,6 +219,175 @@ fn service_screen_error_state() {
 
 use busx::tui::app::App;
 
+// ── `/` inline filter (Service/Objects/Interfaces list screens) ─────────────
+
+/// `/` opens the filter; Esc clears it WITHOUT popping the screen (the full
+/// list is restored, the user isn't navigated back).
+#[test]
+fn filter_open_and_close() {
+    let mut state = State::service(vec![svc("a", None, None), svc("b", None, None)]);
+    assert!(state.filter.is_none());
+    update(&mut state, key(KeyCode::Char('/')));
+    assert!(state.filter.is_some(), "`/` opens the filter");
+    assert_eq!(state.filter.as_ref().unwrap().value(), "");
+    update(&mut state, key(KeyCode::Esc));
+    assert!(state.filter.is_none(), "Esc clears the filter");
+    assert!(matches!(state.top(), Screen::Service(_)), "Esc did not pop");
+    assert!(!state.quit, "Esc did not quit");
+}
+
+#[test]
+fn filter_types_query_and_narrows_list() {
+    let mut state = State::service(vec![
+        svc("org.busx.Test", None, None),
+        svc("org.busx.Other", None, None),
+        svc("org.freedesktop.DBus", None, None),
+    ]);
+    update(&mut state, key(KeyCode::Char('/')));
+    for ch in "busx".chars() {
+        update(&mut state, key(KeyCode::Char(ch)));
+    }
+    let q = state.filter.as_ref().unwrap().value().to_string();
+    assert_eq!(q, "busx");
+    let view = match state.top() {
+        Screen::Service(s) => busx::tui::state::filter_view(&s.services, &q, |sv| sv.name.as_str()),
+        _ => unreachable!(),
+    };
+    assert_eq!(view, vec![0, 1], "only the two org.busx.* rows match");
+    insta::assert_snapshot!(render_to_string(&state, 52, 7));
+}
+
+#[test]
+fn filter_is_case_insensitive() {
+    let mut state = State::service(vec![
+        svc("org.busx.Test", None, None),
+        svc("zzz", None, None),
+    ]);
+    update(&mut state, key(KeyCode::Char('/')));
+    for ch in "BUSX".chars() {
+        update(&mut state, key(KeyCode::Char(ch)));
+    }
+    let q = state.filter.as_ref().unwrap().value().to_string();
+    let view = match state.top() {
+        Screen::Service(s) => busx::tui::state::filter_view(&s.services, &q, |sv| sv.name.as_str()),
+        _ => unreachable!(),
+    };
+    assert_eq!(view, vec![0], "uppercase query matches lowercase name");
+}
+
+/// If the selected row falls out of the filtered view, selection snaps to the
+/// first match rather than pointing at a hidden row.
+#[test]
+fn filter_snaps_selected_into_view() {
+    let mut state = State::service(vec![
+        svc("a", None, None),
+        svc("b", None, None),
+        svc("c", None, None),
+    ]);
+    update(&mut state, key(KeyCode::Down));
+    update(&mut state, key(KeyCode::Down));
+    assert_eq!(selected_of(&state), 2, "on row c");
+    update(&mut state, key(KeyCode::Char('/')));
+    update(&mut state, key(KeyCode::Char('a')));
+    assert_eq!(selected_of(&state), 0, "snapped to the only match (a)");
+}
+
+/// ↑↓ move within the matches and clamp at both ends.
+#[test]
+fn filter_arrow_navigation_within_matches() {
+    let mut state = State::service(vec![
+        svc("apple", None, None),
+        svc("apricot", None, None),
+        svc("banana", None, None),
+    ]);
+    update(&mut state, key(KeyCode::Char('/')));
+    update(&mut state, key(KeyCode::Char('a')));
+    update(&mut state, key(KeyCode::Char('p')));
+    // view = [0, 1] (apple, apricot); selected on 0.
+    assert_eq!(selected_of(&state), 0);
+    update(&mut state, key(KeyCode::Down));
+    assert_eq!(selected_of(&state), 1, "Down → apricot");
+    update(&mut state, key(KeyCode::Down));
+    assert_eq!(selected_of(&state), 1, "Down clamps at last match");
+    update(&mut state, key(KeyCode::Up));
+    assert_eq!(selected_of(&state), 0, "Up → apple");
+}
+
+/// While filtering, j/k are input characters (not navigation) so paths/names
+/// containing them (e.g. `/org/kde`) can be typed.
+#[test]
+fn filter_j_k_type_into_query_not_navigate() {
+    let mut state = State::service(vec![svc("a", None, None), svc("b", None, None)]);
+    update(&mut state, key(KeyCode::Char('/')));
+    update(&mut state, key(KeyCode::Char('j')));
+    update(&mut state, key(KeyCode::Char('k')));
+    assert_eq!(
+        state.filter.as_ref().unwrap().value(),
+        "jk",
+        "j/k type into the query"
+    );
+}
+
+/// Enter drills into the filtered selection, then clears the filter (the new
+/// screen starts unfiltered).
+#[test]
+fn filter_enter_drills_filtered_selection() {
+    let mut state = State::service(vec![
+        svc("org.busx.Test", None, None),
+        svc("zzz", None, None),
+    ]);
+    update(&mut state, key(KeyCode::Char('/')));
+    for ch in "test".chars() {
+        update(&mut state, key(KeyCode::Char(ch)));
+    }
+    let effect = update(&mut state, key(KeyCode::Enter));
+    assert!(matches!(effect, Some(Effect::FetchObjects(_))));
+    assert_eq!(state.nav.service, "org.busx.Test");
+    assert!(matches!(state.top(), Screen::Objects(_)));
+    assert!(state.filter.is_none(), "drilling cleared the filter");
+}
+
+/// Enter with an empty result set just drops the filter instead of drilling a
+/// stale selection.
+#[test]
+fn filter_enter_with_no_matches_just_closes() {
+    let mut state = State::service(vec![svc("a", None, None)]);
+    update(&mut state, key(KeyCode::Char('/')));
+    update(&mut state, key(KeyCode::Char('z'))); // no matches
+    let effect = update(&mut state, key(KeyCode::Enter));
+    assert!(effect.is_none());
+    assert!(
+        state.filter.is_none(),
+        "Enter on empty view drops the filter"
+    );
+    assert!(matches!(state.top(), Screen::Service(_)), "did not drill");
+}
+
+/// The filter also works on the Objects screen (filters object paths).
+#[test]
+fn filter_works_on_objects_screen() {
+    let mut state = State::with_screens(
+        nav_service("org.busx.Test"),
+        vec![Screen::Objects(busx::tui::state::ObjectsScreen {
+            paths: vec!["/org/a".into(), "/org/b".into(), "/x/c".into()],
+            selected: 0,
+            loading: false,
+            error: None,
+        })],
+    );
+    update(&mut state, key(KeyCode::Char('/')));
+    for ch in "org".chars() {
+        update(&mut state, key(KeyCode::Char(ch)));
+    }
+    let q = state.filter.as_ref().unwrap().value().to_string();
+    let view = match state.top() {
+        Screen::Objects(o) => busx::tui::state::filter_view(&o.paths, &q, |p| p.as_str()),
+        _ => unreachable!(),
+    };
+    assert_eq!(view, vec![0, 1], "only the /org/* paths match");
+    insta::assert_snapshot!(render_to_string(&state, 40, 7));
+}
+
 #[test]
 fn loop_loads_services_then_navigates() {
     let services = vec![

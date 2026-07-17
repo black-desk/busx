@@ -18,7 +18,7 @@ use crate::tui::msg::{Effect, Msg};
 use crate::tui::state::{
     ActionKind, ActionResult, ClickTarget, CopyAsPopup, DetailFocus, DetailScreen, InterfaceFocus,
     InterfaceScreen, InterfacesScreen, ListenTarget, MethodMember, NavContext, ObjectsScreen,
-    ResultScreen, Screen, ServiceScreen, State, flatten_paths,
+    ResultScreen, Screen, ServiceScreen, State, filter_view, flatten_paths,
 };
 use tui_input::backend::crossterm::EventHandler;
 
@@ -129,6 +129,14 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
         }
         return None;
     }
+    // The `/` filter, when active on a list screen, captures every key except
+    // `q` (handled above): Esc clears it, Enter drills the filtered selection,
+    // ↑↓ move within the matches, all other keys edit the query (so j/k type
+    // into the box rather than navigate — use ↑↓ while filtering). Route here
+    // before the ordinary Esc/Enter/?/c/y/screen dispatch so none leak through.
+    if state.filter.is_some() {
+        return handle_filter_key(state, k);
+    }
     // `?` opens the help overlay (only when no popup is up and help is closed).
     if matches!(k.code, KeyCode::Char('?')) {
         state.help_open = true;
@@ -171,6 +179,12 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
     }
     if k.code == KeyCode::Enter {
         return handle_enter(state);
+    }
+    // `/` opens the inline filter on a list screen (Service/Objects/Interfaces).
+    // On other screens `/` falls through to the screen's own key handler.
+    if k.code == KeyCode::Char('/') && is_list_screen(state.top()) {
+        state.filter = Some(tui_input::Input::default());
+        return None;
     }
     let nav = state.nav.clone();
     match state.top_mut() {
@@ -688,6 +702,118 @@ fn handle_enter(state: &mut State) -> Option<Effect> {
         Screen::Interface(_) => enter_interface_action(state),
         Screen::Detail(_) => enter_detail_trigger(state),
         Screen::Result(_) => None,
+    }
+}
+
+/// Whether a screen hosts a filterable list (Service/Objects/Interfaces). The
+/// Detail screen's `tui_input` fields are a different interaction, not the `/`
+/// filter.
+fn is_list_screen(s: &Screen) -> bool {
+    matches!(
+        s,
+        Screen::Service(_) | Screen::Objects(_) | Screen::Interfaces(_)
+    )
+}
+
+/// Key handling while the `/` filter is active on a list screen. See the call
+/// site for the routing rationale.
+fn handle_filter_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
+    match k.code {
+        // Esc: drop the filter, restore the full list (do NOT pop the screen).
+        KeyCode::Esc => {
+            state.filter = None;
+            None
+        }
+        // Enter: drill into the filtered selection (kept inside the view by
+        // `clamp_filter_selection`), then `push_screen` clears the filter. With
+        // no matches there's nothing to drill — just drop the filter.
+        KeyCode::Enter => {
+            if filter_view_of(state).is_empty() {
+                state.filter = None;
+                return None;
+            }
+            handle_enter(state)
+        }
+        // ↑↓ move `selected` among the matches. j/k are NOT navigation here —
+        // they fall through to the edit arm and type into the query.
+        KeyCode::Down => {
+            move_filter_selection(state, 1);
+            None
+        }
+        KeyCode::Up => {
+            move_filter_selection(state, -1);
+            None
+        }
+        // Anything else (printable chars, backspace, ←→, Home/End) edits the
+        // query, then we keep `selected` on a still-visible row.
+        _ => {
+            if let Some(input) = state.filter.as_mut() {
+                input.handle_event(&crossterm::event::Event::Key(k));
+            }
+            clamp_filter_selection(state);
+            None
+        }
+    }
+}
+
+/// The filtered raw-index view for the current list screen + active query.
+fn filter_view_of(state: &State) -> Vec<usize> {
+    let q = state.filter.as_ref().map(|f| f.value()).unwrap_or("");
+    match state.top() {
+        Screen::Service(s) => filter_view(&s.services, q, |sv| sv.name.as_str()),
+        Screen::Objects(o) => filter_view(&o.paths, q, |p| p.as_str()),
+        Screen::Interfaces(i) => filter_view(&i.names, q, |n| n.as_str()),
+        _ => Vec::new(),
+    }
+}
+
+/// Read the selected raw index of the current list screen.
+fn current_selected(state: &State) -> usize {
+    match state.top() {
+        Screen::Service(s) => s.selected,
+        Screen::Objects(o) => o.selected,
+        Screen::Interfaces(i) => i.selected,
+        _ => 0,
+    }
+}
+
+/// Set the selected raw index of the current list screen.
+fn set_selected(state: &mut State, idx: usize) {
+    match state.top_mut() {
+        Screen::Service(s) => s.selected = idx,
+        Screen::Objects(o) => o.selected = idx,
+        Screen::Interfaces(i) => i.selected = idx,
+        _ => {}
+    }
+}
+
+/// Move `selected` one step (`delta` = ±1) within the filtered view, snapping at
+/// the ends. No-op when the view is empty.
+fn move_filter_selection(state: &mut State, delta: i32) {
+    let view = filter_view_of(state);
+    if view.is_empty() {
+        return;
+    }
+    let pos = view
+        .iter()
+        .position(|&i| i == current_selected(state))
+        .map(|p| p as i32)
+        .unwrap_or(0);
+    let new_pos = (pos + delta).clamp(0, view.len() as i32 - 1) as usize;
+    set_selected(state, view[new_pos]);
+}
+
+/// After a query edit, keep `selected` on a row still in the view; if the
+/// row it pointed at was filtered out, snap to the first match. No-op when the
+/// view is empty (nothing to snap to).
+fn clamp_filter_selection(state: &mut State) {
+    let view = filter_view_of(state);
+    if view.is_empty() {
+        return;
+    }
+    let cur = current_selected(state);
+    if !view.contains(&cur) {
+        set_selected(state, view[0]);
     }
 }
 

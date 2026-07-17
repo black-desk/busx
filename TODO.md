@@ -151,12 +151,15 @@ migrated.
 
 ## Future (details undecided)
 
-- **TUI search**: replace the deleted `tree` command — locate objects /
-  interfaces under a service. Details TBD (what to search, how to trigger, which
-  screen). Not implemented together with the `tree` deletion.
+- **Deeper search** (optional): the inline `/` filter (#40) covers substring
+  filtering of the current list (services / objects / interfaces) — the same
+  surface the deleted `tree` command served. A future enhancement could search
+  across interfaces/members within a service (locate "which object exposes
+  method `X`"); that needs retaining interface names in `ObjectNode` (currently
+  only the count is kept) and was deferred as lower value.
 
 ## Suggested order
 
 All review follow-ups (A–E) are done, including B's residual private-`screens`
-item: A #33, C #34, B #35 + #39, D #36, E #37. Only the Future item (TUI search)
-remains.
+item: A #33, C #34, B #35 + #39, D #36, E #37. The TUI search (#40, the `/`
+inline filter) is done too; only the optional deeper search above remains.

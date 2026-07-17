@@ -51,6 +51,11 @@ pub struct State {
     /// (Properties/Introspectable/Peer). Hidden by default; set from
     /// `--show-standard-interfaces` at startup.
     pub show_standard_interfaces: bool,
+    /// An inline `/` filter active on the current list screen (Service /
+    /// Objects / Interfaces). `Some` while the user is typing; the list shows
+    /// only rows whose key contains the query (case-insensitive). Cleared on
+    /// push/pop so each screen starts unfiltered. `None` ⇒ show every row.
+    pub filter: Option<tui_input::Input>,
 }
 
 /// A clickable region recorded by `render`, mapping a screen rect to what a
@@ -251,6 +256,7 @@ impl State {
             help_open: false,
             bus: Bus::Session,
             show_standard_interfaces: false,
+            filter: None,
         }
     }
 
@@ -270,6 +276,7 @@ impl State {
             help_open: false,
             bus: Bus::Session,
             show_standard_interfaces: false,
+            filter: None,
         }
     }
 
@@ -291,6 +298,7 @@ impl State {
             help_open: false,
             bus: Bus::Session,
             show_standard_interfaces: false,
+            filter: None,
         }
     }
 
@@ -313,6 +321,7 @@ impl State {
 
     /// Push a screen onto the navigation stack.
     pub fn push_screen(&mut self, screen: Screen) {
+        self.filter = None;
         self.screens.push(screen);
     }
 
@@ -324,6 +333,7 @@ impl State {
         if self.screens.len() <= 1 {
             return false;
         }
+        self.filter = None;
         match self.screens.last() {
             Some(Screen::Objects(_)) => self.nav.service.clear(),
             Some(Screen::Interfaces(_)) => self.nav.object.clear(),
@@ -363,4 +373,21 @@ pub fn flatten_paths(root: &ObjectNode) -> Vec<String> {
         out.extend(flatten_paths(child));
     }
     out
+}
+
+/// The filtered view of a list: the raw indices whose `key` contains `query`
+/// (case-insensitive substring). An empty query returns every index, so the
+/// unfiltered case routes through the same path — callers need not special-case
+/// "no filter". Used by the list screens' render + arrow navigation + drill.
+pub fn filter_view<T>(items: &[T], query: &str, key: impl Fn(&T) -> &str) -> Vec<usize> {
+    if query.is_empty() {
+        return (0..items.len()).collect();
+    }
+    let q = query.to_ascii_lowercase();
+    items
+        .iter()
+        .enumerate()
+        .filter(|(_, it)| key(it).to_ascii_lowercase().contains(&q))
+        .map(|(i, _)| i)
+        .collect()
 }

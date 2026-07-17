@@ -1,5 +1,6 @@
 ---
 source: tests/tui.rs
+assertion_line: 402
 expression: "format!(\"{}\", term.backend())"
 ---
 "                                            "
@@ -9,4 +10,4 @@ expression: "format!(\"{}\", term.backend())"
 "│                                          │"
 "│                                          │"
 "└──────────────────────────────────────────┘"
-"↑↓ select · Enter open · q quit · ? help    "
+"↑↓ select · Enter open · / filter · q quit ·"
