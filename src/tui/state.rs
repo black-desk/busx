@@ -24,18 +24,15 @@ pub struct NavContext {
     pub interface: String,
 }
 
-#[derive(Default)]
 pub struct State {
     /// The accumulated service/object/interface of the current drill path.
     pub nav: NavContext,
     /// Navigation stack; the last element is the currently-shown screen.
-    /// Never empty (the initial Service screen is pushed at construction and
-    /// `pop_screen` refuses at the root). `push_screen`/`pop_screen` maintain
-    /// the nav context alongside it. (Field is public because integration tests
-    /// build `State` literals directly; the never-empty invariant is upheld by
-    /// the constructors + `pop_screen`. Making it fully private is TODO B's
-    /// last micro-item — it needs the test fixtures moved to a constructor.)
-    pub screens: Vec<Screen>,
+    /// **Never empty** — the invariant is upheld by [`State::with_screens`]
+    /// (which rejects an empty stack) plus [`State::pop_screen`] (which refuses
+    /// at the root). Private so external code can't break it; the field is
+    /// reached via [`State::top`] / [`State::top_mut`] / [`State::screens`].
+    screens: Vec<Screen>,
     pub quit: bool,
     /// The copy-as popup overlay (`Some` while open; `c` opens, `Esc`/`Enter`
     /// close). Rendered on top of the current screen by `render::render_popup`.
@@ -276,15 +273,37 @@ impl State {
         }
     }
 
-    /// The currently-shown screen. The stack is never empty (private field +
-    /// constructors push one + `pop_screen` refuses at the root), so this cannot
-    /// panic in practice.
+    /// Build a State with a pre-built screen stack and nav context. The stack
+    /// must be non-empty (the last element is shown); this is the constructor
+    /// tests use in place of a struct literal now that `screens` is private.
+    /// Panics on an empty stack to make the never-empty invariant unmissable.
+    pub fn with_screens(nav: NavContext, screens: Vec<Screen>) -> Self {
+        assert!(
+            !screens.is_empty(),
+            "screen stack must have at least one screen"
+        );
+        State {
+            nav,
+            screens,
+            quit: false,
+            popup: None,
+            click_targets: Vec::new(),
+            help_open: false,
+            bus: Bus::Session,
+            show_standard_interfaces: false,
+        }
+    }
+
+    /// The currently-shown screen. The stack is never empty (private field,
+    /// `with_screens` rejects empty, `pop_screen` refuses at the root), so
+    /// `len() - 1` is a valid index — no `expect`/`unwrap` needed.
     pub fn top(&self) -> &Screen {
-        self.screens.last().expect("screen stack never empty")
+        &self.screens[self.screens.len() - 1]
     }
 
     pub fn top_mut(&mut self) -> &mut Screen {
-        self.screens.last_mut().expect("screen stack never empty")
+        let last = self.screens.len() - 1;
+        &mut self.screens[last]
     }
 
     /// Read-only view of the screen stack (for depth assertions in tests).
