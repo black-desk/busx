@@ -140,8 +140,10 @@ is `0` on success, `1` on failure; piping into `less`/`head` does not panic
 
 Planned refactors and known issues are tracked in [TODO.md](TODO.md).
 
-The `tree` subcommand was removed; its capability (locating objects under a
-service) will return as an in-TUI search.
+The `tree` subcommand was removed; its capability now lives in the TUI: press
+`/` on any list screen (services / objects / interfaces) to filter by substring
+(case-insensitive) — type to narrow, `↑↓` to pick, `Enter` to open, `Esc` to
+clear.
 
 ## Install
 

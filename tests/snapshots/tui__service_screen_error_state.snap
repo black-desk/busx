@@ -1,5 +1,6 @@
 ---
 source: tests/tui.rs
+assertion_line: 217
 expression: "render_to_string(&state, 40, 6)"
 ---
 "                                        "
@@ -7,4 +8,4 @@ expression: "render_to_string(&state, 40, 6)"
 "│error: org.freedesktop.DBus.Error.Serv│"
 "│                                      │"
 "└──────────────────────────────────────┘"
-"↑↓ select · Enter open · q quit · ? help"
+"↑↓ select · Enter open · / filter · q qu"

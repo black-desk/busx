@@ -48,15 +48,35 @@ pub fn render(
     let (crumb, main, footer) = (chunks[0], chunks[1], chunks[2]);
 
     render_breadcrumb(frame, crumb, state);
+    // When the `/` filter is active on a list screen, carve a one-line input box
+    // out of the bottom of `main` so the list shrinks by a row to host it.
+    let query = state
+        .filter
+        .as_ref()
+        .map(|f| f.value().to_string())
+        .unwrap_or_default();
+    let (list_area, filter_area) = if state.filter.is_some() {
+        let sub = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .split(main);
+        (sub[0], Some(sub[1]))
+    } else {
+        (main, None)
+    };
     match state.top() {
-        Screen::Service(s) => render_service(frame, main, s, targets, scroll),
-        Screen::Objects(o) => render_objects(frame, main, o, targets, scroll),
-        Screen::Interfaces(i) => render_interfaces(frame, main, i, targets, scroll),
-        Screen::Interface(i) => render_interface(frame, main, i, targets, scroll),
-        Screen::Detail(d) => render_detail(frame, main, d, &state.nav, targets),
-        Screen::Result(r) => render_result(frame, main, r),
+        Screen::Service(s) => render_service(frame, list_area, s, &query, targets, scroll),
+        Screen::Objects(o) => render_objects(frame, list_area, o, &query, targets, scroll),
+        Screen::Interfaces(i) => render_interfaces(frame, list_area, i, &query, targets, scroll),
+        Screen::Interface(i) => render_interface(frame, list_area, i, targets, scroll),
+        Screen::Detail(d) => render_detail(frame, list_area, d, &state.nav, targets),
+        Screen::Result(r) => render_result(frame, list_area, r),
     }
     render_keyhint(frame, footer, state.top());
+
+    if let (Some(input), Some(area)) = (state.filter.as_ref(), filter_area) {
+        render_filter_box(frame, area, input);
+    }
 
     // The copy-as popup overlays the whole frame when open. Drawn last so it sits
     // on top of the screen + keyhint; Clear wipes the underlying area first.
@@ -179,10 +199,43 @@ fn member_rows(rows: &[(String, String)], inner_w: usize) -> Vec<ListItem<'_>> {
         .collect()
 }
 
+/// The one-line `/` filter input at the bottom of a list screen. A yellow `/`
+/// prompt, the query, and a block cursor at the input's cursor position (a
+/// reversed cell — the next char under the cursor, or a trailing space when the
+/// cursor sits past the end). The list above shrinks by one row to host this.
+fn render_filter_box(frame: &mut Frame, area: Rect, input: &tui_input::Input) {
+    let value = input.value();
+    let cursor = input.cursor().min(value.len());
+    let (before, after) = value.split_at(cursor);
+    let rev = Style::default().add_modifier(Modifier::REVERSED);
+    let prompt = Style::default().fg(Color::Yellow);
+
+    let mut spans = vec![Span::styled("/ ", prompt), Span::raw(before.to_string())];
+    // Block cursor: the first char of `after` (reversed), or a reversed space
+    // when the cursor is past the last char.
+    let mut rest = "";
+    match after.chars().next() {
+        Some(_) => {
+            let end = after
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| i)
+                .unwrap_or(after.len());
+            let (cur, tail) = after.split_at(end);
+            spans.push(Span::styled(cur.to_string(), rev));
+            rest = tail;
+        }
+        None => spans.push(Span::styled(" ", rev)),
+    }
+    spans.push(Span::raw(rest.to_string()));
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
 fn render_service(
     frame: &mut Frame,
     area: Rect,
     s: &ServiceScreen,
+    query: &str,
     targets: &mut Vec<(Rect, ClickTarget)>,
     scroll: &mut [usize; 3],
 ) {
@@ -198,30 +251,42 @@ fn render_service(
         return;
     }
 
+    // The filtered view (raw indices); empty query ⇒ all rows.
+    let view = crate::tui::state::filter_view(&s.services, query, |sv| sv.name.as_str());
+
     // Dynamic column widths so a long service name doesn't push PID/PROCESS out
     // of alignment (the old fixed `{:<32}` shifted the columns past 32 chars).
     // NAME is left-aligned; PID and PROCESS are right-aligned, each sized to the
     // widest value in its column; NAME takes the remainder, truncated with `…`.
     let inner_w = area.width.saturating_sub(2) as usize; // inside the borders
-    let pid_w = s
-        .services
+    let pid_w = view
         .iter()
-        .map(|sv| sv.pid.map(|p| p.to_string().chars().count()).unwrap_or(0))
+        .map(|&i| {
+            s.services[i]
+                .pid
+                .map(|p| p.to_string().chars().count())
+                .unwrap_or(0)
+        })
         .max()
         .unwrap_or(0);
-    let proc_w = s
-        .services
+    let proc_w = view
         .iter()
-        .map(|sv| sv.process.as_ref().map(|p| p.chars().count()).unwrap_or(0))
+        .map(|&i| {
+            s.services[i]
+                .process
+                .as_ref()
+                .map(|p| p.chars().count())
+                .unwrap_or(0)
+        })
         .max()
         .unwrap_or(0);
     // NAME gets what's left (two 2-space separators = 4 cols).
     let name_w = inner_w.saturating_sub(pid_w + proc_w + 4);
 
-    let items: Vec<ListItem> = s
-        .services
+    let items: Vec<ListItem> = view
         .iter()
-        .map(|sv| {
+        .map(|&i| {
+            let sv = &s.services[i];
             let pid = sv.pid.map(|p| p.to_string()).unwrap_or_default();
             let proc = sv.process.clone().unwrap_or_default();
             ListItem::new(Line::from(format!(
@@ -239,8 +304,9 @@ fn render_service(
         .block(block.clone())
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
     let mut list_state = ListState::default().with_offset(scroll[0]);
-    if !s.services.is_empty() {
-        list_state.select(Some(s.selected));
+    // Highlight the selected raw index if it's in the view; otherwise nothing.
+    if let Some(pos) = view.iter().position(|&i| i == s.selected) {
+        list_state.select(Some(pos));
     }
     frame.render_stateful_widget(list, area, &mut list_state);
     // Persist the offset ratatui computed so the cursor stays put next frame
@@ -249,19 +315,14 @@ fn render_service(
 
     // Record click targets for the visible rows only, offset by the scroll so a
     // click maps to the row actually rendered under the cursor.
-    push_list_rows(
-        targets,
-        area,
-        scroll[0],
-        s.services.len(),
-        ClickTarget::ServiceRow,
-    );
+    push_list_rows(targets, area, scroll[0], &view, ClickTarget::ServiceRow);
 }
 
 fn render_objects(
     frame: &mut Frame,
     area: Rect,
     o: &crate::tui::state::ObjectsScreen,
+    query: &str,
     targets: &mut Vec<(Rect, ClickTarget)>,
     scroll: &mut [usize; 3],
 ) {
@@ -275,34 +336,29 @@ fn render_objects(
         frame.render_widget(Paragraph::new(format!("error: {err}")).block(block), area);
         return;
     }
-    let items: Vec<ListItem> = o
-        .paths
+    let view = crate::tui::state::filter_view(&o.paths, query, |p| p.as_str());
+    let items: Vec<ListItem> = view
         .iter()
-        .map(|p| ListItem::new(Line::from(p.clone())))
+        .map(|&i| ListItem::new(Line::from(o.paths[i].clone())))
         .collect();
     let list = List::new(items)
         .block(block.clone())
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
     let mut ls = ListState::default().with_offset(scroll[0]);
-    if !o.paths.is_empty() {
-        ls.select(Some(o.selected));
+    if let Some(pos) = view.iter().position(|&i| i == o.selected) {
+        ls.select(Some(pos));
     }
     frame.render_stateful_widget(list, area, &mut ls);
     scroll[0] = ls.offset();
 
-    push_list_rows(
-        targets,
-        area,
-        scroll[0],
-        o.paths.len(),
-        ClickTarget::ObjectsRow,
-    );
+    push_list_rows(targets, area, scroll[0], &view, ClickTarget::ObjectsRow);
 }
 
 fn render_interfaces(
     frame: &mut Frame,
     area: Rect,
     i: &crate::tui::state::InterfacesScreen,
+    query: &str,
     targets: &mut Vec<(Rect, ClickTarget)>,
     scroll: &mut [usize; 3],
 ) {
@@ -316,28 +372,22 @@ fn render_interfaces(
         frame.render_widget(Paragraph::new(format!("error: {err}")).block(block), area);
         return;
     }
-    let items: Vec<ListItem> = i
-        .names
+    let view = crate::tui::state::filter_view(&i.names, query, |n| n.as_str());
+    let items: Vec<ListItem> = view
         .iter()
-        .map(|n| ListItem::new(Line::from(n.clone())))
+        .map(|&idx| ListItem::new(Line::from(i.names[idx].clone())))
         .collect();
     let list = List::new(items)
         .block(block.clone())
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
     let mut ls = ListState::default().with_offset(scroll[0]);
-    if !i.names.is_empty() {
-        ls.select(Some(i.selected));
+    if let Some(pos) = view.iter().position(|&idx| idx == i.selected) {
+        ls.select(Some(pos));
     }
     frame.render_stateful_widget(list, area, &mut ls);
     scroll[0] = ls.offset();
 
-    push_list_rows(
-        targets,
-        area,
-        scroll[0],
-        i.names.len(),
-        ClickTarget::InterfacesRow,
-    );
+    push_list_rows(targets, area, scroll[0], &view, ClickTarget::InterfacesRow);
 }
 
 fn render_interface(
@@ -383,7 +433,7 @@ fn render_interface(
         targets,
         chunks[0],
         scroll[0],
-        i.methods.len(),
+        &(0..i.methods.len()).collect::<Vec<_>>(),
         ClickTarget::MethodRow,
     );
 
@@ -450,7 +500,7 @@ fn render_interface(
             targets,
             chunks[1],
             scroll[1],
-            i.properties.len(),
+            &(0..i.properties.len()).collect::<Vec<_>>(),
             ClickTarget::PropertyRow,
         );
     }
@@ -469,7 +519,7 @@ fn render_interface(
         targets,
         chunks[2],
         scroll[2],
-        i.signals.len(),
+        &(0..i.signals.len()).collect::<Vec<_>>(),
         ClickTarget::SignalRow,
     );
 
@@ -490,7 +540,13 @@ fn render_interface(
         i.in_buttons,
         0,
     );
-    push_list_rows(targets, right, 0, n_buttons, ClickTarget::ActionButton);
+    push_list_rows(
+        targets,
+        right,
+        0,
+        &(0..n_buttons).collect::<Vec<_>>(),
+        ClickTarget::ActionButton,
+    );
 }
 
 /// Push one click target per row of a bordered list rendered into `area`. The
@@ -500,21 +556,26 @@ fn render_interface(
 /// window `[offset, offset+height)` gets targets. Without the offset a scrolled
 /// list desyncs clicks from the rendered rows — e.g. clicking the top visible
 /// row (index `offset`) would hit row 0 instead.
+/// Record click targets for the visible rows of a (possibly filtered) list.
+/// `rows` is the raw-index view (see `state::filter_view`); `offset` is the
+/// scroll position within that view. Each target carries the row's *raw* index
+/// so the mouse handler (which sets `selected = i`) works unchanged whether or
+/// not a filter is active.
 fn push_list_rows(
     targets: &mut Vec<(Rect, ClickTarget)>,
     area: Rect,
     offset: usize,
-    n_rows: usize,
+    rows: &[usize],
     make: impl Fn(usize) -> ClickTarget,
 ) {
     let inner = Block::default().borders(Borders::ALL).inner(area);
     let vh = inner.height as usize;
-    let start = offset.min(n_rows);
-    let end = offset.saturating_add(vh).min(n_rows);
-    for i in start..end {
+    let start = offset.min(rows.len());
+    let end = offset.saturating_add(vh).min(rows.len());
+    for (rel, &raw) in rows[start..end].iter().enumerate() {
         targets.push((
-            Rect::new(inner.x, inner.y + (i - offset) as u16, inner.width, 1),
-            make(i),
+            Rect::new(inner.x, inner.y + rel as u16, inner.width, 1),
+            make(raw),
         ));
     }
 }
@@ -741,9 +802,9 @@ fn render_sub_list(
 
 fn render_keyhint(frame: &mut Frame, area: Rect, screen: &Screen) {
     let hint = match screen {
-        Screen::Service(_) => "↑↓ select · Enter open · q quit · ? help",
-        Screen::Objects(_) => "↑↓ select · Enter open · Esc back · q quit · ? help",
-        Screen::Interfaces(_) => "↑↓ select · Enter open · Esc back · q quit · ? help",
+        Screen::Service(_) => "↑↓ select · Enter open · / filter · q quit · ? help",
+        Screen::Objects(_) => "↑↓ select · Enter open · / filter · Esc back · q quit · ? help",
+        Screen::Interfaces(_) => "↑↓ select · Enter open · / filter · Esc back · q quit · ? help",
         Screen::Interface(_) => {
             "Tab column · ↑↓ select · Enter open · r refresh · Esc back · q quit · ? help"
         }
@@ -876,6 +937,7 @@ global:
   Enter       open / activate / drill in / fire the focused button
   Esc         back (or stop a listen); at the root Service screen, quit
   q           quit
+  /           (list screen) filter — type to narrow, ↑↓ pick, Enter open, Esc clear
   Tab         (Interface) cycle the methods/properties/signals columns
   r           (Interface) refresh the property-value snapshot
   c           copy-as — generate dbus-send/busctl/qdbus/gdbus for the current op

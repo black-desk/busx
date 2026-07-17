@@ -1,5 +1,6 @@
 ---
 source: tests/tui.rs
+assertion_line: 439
 expression: "render_to_string(&state, 48, 9)"
 ---
 "org.busx.Test                                   "
@@ -10,4 +11,4 @@ expression: "render_to_string(&state, 48, 9)"
 "│                                              │"
 "│                                              │"
 "└──────────────────────────────────────────────┘"
-"↑↓ select · Enter open · Esc back · q quit · ? h"
+"↑↓ select · Enter open · / filter · Esc back · q"
