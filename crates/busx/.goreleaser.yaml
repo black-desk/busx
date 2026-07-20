@@ -14,6 +14,11 @@ builds:
   - id: busx
     builder: rust
     binary: busx
+    # cargo workspace puts build output at the workspace root's target/, but
+    # goreleaser looks for the binary under the workdir (crates/busx). Pin
+    # CARGO_TARGET_DIR so both sides agree on crates/busx/target/.
+    env:
+      - CARGO_TARGET_DIR=target
     # busx is a D-Bus tool; D-Bus has no system presence on Windows, so only
     # build for Linux (glibc) and macOS. goreleaser runs `rustup target add`
     # for each entry automatically.
