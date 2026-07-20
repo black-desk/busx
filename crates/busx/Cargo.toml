@@ -4,7 +4,7 @@
 
 [package]
 name = "busx"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.87"
 description = "A zbus-based dbus-send/busctl/qdbus replacement"
