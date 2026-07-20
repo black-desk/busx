@@ -27,15 +27,14 @@ jobs:
           working-directory: crates/busx
 
   # Builds precompiled binaries (Linux + macOS, x86_64 + aarch64) and
-  # publishes them to a GitHub Release. Config lives in
-  # crates/busx/.goreleaser.yaml. Runs in parallel with `crate`; both
-  # actions detect the version and tag locally without pushing, so they
-  # do not interfere with each other.
+  # publishes them to a GitHub Release. Config lives in .goreleaser.yaml at
+  # the workspace root (goreleaser runs there; builds[].flags targets the
+  # busx member via --package=busx). Runs in parallel with `crate`; both
+  # actions detect the version and tag locally without pushing, so they do
+  # not interfere with each other.
   goreleaser:
     permissions:
       contents: write
     runs-on: ubuntu-latest
     steps:
       - uses: black-desk/workflows/goreleaser@master
-        with:
-          working-directory: crates/busx
