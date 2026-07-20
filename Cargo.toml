@@ -2,41 +2,6 @@
 #
 # SPDX-License-Identifier: MIT
 
-[package]
-name = "busx"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.87"
-description = "A zbus-based dbus-send/busctl/qdbus replacement"
-license = "GPL-3.0-or-later"
-repository = "https://github.com/black-desk/busx"
-
-[dependencies]
-zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
-zvariant = "5"
-enumflags2 = "0.7"
-libc = "0.2"
-clap = { version = "4", features = ["derive"] }
-clap_complete = { version = "4", features = ["unstable-dynamic"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
-anyhow = "1"
-zbus_xml = "5"
-async-global-executor = "3"
-async-io = "2"
-ratatui = "0.30"
-crossterm = "0.29"
-flume = "0.12"
-tui-input = "0.15"
-futures = "0.3"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tracing-appender = "0.2"
-arboard = "3.6"
-
-[dev-dependencies]
-assert_cmd = "2"
-predicates = "3"
-nix = { version = "0.31", features = ["signal"] }
-insta = "1"
+[workspace]
+members = ["crates/busx", "crates/testbus"]
+resolver = "2"

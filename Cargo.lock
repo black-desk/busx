@@ -369,11 +369,11 @@ dependencies = [
  "futures",
  "insta",
  "libc",
- "nix 0.31.3",
  "predicates",
  "ratatui",
  "serde",
  "serde_json",
+ "testbus",
  "thiserror 2.0.18",
  "tracing",
  "tracing-appender",
@@ -2290,6 +2290,16 @@ dependencies = [
  "wezterm-dynamic",
  "wezterm-input-types",
  "winapi",
+]
+
+[[package]]
+name = "testbus"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "nix 0.31.3",
+ "zbus",
+ "zvariant",
 ]
 
 [[package]]

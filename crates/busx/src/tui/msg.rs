@@ -12,7 +12,7 @@ use zvariant::OwnedValue;
 
 pub enum Msg {
     Key(KeyEvent),
-    Resize(u16, u16),
+    Resize,
     /// A crossterm mouse event (forwarded raw; hit-testing happens in `update`).
     Mouse(crossterm::event::MouseEvent),
 
@@ -69,6 +69,7 @@ pub enum Effect {
     /// (`Msg::ListenMessage`); signal/property subscribe a `MessageStream`,
     /// method listen uses BecomeMonitor (dedicated connection).
     Listen {
+        #[allow(dead_code)]
         service: String,
         object: String,
         iface: String,

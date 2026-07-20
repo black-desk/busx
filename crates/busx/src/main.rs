@@ -2,11 +2,23 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use busx::{
-    cli::{Cli, Command},
-    complete, error, log, ops, tui,
-};
+//! `busx` — a zbus-based dbus-send/busctl/qdbus replacement (binary crate).
+//!
+//! The module tree (`cli`, `dbus`, `ops`, `tui`, …) lives inside this binary
+//! crate; there is no library target, so none of it is reachable from outside.
+
+mod cli;
+mod complete;
+mod dbus;
+mod error;
+mod log;
+mod ops;
+mod out;
+mod tui;
+mod value;
+
 use clap::Parser;
+use cli::{Cli, Command};
 
 fn main() -> std::process::ExitCode {
     // Rust sets SIGPIPE to SIG_IGN at startup, so a downstream pipe reader

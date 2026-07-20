@@ -82,6 +82,7 @@ pub enum ClickTarget {
 #[derive(Clone, Debug)]
 pub struct CopyAsPopup {
     /// The operation being rendered as another tool's command.
+    #[allow(dead_code)]
     pub op: CopyOp,
     /// Per-tool generated command (`None` = the tool can't express it). Indexed
     /// in [`Tool::ALL`] order so `selected` indexes both this and the popup rows.
@@ -261,6 +262,7 @@ impl State {
     }
 
     /// Build a State with a single populated Service screen (tests / default).
+    #[cfg(test)]
     pub fn service(services: Vec<ServiceInfo>) -> Self {
         State {
             nav: NavContext::default(),
@@ -284,6 +286,7 @@ impl State {
     /// must be non-empty (the last element is shown); this is the constructor
     /// tests use in place of a struct literal now that `screens` is private.
     /// Panics on an empty stack to make the never-empty invariant unmissable.
+    #[cfg(test)]
     pub fn with_screens(nav: NavContext, screens: Vec<Screen>) -> Self {
         assert!(
             !screens.is_empty(),
@@ -345,6 +348,7 @@ impl State {
     }
 
     /// The focus of the top Interface screen (test convenience).
+    #[cfg(test)]
     pub fn top_focus(&self) -> InterfaceFocus {
         match self.top() {
             Screen::Interface(i) => i.focus,
@@ -353,6 +357,7 @@ impl State {
     }
 
     /// The per-column selection of the top Interface screen (test convenience).
+    #[cfg(test)]
     pub fn top_selected(&self) -> [usize; 3] {
         match self.top() {
             Screen::Interface(i) => i.selected,

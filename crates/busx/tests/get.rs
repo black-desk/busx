@@ -2,13 +2,12 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-mod common;
 use assert_cmd::Command;
 use serde_json::Value;
 
 #[test]
 fn getall_returns_tagged_json() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -66,7 +65,7 @@ fn getall_returns_tagged_json() {
 
 #[test]
 fn get_single_property() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -92,7 +91,7 @@ fn get_single_property() {
 /// `d  0.5` for the fixture's `volume`.
 #[test]
 fn get_single_property_human() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -110,37 +109,5 @@ fn get_single_property_human() {
     assert!(
         stdout.contains("d  0.5"),
         "expected `d  0.5` in human output:\n{stdout}"
-    );
-}
-
-/// `get_all_by_one` is the per-property `Get` fallback the TUI uses when
-/// `GetAll` is unavailable. For a service that *does* implement GetAll it must
-/// return the same property names as GetAll (proving the fallback path works).
-#[test]
-fn get_all_by_one_matches_getall() {
-    let addr = common::bus().address.clone();
-    let (by_all, by_one) = async_global_executor::block_on(async {
-        let conn = busx::dbus::conn::connect(false, false, Some(&addr))
-            .await
-            .expect("connect test bus");
-        let svc = "org.busx.Test";
-        let obj = "/org/busx/Test";
-        let iface = "org.busx.Test";
-        let all = busx::dbus::property::get_all(&conn, svc, obj, iface)
-            .await
-            .expect("get_all");
-        let one = busx::dbus::property::get_all_by_one(&conn, svc, obj, iface)
-            .await
-            .expect("get_all_by_one");
-        (all, one)
-    });
-    let mut a: Vec<&str> = by_all.iter().map(|(k, _)| k.as_str()).collect();
-    let mut b: Vec<&str> = by_one.iter().map(|(k, _)| k.as_str()).collect();
-    a.sort_unstable();
-    b.sort_unstable();
-    assert_eq!(a, b, "get_all_by_one should match GetAll's property names");
-    assert!(
-        a.contains(&"volume"),
-        "fixture has a `volume` property (test not vacuous): {a:?}"
     );
 }
