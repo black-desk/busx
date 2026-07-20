@@ -21,8 +21,9 @@ use zbus::Connection;
 use crate::dbus;
 use crate::error::Result;
 use crate::tui::msg::{Effect, Msg};
+use crate::tui::render::render;
 use crate::tui::state::{ActionResult, ListenTarget, State};
-use crate::tui::{render, update};
+use crate::tui::update::update;
 
 /// Pretty-print an owned value (the common tail of call/get result rendering).
 fn pretty(v: &zvariant::OwnedValue) -> String {
@@ -59,7 +60,7 @@ impl App {
         crate::error::Error: From<<B as Backend>::Error>,
         F: FnMut(Effect),
     {
-        let mut targets: Vec<(ratatui::layout::Rect, crate::tui::ClickTarget)> = Vec::new();
+        let mut targets: Vec<(ratatui::layout::Rect, crate::tui::state::ClickTarget)> = Vec::new();
         // Persisted per-list scroll offsets for the top screen's list(s),
         // threaded into `render` so the cursor doesn't snap back to the viewport
         // bottom each frame (see `render`). Like `targets`, this is loop-owned.
@@ -320,7 +321,7 @@ fn run_effect(
                                 return;
                             }
                         };
-                    let rule = match update::listen_rule(&iface, &object, &target) {
+                    let rule = match crate::tui::update::listen_rule(&iface, &object, &target) {
                         Ok(r) => r,
                         Err(e) => {
                             let _ = tx.send(Msg::ActionResult(Err(e.to_string())));
@@ -358,7 +359,7 @@ fn run_effect(
 
                 // Signal / Property listen: subscribe via the match rule on the
                 // main connection; PropertiesChanged is filtered client-side.
-                let rule = match update::listen_rule(&iface, &object, &target) {
+                let rule = match crate::tui::update::listen_rule(&iface, &object, &target) {
                     Ok(r) => r,
                     Err(e) => {
                         let _ = tx.send(Msg::ActionResult(Err(e.to_string())));
@@ -460,7 +461,7 @@ impl Iterator for CrosstermSource {
 fn non_mouse(ev: Event) -> Option<Msg> {
     match ev {
         Event::Key(k) => Some(Msg::Key(k)),
-        Event::Resize(w, h) => Some(Msg::Resize(w, h)),
+        Event::Resize(_, _) => Some(Msg::Resize),
         Event::Mouse(m) => Some(Msg::Mouse(m)),
         _ => None,
     }

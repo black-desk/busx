@@ -32,6 +32,8 @@ jobs:
       id-token: write
     steps:
       - uses: black-desk/workflows/rust@master
+        with:
+          working-directory: crates/busx
 
   # Verify the project still builds and tests pass on its declared minimum
   # supported Rust (Cargo.toml's `rust-version`). Reuses the rust action at that
@@ -44,6 +46,7 @@ jobs:
     steps:
       - uses: black-desk/workflows/rust@master
         with:
+          working-directory: crates/busx
           toolchain: "1.87"
 
   pass:

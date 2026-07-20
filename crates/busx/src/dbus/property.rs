@@ -104,3 +104,39 @@ fn resolve_iface(iface: &str) -> Result<InterfaceName<'_>> {
             .map_err(Error::from)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `get_all_by_one` is the per-property `Get` fallback the TUI uses when
+    /// `GetAll` is unavailable. For a service that *does* implement GetAll it
+    /// must return the same property names as GetAll (proving the fallback path
+    /// works). The fixture lives in the `testbus` dev-crate.
+    #[test]
+    fn get_all_by_one_matches_getall() {
+        let addr = testbus::bus().address.clone();
+        let (by_all, by_one) = async_global_executor::block_on(async {
+            let conn = crate::dbus::conn::connect(false, false, Some(&addr))
+                .await
+                .expect("connect test bus");
+            let svc = "org.busx.Test";
+            let obj = "/org/busx/Test";
+            let iface = "org.busx.Test";
+            let all = get_all(&conn, svc, obj, iface).await.expect("get_all");
+            let one = get_all_by_one(&conn, svc, obj, iface)
+                .await
+                .expect("get_all_by_one");
+            (all, one)
+        });
+        let mut a: Vec<&str> = by_all.iter().map(|(k, _)| k.as_str()).collect();
+        let mut b: Vec<&str> = by_one.iter().map(|(k, _)| k.as_str()).collect();
+        a.sort_unstable();
+        b.sort_unstable();
+        assert_eq!(a, b, "get_all_by_one should match GetAll's property names");
+        assert!(
+            a.contains(&"volume"),
+            "fixture has a `volume` property (test not vacuous): {a:?}"
+        );
+    }
+}

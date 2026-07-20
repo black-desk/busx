@@ -53,7 +53,7 @@ fn shell_split(s: &str) -> Vec<String> {
 pub fn update(state: &mut State, msg: Msg) -> Option<Effect> {
     match msg {
         Msg::Key(k) => update_key(state, k),
-        Msg::Resize(_, _) => None,
+        Msg::Resize => None,
         Msg::Mouse(ev) => handle_mouse(state, ev),
         Msg::ServicesLoaded(res) => {
             if let Screen::Service(s) = state.top_mut() {

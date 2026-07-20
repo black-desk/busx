@@ -2,13 +2,12 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-mod common;
 use assert_cmd::Command;
 use serde_json::Value;
 
 #[test]
 fn call_with_string_array_encodes_and_returns() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -35,7 +34,7 @@ fn call_with_string_array_encodes_and_returns() {
 
 #[test]
 fn call_with_dict_of_variant_encodes() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -67,7 +66,7 @@ fn call_with_dict_of_variant_encodes() {
 /// prove the count encoding matches.
 #[test]
 fn call_with_multi_entry_dict_encodes() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -99,7 +98,7 @@ fn call_with_multi_entry_dict_encodes() {
 /// `Join(["a","b","c"])` returns `"a-b-c"`, rendered `s  "a-b-c"`.
 #[test]
 fn call_human_prints_type_and_pretty_value() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -135,7 +134,7 @@ fn call_human_prints_type_and_pretty_value() {
 /// An unsupported type code in the signature is rejected.
 #[test]
 fn call_rejects_unknown_type_code() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -158,7 +157,7 @@ fn call_rejects_unknown_type_code() {
 /// but provides none).
 #[test]
 fn call_rejects_too_few_args() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -181,7 +180,7 @@ fn call_rejects_too_few_args() {
 /// one element but provides two).
 #[test]
 fn call_rejects_extra_args() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -205,7 +204,7 @@ fn call_rejects_extra_args() {
 /// A non-numeric element count is rejected.
 #[test]
 fn call_rejects_bad_element_count() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -229,7 +228,7 @@ fn call_rejects_bad_element_count() {
 /// structured object (kind/target/mode) instead of a meaningless integer.
 #[test]
 fn call_renders_unix_fd() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -255,7 +254,7 @@ fn call_renders_unix_fd() {
 /// Human output resolves the fd inline: `h  <fd /dev/null ro>`.
 #[test]
 fn call_renders_unix_fd_human() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -281,7 +280,7 @@ fn call_renders_unix_fd_human() {
 /// non-deterministic, asserted by prefix only).
 #[test]
 fn call_renders_pipe_fd() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -310,7 +309,7 @@ fn call_renders_pipe_fd() {
 /// A byte array (`ay`) renders as a Rust-style bytestring in human output.
 #[test]
 fn call_renders_ay_bytestring() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -332,7 +331,7 @@ fn call_renders_ay_bytestring() {
 /// Non-printable bytes in `ay` are `\xNN`-escaped.
 #[test]
 fn call_renders_ay_nonprintable() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -357,7 +356,7 @@ fn call_renders_ay_nonprintable() {
 /// The JSON path keeps `ay` as a type-tagged array of bytes (unchanged).
 #[test]
 fn call_ay_json_stays_tagged_bytes() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -383,7 +382,7 @@ fn call_ay_json_stays_tagged_bytes() {
 /// etc. doesn't inject a raw newline into the line-based output.
 #[test]
 fn call_renders_control_chars_in_string() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([

@@ -4,7 +4,7 @@
 
 version: 2
 updates:
-  - directory: /
+  - directory: /crates/busx
     package-ecosystem: cargo
     schedule:
       interval: daily

@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "testbus"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.87"
+publish = false
+
+[dependencies]
+zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
+zvariant = "5"
+nix = { version = "0.31", features = ["signal"] }
+libc = "0.2"

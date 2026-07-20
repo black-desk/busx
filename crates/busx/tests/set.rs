@@ -2,13 +2,12 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-mod common;
 use assert_cmd::Command;
 use serde_json::Value;
 
 #[test]
 fn set_then_get_roundtrips() {
-    let addr = common::bus().address.clone();
+    let addr = testbus::bus().address.clone();
     // Set volume to 0.75 (double).
     Command::cargo_bin("busx")
         .unwrap()

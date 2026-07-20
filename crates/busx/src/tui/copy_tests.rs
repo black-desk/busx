@@ -2,11 +2,11 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Direct tests for `busx::tui::copy::generate` (spec §10 copy-as generation).
+//! Direct tests for `crate::tui::copy::generate` (spec §10 copy-as generation).
 //! Pin the exact command each tool produces for representative operations.
 
-use busx::dbus::conn::Bus;
-use busx::tui::copy::{CopyOp, Tool, generate};
+use crate::dbus::conn::Bus;
+use crate::tui::copy::{CopyOp, Tool, generate};
 
 /// Helper: render `op` for `tool` on the *session* bus, unwrapping the
 /// `Some(command)`. (Session is the common default; system/custom-bus behavior
