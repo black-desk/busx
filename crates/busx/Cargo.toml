@@ -39,4 +39,6 @@ arboard = "3.6"
 assert_cmd = "2"
 predicates = "3"
 insta = { version = "1", features = ["filters"] }
+serial_test = "3"
+tempfile = "3"
 testbus = { path = "../testbus" }

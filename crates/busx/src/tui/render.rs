@@ -81,12 +81,19 @@ pub fn render(
     // The copy-as popup overlays the whole frame when open. Drawn last so it sits
     // on top of the screen + keyhint; Clear wipes the underlying area first.
     if let Some(popup) = &state.popup {
+        // Clear the whole frame so the popup reads as a true modal — no
+        // underlying screen content bleeds in around the centered popup
+        // area. Matches the lazygit/htop/bottom convention for modal
+        // overlays.
+        frame.render_widget(Clear, area);
         render_popup(frame, area, popup, targets);
     }
     // The help overlay sits on top of everything (above the popup too, though the
     // two can't be open at once — help can't open while the popup is up). Not
     // clickable, so it records no click targets.
     if state.help_open {
+        // Same modal treatment as the copy-as popup above.
+        frame.render_widget(Clear, area);
         render_help(frame, area);
     }
 }
@@ -254,34 +261,23 @@ fn render_service(
     // The filtered view (raw indices); empty query ⇒ all rows.
     let view = crate::tui::state::filter_view(&s.services, query, |sv| sv.name.as_str());
 
-    // Dynamic column widths so a long service name doesn't push PID/PROCESS out
-    // of alignment (the old fixed `{:<32}` shifted the columns past 32 chars).
-    // NAME is left-aligned; PID and PROCESS are right-aligned, each sized to the
-    // widest value in its column; NAME takes the remainder, truncated with `…`.
+    // Fixed column widths driven by hard kernel limits rather than the data
+    // on screen, so the layout is identical across runs / machines / CI:
+    // - PID column: `/proc/sys/kernel/pid_max` defaults to 4194304 → 7 digits.
+    // - PROCESS column: `TASK_COMM_LEN` is 16 (15 chars + NUL) → 15 chars,
+    //   matching what `/proc/<pid>/comm` (the source of this field) can hold.
+    // NAME gets whatever's left (two 2-space separators = 4 cols) and is
+    // truncated with `…`. NAME left-aligned; PID/PROCESS right-aligned.
+    // Fixed widths (not auto-sized to the data) are required by the e2e
+    // snapshot tests — insta filters mask the PID / process-name *content*
+    // to `<PID>` / `<PROC>` after render, and with auto-sized columns the
+    // mask's width would differ from the original's, shifting every
+    // subsequent column. Fixed widths let the filter replace a
+    // column-width-wide run with a column-width-wide placeholder.
     let inner_w = area.width.saturating_sub(2) as usize; // inside the borders
-    let pid_w = view
-        .iter()
-        .map(|&i| {
-            s.services[i]
-                .pid
-                .map(|p| p.to_string().chars().count())
-                .unwrap_or(0)
-        })
-        .max()
-        .unwrap_or(0);
-    let proc_w = view
-        .iter()
-        .map(|&i| {
-            s.services[i]
-                .process
-                .as_ref()
-                .map(|p| p.chars().count())
-                .unwrap_or(0)
-        })
-        .max()
-        .unwrap_or(0);
-    // NAME gets what's left (two 2-space separators = 4 cols).
-    let name_w = inner_w.saturating_sub(pid_w + proc_w + 4);
+    const PID_W: usize = 7;
+    const PROC_W: usize = 15;
+    let name_w = inner_w.saturating_sub(PID_W + PROC_W + 4);
 
     let items: Vec<ListItem> = view
         .iter()
@@ -295,8 +291,8 @@ fn render_service(
                 pid = pid,
                 proc = proc,
                 name_w = name_w,
-                pid_w = pid_w,
-                proc_w = proc_w,
+                pid_w = PID_W,
+                proc_w = PROC_W,
             )))
         })
         .collect();

@@ -1,18 +1,35 @@
-// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxian <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+//! Test bus fixture.
+//!
+//! [`bus`] returns a process-wide singleton test bus (started once per
+//! test binary); [`bus_owned`] starts a fresh, owned test bus so each
+//! caller sees a deterministic `:1.x` table regardless of what other
+//! tests are running concurrently. Both spin up a private `dbus-daemon`
+//! and register the `org.busx.Test` interface against it in-process.
+//!
+//! Integration tests that drive `busx` as a subprocess via `assert_cmd`
+//! can use [`bus`] — each subprocess connects, does its work, exits.
+//! End-to-end tests that drive the TUI in-process and snapshot the
+//! service list should use [`bus_owned`] so list_names' output is
+//! invariant across concurrent test threads.
+
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
-use zbus::blocking::Connection;
+
 use zbus::blocking::connection::Builder;
 use zbus::interface;
 
-/// Test service. Methods/properties are chosen to exercise every busx feature:
+/// Test service. Methods/properties are chosen to exercise every busx
+/// feature:
 /// - `counts` (a{uu}): non-string-key dict — exercises spec §7.2 safety rule
 /// - `hints` (a{sv}): string-key dict-of-variant
-/// - `volume`: settable property; changing it emits PropertiesChanged (monitor test)
+/// - `volume`: settable property; changing it emits PropertiesChanged
+///   (monitor test)
 /// - `take_hints`/`join`: targets for encode (call) tests
+/// - `echo_bool`: round-trip target for `b` signature encode tests
 pub struct TestIface {
     volume: f64,
 }
@@ -20,8 +37,8 @@ pub struct TestIface {
 #[interface(name = "org.busx.Test")]
 impl TestIface {
     // Pin D-Bus property names to lowercase so the fixture matches its
-    // documented contract (`volume`/`name`/`counts`/`hints`). zbus otherwise
-    // exposes Rust snake_case getters as PascalCase.
+    // documented contract (`volume`/`name`/`counts`/`hints`). zbus
+    // otherwise exposes Rust snake_case getters as PascalCase.
     #[zbus(property, name = "volume")]
     fn volume(&self) -> f64 {
         self.volume
@@ -95,9 +112,9 @@ impl TestIface {
         vec![0x00, 0xab, b'c', 0xff]
     }
 
-    /// Returns `s` with embedded control characters — exercises string escaping
-    /// (`\n` / `\t` named, other controls as `\u{NN}`) so they don't break the
-    /// line-based output.
+    /// Returns `s` with embedded control characters — exercises string
+    /// escaping (`\n` / `\t` named, other controls as `\u{NN}`) so they
+    /// don't break the line-based output.
     fn make_control_string(&self) -> String {
         "a\tb\nc\u{1}d".to_string()
     }
@@ -112,7 +129,7 @@ impl TestIface {
 
 pub struct TestBus {
     pub address: String,
-    _conn: Connection,
+    _conn: zbus::blocking::Connection,
     daemon_pid: i32,
 }
 
@@ -127,58 +144,74 @@ impl Drop for TestBus {
 
 static BUS: OnceLock<TestBus> = OnceLock::new();
 
-/// Returns the shared test bus (started once per test binary).
+/// Returns the shared test bus (started once per test binary). Use this
+/// from integration tests that drive `busx` as a subprocess via
+/// `assert_cmd` — each subprocess connects, does its work, and exits,
+/// so they don't need isolation from one another.
 pub fn bus() -> &'static TestBus {
-    BUS.get_or_init(|| {
-        // --fork: the parent prints "address\npid\n" to stdout then exits;
-        // the daemon detaches and runs with the given pid. No pipe to hold.
-        let out = Command::new("dbus-daemon")
-            .args(["--session", "--fork", "--print-address=1", "--print-pid=1"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output()
-            .expect("dbus-daemon not found; install dbus");
-        let s = String::from_utf8(out.stdout).expect("dbus-daemon output utf8");
-        let mut lines = s.lines();
-        let address = lines.next().expect("address line").trim().to_string();
-        let daemon_pid: i32 = lines
-            .next()
-            .expect("pid line")
-            .trim()
-            .parse()
-            .expect("pid number");
+    BUS.get_or_init(start_bus_with_fixture)
+}
 
-        let conn = Builder::address(address.as_str())
-            .expect("build test-bus connection")
-            .serve_at("/org/busx/Test", TestIface { volume: 0.5 })
-            .expect("register test object")
-            .serve_at("/org/busx/Test/sub", TestIface { volume: 0.0 })
-            .expect("register sub object")
-            .name("org.busx.Test")
-            .expect("request name")
-            .build()
-            .expect("connect test bus");
+/// Starts a fresh, owned test bus. Drop the returned `TestBus` to
+/// SIGTERM the underlying daemon. Use this from tests that need
+/// isolation — e.g. e2e TUI tests that list_names and snapshot the
+/// result, where a deterministic `:1.0` (daemon) + `:1.1` (fixture) +
+/// `:1.2` (self) naming matters regardless of concurrent tests.
+pub fn bus_owned() -> TestBus {
+    start_bus_with_fixture()
+}
 
-        // A second, deliberately overlong well-known name so `list` can exercise
-        // its NAME-column truncation.
-        conn.request_name(
-            "org.busx.TestServiceNameThatIsIntentionallyVeryLongSoItExceedsTheNameColumnWidthLimitOfFiftyFour",
-        )
-        .expect("request long name");
+fn start_bus_with_fixture() -> TestBus {
+    // --fork: the parent prints "address\npid\n" to stdout then exits;
+    // the daemon detaches and runs with the given pid. No pipe to hold.
+    let out = Command::new("dbus-daemon")
+        .args(["--session", "--fork", "--print-address=1", "--print-pid=1"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .expect("dbus-daemon not found; install dbus");
+    let s = String::from_utf8(out.stdout).expect("dbus-daemon output utf8");
+    let mut lines = s.lines();
+    let address = lines.next().expect("address line").trim().to_string();
+    let daemon_pid: i32 = lines
+        .next()
+        .expect("pid line")
+        .trim()
+        .parse()
+        .expect("pid number");
 
-        // Extra well-known names all owned by this connection so the TUI's
-        // service list has enough rows to exercise viewport scrolling in
-        // end-to-end snapshot tests. Numbered for stable alphabetical order
-        // and easy-to-read snapshots.
-        for n in 0..12 {
-            conn.request_name(format!("org.busx.Scroll{n:02}"))
-                .expect("request scroll name");
-        }
+    let conn = Builder::address(address.as_str())
+        .expect("build test-bus connection")
+        .serve_at("/org/busx/Test", TestIface { volume: 0.5 })
+        .expect("register test object")
+        .serve_at("/org/busx/Test/sub", TestIface { volume: 0.0 })
+        .expect("register sub object")
+        .name("org.busx.Test")
+        .expect("request name")
+        .build()
+        .expect("connect test bus");
 
-        TestBus {
-            address,
-            _conn: conn,
-            daemon_pid,
-        }
-    })
+    // A second, deliberately overlong well-known name so `list` can exercise
+    // its NAME-column truncation.
+    conn.request_name(
+        "org.busx.TestServiceNameThatIsIntentionallyVeryLongSoItExceedsTheNameColumnWidthLimitOfFiftyFour",
+    )
+    .expect("request long name");
+
+    // Extra well-known names all owned by this connection so the TUI's
+    // service list has enough rows to exercise viewport scrolling in
+    // end-to-end snapshot tests. Letter-suffixed (rather than numbered)
+    // so they contain no digits — that way the e2e insta filter can
+    // blanket-match any remaining digit string as a PID without
+    // clobbering the service names.
+    for suffix in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'] {
+        conn.request_name(format!("org.busx.Scroll{suffix}"))
+            .expect("request scroll name");
+    }
+
+    TestBus {
+        address,
+        _conn: conn,
+        daemon_pid,
+    }
 }
