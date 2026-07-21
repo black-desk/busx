@@ -261,50 +261,6 @@ impl State {
         }
     }
 
-    /// Build a State with a single populated Service screen (tests / default).
-    #[cfg(test)]
-    pub fn service(services: Vec<ServiceInfo>) -> Self {
-        State {
-            nav: NavContext::default(),
-            screens: vec![Screen::Service(ServiceScreen {
-                services,
-                selected: 0,
-                loading: false,
-                error: None,
-            })],
-            quit: false,
-            popup: None,
-            click_targets: Vec::new(),
-            help_open: false,
-            bus: Bus::Session,
-            show_standard_interfaces: false,
-            filter: None,
-        }
-    }
-
-    /// Build a State with a pre-built screen stack and nav context. The stack
-    /// must be non-empty (the last element is shown); this is the constructor
-    /// tests use in place of a struct literal now that `screens` is private.
-    /// Panics on an empty stack to make the never-empty invariant unmissable.
-    #[cfg(test)]
-    pub fn with_screens(nav: NavContext, screens: Vec<Screen>) -> Self {
-        assert!(
-            !screens.is_empty(),
-            "screen stack must have at least one screen"
-        );
-        State {
-            nav,
-            screens,
-            quit: false,
-            popup: None,
-            click_targets: Vec::new(),
-            help_open: false,
-            bus: Bus::Session,
-            show_standard_interfaces: false,
-            filter: None,
-        }
-    }
-
     /// The currently-shown screen. The stack is never empty (private field,
     /// `with_screens` rejects empty, `pop_screen` refuses at the root), so
     /// `len() - 1` is a valid index — no `expect`/`unwrap` needed.
@@ -345,24 +301,6 @@ impl State {
         }
         self.screens.pop();
         true
-    }
-
-    /// The focus of the top Interface screen (test convenience).
-    #[cfg(test)]
-    pub fn top_focus(&self) -> InterfaceFocus {
-        match self.top() {
-            Screen::Interface(i) => i.focus,
-            _ => InterfaceFocus::Methods,
-        }
-    }
-
-    /// The per-column selection of the top Interface screen (test convenience).
-    #[cfg(test)]
-    pub fn top_selected(&self) -> [usize; 3] {
-        match self.top() {
-            Screen::Interface(i) => i.selected,
-            _ => [0, 0, 0],
-        }
     }
 }
 

@@ -101,6 +101,13 @@ impl TestIface {
     fn make_control_string(&self) -> String {
         "a\tb\nc\u{1}d".to_string()
     }
+
+    /// Echoes the input bool — round-trip target for the `b` signature, so
+    /// `busx call` encode tests can verify bool parsing (true/yes/on/1 vs
+    /// True/garbage/2) end-to-end through a real D-Bus call.
+    fn echo_bool(&self, b: bool) -> bool {
+        b
+    }
 }
 
 pub struct TestBus {
@@ -158,6 +165,15 @@ pub fn bus() -> &'static TestBus {
             "org.busx.TestServiceNameThatIsIntentionallyVeryLongSoItExceedsTheNameColumnWidthLimitOfFiftyFour",
         )
         .expect("request long name");
+
+        // Extra well-known names all owned by this connection so the TUI's
+        // service list has enough rows to exercise viewport scrolling in
+        // end-to-end snapshot tests. Numbered for stable alphabetical order
+        // and easy-to-read snapshots.
+        for n in 0..12 {
+            conn.request_name(format!("org.busx.Scroll{n:02}"))
+                .expect("request scroll name");
+        }
 
         TestBus {
             address,

@@ -180,7 +180,7 @@ fn write_to_clipboard(text: &str) -> std::result::Result<(), String> {
 /// `user`/`system`/`address` are only used by the Method-listen branch, which
 /// builds its own dedicated connection (BecomeMonitor makes a connection
 /// recv-only, so it cannot reuse the main one).
-fn run_effect(
+pub(super) fn run_effect(
     effect: Effect,
     conn: Connection,
     tx: flume::Sender<Msg>,

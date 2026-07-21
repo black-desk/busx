@@ -12,8 +12,6 @@ mod state;
 mod update;
 
 #[cfg(test)]
-mod copy_tests;
-#[cfg(test)]
-mod snapshot_tests;
+mod e2e_tests;
 
 pub use app::run;

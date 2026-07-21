@@ -339,35 +339,3 @@ where
         .map_err(|e| Error::Msg(format!("invalid {what} `{s}`: {e}")))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bool_accepts_busctl_truthy_and_falsy() {
-        for t in ["true", "yes", "on", "1"] {
-            assert!(parse_bool(t).unwrap(), "{t} should be true");
-        }
-        for f in ["false", "no", "off", "0"] {
-            assert!(!parse_bool(f).unwrap(), "{f} should be false");
-        }
-    }
-
-    #[test]
-    fn bool_rejects_unrecognized_input() {
-        // Case-sensitive: uppercase variants are not busctl's accepted forms.
-        for bad in ["True", "TRUE", "garbage", "maybe", "2", "", "y", "t"] {
-            assert!(
-                parse_bool(bad).is_err(),
-                "`{bad}` should be rejected, not silently coerced"
-            );
-        }
-    }
-
-    #[test]
-    fn bool_round_trips_through_parse() {
-        assert!(matches!(parse("b", &["true".into()]), Ok(v) if matches!(v[0], Value::Bool(true))));
-        assert!(matches!(parse("b", &["0".into()]), Ok(v) if matches!(v[0], Value::Bool(false))));
-        assert!(parse("b", &["nope".into()]).is_err());
-    }
-}

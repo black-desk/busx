@@ -1026,27 +1026,3 @@ fn gdbus_bool(s: &str) -> String {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn split_signature_basics() {
-        assert_eq!(split_signature("su"), vec!["s", "u"]);
-        assert_eq!(split_signature("as"), vec!["as"]);
-        assert_eq!(split_signature("a{sv}"), vec!["a{sv}"]);
-        assert_eq!(split_signature("(ii)s"), vec!["(ii)", "s"]);
-        assert_eq!(split_signature("a(ii)u"), vec!["a(ii)", "u"]);
-        assert_eq!(split_signature(""), Vec::<String>::new());
-    }
-
-    #[test]
-    fn quote_only_when_needed() {
-        assert_eq!(quote("42"), "42");
-        assert_eq!(quote("hi"), "hi");
-        assert_eq!(quote("a b"), "\"a b\"");
-        assert_eq!(quote("a\"b"), "\"a\\\"b\"");
-        assert_eq!(quote(""), "\"\"");
-        assert_eq!(quote("type='signal'"), "\"type='signal'\"");
-    }
-}

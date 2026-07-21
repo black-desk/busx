@@ -409,3 +409,78 @@ fn call_renders_control_chars_in_string() {
         "no raw tab leaked into the output: {s:?}"
     );
 }
+
+/// `busx call ... b <token>` accepts the same truthy/falsy tokens as
+/// `busctl` (`true`/`yes`/`on`/`1` → true; `false`/`no`/`off`/`0` → false)
+/// and round-trips them through a real D-Bus call to the `EchoBool` fixture.
+/// Replaces the previously-inlined `value::encode::bool_*` unit tests with an
+/// end-to-end counterpart.
+#[test]
+fn call_bool_accepts_busctl_truthy_and_falsy() {
+    let addr = testbus::bus().address.clone();
+    for (token, expected) in [
+        ("true", true),
+        ("yes", true),
+        ("on", true),
+        ("1", true),
+        ("false", false),
+        ("no", false),
+        ("off", false),
+        ("0", false),
+    ] {
+        let out = Command::cargo_bin("busx")
+            .unwrap()
+            .args([
+                "--json",
+                "--address",
+                &addr,
+                "call",
+                "org.busx.Test",
+                "/org/busx/Test",
+                "org.busx.Test",
+                "EchoBool",
+                "b",
+                token,
+            ])
+            .ok()
+            .unwrap_or_else(|e| panic!("`{token}` should be accepted: {e:?}"));
+        let v: Value = serde_json::from_slice(&out.stdout)
+            .unwrap_or_else(|e| panic!("`{token}` reply parsed: {e}"));
+        assert_eq!(
+            v[0]["type"], "b",
+            "EchoBool returns a single bool (`{token}` case): {v}"
+        );
+        assert_eq!(
+            v[0]["data"], expected,
+            "`{token}` round-trips as {expected}: {v}"
+        );
+    }
+}
+
+/// The bool encoder rejects case-variants and non-busctl spellings rather than
+/// silently coercing them. `busx call` exits non-zero and prints an error
+/// instead of issuing the method call.
+#[test]
+fn call_bool_rejects_unrecognized_input() {
+    let addr = testbus::bus().address.clone();
+    for bad in ["True", "TRUE", "garbage", "maybe", "2", "", "y", "t"] {
+        let res = Command::cargo_bin("busx")
+            .unwrap()
+            .args([
+                "--address",
+                &addr,
+                "call",
+                "org.busx.Test",
+                "/org/busx/Test",
+                "org.busx.Test",
+                "EchoBool",
+                "b",
+                bad,
+            ])
+            .ok();
+        assert!(
+            res.is_err(),
+            "`{bad}` should be rejected (non-zero exit), got: {res:?}"
+        );
+    }
+}
