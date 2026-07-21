@@ -25,7 +25,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
 use crate::dbus;
-use crate::tui::app::{run_effect, App};
+use crate::tui::app::{App, run_effect};
 use crate::tui::msg::{Effect, Msg};
 use crate::tui::state::State;
 
@@ -247,7 +247,10 @@ fn e2e_service_list_scrolls_then_climbs() {
     // are plenty to scroll.
     let keys: Vec<Msg> = (0..10).map(|_| key(KeyCode::Down)).collect();
     let out = run_scripted(harness(), keys, 64, 8);
-    assert!(out.contains("Scroll09"), "scrolled far enough to see Scroll09");
+    assert!(
+        out.contains("Scroll09"),
+        "scrolled far enough to see Scroll09"
+    );
     insta::assert_snapshot!(out);
 }
 

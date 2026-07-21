@@ -1025,4 +1025,3 @@ fn gdbus_bool(s: &str) -> String {
         _ => "false".into(),
     }
 }
-
