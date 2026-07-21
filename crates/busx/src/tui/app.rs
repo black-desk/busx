@@ -340,11 +340,38 @@ pub(super) fn run_effect(
                     // The BecomeMonitor rule filters at the bus, so this stream
                     // yields only matching method_call messages — no client-side
                     // filtering or serial tracking needed.
+                    //
+                    // Exception: the daemon emits NameAcquired / NameLost
+                    // signals about this monitor connection's own unique
+                    // name as part of the BecomeMonitor lifecycle (the
+                    // connection's "primary name" changes from normal to
+                    // monitor). These are bus plumbing, not the application-
+                    // level traffic the user asked to listen for, and their
+                    // arrival timing / count is daemon-implementation-
+                    // dependent. `busctl monitor` handles this by waiting
+                    // for `NameLost(own_name)` before it starts displaying
+                    // messages; we do the same — discard everything until
+                    // that confirmation arrives, then forward normally.
+                    let own_name = dedicated
+                        .unique_name()
+                        .map(|n| n.to_string())
+                        .unwrap_or_default();
+                    let mut monitor_ready = false;
                     let mut stream = zbus::MessageStream::from(&dedicated).fuse();
                     loop {
                         futures::select! {
                             msg = stream.next() => match msg {
                                 Some(Ok(m)) => {
+                                    if !monitor_ready {
+                                        // Mirror busctl: wait for the daemon's
+                                        // NameLost(own_name) that signals monitor
+                                        // mode is live. Anything before it is
+                                        // BecomeMonitor lifecycle noise.
+                                        if is_monitor_ready_signal(&m, &own_name) {
+                                            monitor_ready = true;
+                                        }
+                                        continue;
+                                    }
                                     let _ = tx.send(Msg::ListenMessage(
                                         crate::dbus::monitor::format_message(&m)));
                                 }
@@ -407,6 +434,34 @@ pub(super) fn run_effect(
 }
 
 /// Client-side filter for a received listen message. Signals always pass; a
+/// Is `m` the `NameLost(own_name)` signal the daemon sends to confirm that
+/// BecomeMonitor has taken effect? `busctl monitor` waits for exactly this
+/// signal before it starts displaying messages — anything earlier is
+/// BecomeMonitor lifecycle noise (NameAcquired, the implicit name release
+/// the daemon does as part of the transition, etc.).
+///
+/// Best-effort: on parse failure, return `false` (don't suppress on
+/// uncertainty — the worst case is the user sees one extra message).
+fn is_monitor_ready_signal(m: &zbus::Message, own_name: &str) -> bool {
+    use zbus::message::Type;
+    if m.header().message_type() != Type::Signal {
+        return false;
+    }
+    let h = m.header();
+    let iface_matches = h.interface().is_some_and(|i| i == "org.freedesktop.DBus");
+    let member_matches = h.member().is_some_and(|memb| memb == "NameLost");
+    let path_matches = h
+        .path()
+        .is_some_and(|p| p.as_str() == "/org/freedesktop/DBus");
+    if !iface_matches || !member_matches || !path_matches {
+        return false;
+    }
+    let Ok((name,)) = m.body().deserialize::<(String,)>() else {
+        return false;
+    };
+    name == own_name
+}
+
 /// Property listen forwards only `PropertiesChanged` messages whose changed- or
 /// invalidated-keys mention the watched property. Best-effort: on parse failure
 /// the message passes through (don't kill the stream for one odd message).
