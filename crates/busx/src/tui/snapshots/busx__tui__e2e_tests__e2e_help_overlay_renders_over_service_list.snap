@@ -1,0 +1,28 @@
+---
+source: crates/busx/src/tui/e2e_tests.rs
+expression: out
+---
+"                                                                                "
+"┌Services──────────────────────────────────────────────────────────────────────┐"
+"│org.busx.Scroll00                                      <PID>  busx-1e64b0be43│"
+"│org.busx.Scroll01                                      <PID>  busx-1e64b0be43│"
+"│org.busx.Sc┌help — Esc or ? to close──────────────────────────────┐-1e64b0be43│"
+"│org.busx.Sc│busx — keybindings                                    │-1e64b0be43│"
+"│org.busx.Sc│                                                      │-1e64b0be43│"
+"│org.busx.Sc│global:                                               │-1e64b0be43│"
+"│org.busx.Sc│  ↑↓ / jk     move selection (or scroll on the Result │-1e64b0be43│"
+"│org.busx.Sc│screen)                                               │-1e64b0be43│"
+"│org.busx.Sc│  Enter       open / activate / drill in / fire the   │-1e64b0be43│"
+"│org.busx.Sc│focused button                                        │-1e64b0be43│"
+"│org.busx.Sc│  Esc         back (or stop a listen); at the root    │-1e64b0be43│"
+"│org.busx.Sc│Service screen, quit                                  │-1e64b0be43│"
+"│org.busx.Te│  q           quit                                    │-1e64b0be43│"
+"│org.busx.Te│  /           (list screen) filter — type to narrow,  │-1e64b0be43│"
+"│org.freedes│↑↓ pick, Enter open, Esc clear                        │dbus-daemon│"
+"│:1.N       │  Tab         (Interface) cycle the                   │-1e64b0be43│"
+"│:1.N       │methods/properties/signals columns                    │-1e64b0be43│"
+"│:1.N       └──────────────────────────────────────────────────────┘-1e64b0be43│"
+"│:1.N                                                   <PID>  busx-1e64b0be43│"
+"│:1.N                                                   <PID>  busx-1e64b0be43│"
+"└──────────────────────────────────────────────────────────────────────────────┘"
+"↑↓ select · Enter open · / filter · q quit · ? help                             "

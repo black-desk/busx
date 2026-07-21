@@ -1,0 +1,24 @@
+---
+source: crates/busx/src/tui/e2e_tests.rs
+expression: out
+---
+"org.busx.Test > /org/busx/Test/sub > org.busx.Test                              "
+"┌▶ methods───────────────────────────────────────────────┐┌actions─────────────┐"
+"│TakeHints          a{sv}                                ││Call                │"
+"│Join               as                                   ││Listen              │"
+"│BumpVolume                                              ││                    │"
+"│MakeFd                                                  ││                    │"
+"└────────────────────────────────────────────────────────┘│                    │"
+"┌properties──────────────────────────────────────────────┐│                    │"
+"│counts  a{uu}  {1: 10, 2: 20}                           ││                    │"
+"│hints   a{sv}  {"urgency": <y 1>}                       ││                    │"
+"│name    s      "busx-test"                              ││                    │"
+"│volume  d      0                                        ││                    │"
+"└────────────────────────────────────────────────────────┘│                    │"
+"┌signals─────────────────────────────────────────────────┐│                    │"
+"│                                                        ││                    │"
+"│                                                        ││                    │"
+"│                                                        ││                    │"
+"│                                                        ││                    │"
+"└────────────────────────────────────────────────────────┘└────────────────────┘"
+"Tab column · ↑↓ select · Enter open · r refresh · Esc back · q quit · ? help    "

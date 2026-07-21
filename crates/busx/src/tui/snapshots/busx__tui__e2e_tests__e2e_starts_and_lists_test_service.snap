@@ -1,0 +1,16 @@
+---
+source: crates/busx/src/tui/e2e_tests.rs
+expression: out
+---
+"                                                                "
+"┌Services──────────────────────────────────────────────────────┐"
+"│org.busx.Scroll00                      <PID>  busx-1e64b0be43│"
+"│org.busx.Scroll01                      <PID>  busx-1e64b0be43│"
+"│org.busx.Scroll02                      <PID>  busx-1e64b0be43│"
+"│org.busx.Scroll03                      <PID>  busx-1e64b0be43│"
+"│org.busx.Scroll04                      <PID>  busx-1e64b0be43│"
+"│org.busx.Scroll05                      <PID>  busx-1e64b0be43│"
+"│org.busx.Scroll06                      <PID>  busx-1e64b0be43│"
+"│org.busx.Scroll07                      <PID>  busx-1e64b0be43│"
+"└──────────────────────────────────────────────────────────────┘"
+"↑↓ select · Enter open · / filter · q quit · ? help             "
