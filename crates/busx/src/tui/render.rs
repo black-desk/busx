@@ -798,9 +798,13 @@ fn render_sub_list(
 
 fn render_keyhint(frame: &mut Frame, area: Rect, screen: &Screen) {
     let hint = match screen {
-        Screen::Service(_) => "↑↓ select · Enter open · / filter · q quit · ? help",
-        Screen::Objects(_) => "↑↓ select · Enter open · / filter · Esc back · q quit · ? help",
-        Screen::Interfaces(_) => "↑↓ select · Enter open · / filter · Esc back · q quit · ? help",
+        Screen::Service(_) => "↑↓ select · Enter open · / filter · r refresh · q quit · ? help",
+        Screen::Objects(_) => {
+            "↑↓ select · Enter open · / filter · r refresh · Esc back · q quit · ? help"
+        }
+        Screen::Interfaces(_) => {
+            "↑↓ select · Enter open · / filter · r refresh · Esc back · q quit · ? help"
+        }
         Screen::Interface(_) => {
             "Tab column · ↑↓ select · Enter open · r refresh · Esc back · q quit · ? help"
         }
@@ -935,7 +939,7 @@ global:
   q           quit
   /           (list screen) filter — type to narrow, ↑↓ pick, Enter open, Esc clear
   Tab         (Interface) cycle the methods/properties/signals columns
-  r           (Interface) refresh the property-value snapshot
+  r           refresh the current view (service list / objects / interfaces / property values)
   c           copy-as — generate dbus-send/busctl/qdbus/gdbus for the current op
   y           (Result) copy the result text
   ?           toggle this help

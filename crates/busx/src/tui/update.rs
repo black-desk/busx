@@ -163,6 +163,13 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
             return None;
         }
     }
+    // `r` refreshes the current view: re-fetch the service list / object tree /
+    // introspection / property snapshot for the top screen. No-op on Detail/
+    // Result (no data to refresh). Clears any prior error so the user sees a
+    // clean loading state, not a stale error message.
+    if matches!(k.code, KeyCode::Char('r')) {
+        return refresh_screen(state);
+    }
     if matches!(k.code, KeyCode::Esc) {
         // On the Interface screen, Esc first backs out of the action-button bar
         // (back to the member column); only a second Esc pops the screen.
@@ -186,12 +193,11 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
         state.filter = Some(tui_input::Input::default());
         return None;
     }
-    let nav = state.nav.clone();
     match state.top_mut() {
         Screen::Service(s) => update_service_key(s, k.code),
         Screen::Objects(o) => update_objects_key(o, k.code),
         Screen::Interfaces(i) => update_interfaces_key(i, k.code),
-        Screen::Interface(i) => return update_interface_key(i, &nav, k),
+        Screen::Interface(i) => return update_interface_key(i, k),
         Screen::Detail(d) => return update_detail_key(d, k),
         Screen::Result(r) => update_result_key(r, k.code),
     }
@@ -892,8 +898,9 @@ fn update_interfaces_key(i: &mut InterfacesScreen, code: KeyCode) {
 /// - `Enter` (drill into buttons / fire a button) and `Esc` (back out of buttons
 ///   before popping) are handled in `handle_enter` / the global Esc arm — NOT
 ///   here, since they need `&mut State`.
-/// - `r` refreshes the property-value snapshot (GetAll) for this interface.
-fn update_interface_key(i: &mut InterfaceScreen, nav: &NavContext, k: KeyEvent) -> Option<Effect> {
+/// - `r` (refresh the property-value snapshot) is handled globally in
+///   `update_key` so the same key refreshes every list/interface screen.
+fn update_interface_key(i: &mut InterfaceScreen, k: KeyEvent) -> Option<Effect> {
     match (k.code, k.modifiers.contains(KeyModifiers::SHIFT)) {
         // Tab (no Shift): leave the button bar if in it, then cycle forward.
         (KeyCode::Tab, false) => {
@@ -927,18 +934,47 @@ fn update_interface_key(i: &mut InterfaceScreen, nav: &NavContext, k: KeyEvent) 
                 i.selected[idx] = i.selected[idx].saturating_sub(1);
             }
         }
-        // Refresh the property-value snapshot.
-        (KeyCode::Char('r'), _) => {
-            i.loading = true;
-            return Some(Effect::FetchProperties(
-                nav.service.clone(),
-                nav.object.clone(),
-                nav.interface.clone(),
-            ));
-        }
         _ => {}
     }
     None
+}
+
+/// `r` refresh handler: refetch the top screen's data. Sets `loading = true`
+/// and clears any prior error so the user sees a clean loading state, then
+/// returns the matching `Effect` for `run_effect` to perform. No-op (returns
+/// `None`) on Detail/Result, which carry no refreshable data.
+///
+/// On Service/Objects/Interfaces, the existing list/paths/names stay visible
+/// until the new data arrives (selection is re-clamped by `load_*`); on
+/// Interface only the property-value snapshot is re-fetched (methods/signals
+/// come from the parent Interfaces screen's cached introspection node).
+fn refresh_screen(state: &mut State) -> Option<Effect> {
+    let service = state.nav.service.clone();
+    let object = state.nav.object.clone();
+    let interface = state.nav.interface.clone();
+    match state.top_mut() {
+        Screen::Service(s) => {
+            s.loading = true;
+            s.error = None;
+            Some(Effect::FetchServices)
+        }
+        Screen::Objects(o) => {
+            o.loading = true;
+            o.error = None;
+            Some(Effect::FetchObjects(service))
+        }
+        Screen::Interfaces(i) => {
+            i.loading = true;
+            i.error = None;
+            Some(Effect::FetchInterfaces(service, object))
+        }
+        Screen::Interface(i) => {
+            i.loading = true;
+            i.error = None;
+            Some(Effect::FetchProperties(service, object, interface))
+        }
+        _ => None,
+    }
 }
 
 /// Cycle `focus` among Methods/Properties/Signals by `dir` (+1 forward, -1 back).
