@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
-// // SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 
 use std::fmt;
 
@@ -20,7 +20,10 @@ impl fmt::Display for Error {
             Error::Pty(msg) => write!(f, "pty error: {msg}"),
             Error::Io(e) => write!(f, "io error: {e}"),
             Error::Timeout { what, screen } => {
-                write!(f, "timeout waiting for: {what}\n\ncurrent screen:\n{screen}")
+                write!(
+                    f,
+                    "timeout waiting for: {what}\n\ncurrent screen:\n{screen}"
+                )
             }
             Error::ProcessExited => write!(f, "child process exited unexpectedly"),
         }

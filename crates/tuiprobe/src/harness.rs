@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
-// // SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 
 //! High-level test harness: combines PTY management + terminal emulation
 //! into an ergonomic API for driving TUI applications.
@@ -25,8 +25,7 @@ use portable_pty::{CommandBuilder, ExitStatus};
 use crate::emulator::Screen;
 use crate::error::{Error, Result};
 use crate::events::{
-    encode_key, encode_mouse, encode_scroll, KeyCode, KeyModifiers, MouseButton,
-    ScrollDirection,
+    KeyCode, KeyModifiers, MouseButton, ScrollDirection, encode_key, encode_mouse, encode_scroll,
 };
 use crate::pty::Pty;
 

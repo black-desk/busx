@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
-// // SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 
 //! tuiprobe — PTY-based integration testing for TUI applications.
 //!
@@ -45,8 +45,7 @@ mod pty;
 pub use emulator::Screen;
 pub use error::{Error, Result};
 pub use events::{
-    encode_key, encode_mouse, encode_scroll, KeyCode, KeyModifiers, MouseButton,
-    ScrollDirection,
+    KeyCode, KeyModifiers, MouseButton, ScrollDirection, encode_key, encode_mouse, encode_scroll,
 };
 pub use harness::{TuiProbe, TuiProbeBuilder};
 pub use pty::Pty;

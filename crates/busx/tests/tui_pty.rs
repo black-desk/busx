@@ -125,14 +125,24 @@ fn busx_binary() -> std::path::PathBuf {
 /// reproducible across runs.
 fn pty_filter() -> insta::Settings {
     let mut s = insta::Settings::new();
-    // Process comms FIRST (before the PID filter mangles the hex hash).
-    s.add_filter(r"tui_pty-[0-9a-f]+", "<PROC>");
-    s.add_filter(r"busx-[0-9a-f]+", "<PROC>");
+    // PID column: anchor at `│` (left border), skip name_col + separator
+    // (fixed width per terminal size), then match the PID column itself
+    // (` *\d{1,7}` = right-aligned digits, exactly PID_W = 7 chars).
+    // Replace with `  <PID>` (also 7 chars) so all columns past PID stay
+    // aligned regardless of PID digit count (which varies local vs CI).
+    //
+    // Two patterns for the two terminal widths used in tests:
+    //   64-wide: inner=62, name_w = 62-7-15-4 = 36 → prefix = │ + 38 chars
+    //   80-wide: inner=78, name_w = 78-7-15-4 = 52 → prefix = │ + 54 chars
+    s.add_filter(r"(?m)^(│.{38}) *\d{1,7}", "${1}  <PID>");
+    s.add_filter(r"(?m)^(│.{54}) *\d{1,7}", "${1}  <PID>");
+    // PROC column: process comm hash (PROC_W = 15 chars). Replace with
+    // fixed-width `<PROC>         ` (15 chars) to preserve alignment.
+    s.add_filter(r"tui_pty-[0-9a-f]+", "<PROC>         ");
+    s.add_filter(r"busx-[0-9a-f]+", "<PROC>         ");
     // testbus socket path + GUID.
     s.add_filter(r#"unix:path=[^,\s"]+,guid=[^,\s"]+"#, "<SOCKET>");
     s.add_filter(r#"unix:abstract=[^,\s"]+,guid=[^,\s"]+"#, "<SOCKET>");
-    // PIDs last (4+ digits to avoid matching single-digit values in text).
-    s.add_filter(r"\d{4,}", "<PID>");
     s
 }
 
