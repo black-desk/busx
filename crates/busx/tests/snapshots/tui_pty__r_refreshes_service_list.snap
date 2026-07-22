@@ -1,0 +1,16 @@
+---
+source: crates/busx/tests/tui_pty.rs
+expression: probe.screen_contents()
+---
+                                                                
+┌Services (loading…)───────────────────────────────────────────┐
+│org.busx.ScrollA                       <PID>  <PROC>│
+│org.busx.ScrollB                       <PID>  <PROC>│
+│org.busx.ScrollC                       <PID>  <PROC>│
+│org.busx.ScrollD                       <PID>  <PROC>│
+│org.busx.ScrollE                       <PID>  <PROC>│
+│org.busx.ScrollF                       <PID>  <PROC>│
+│org.busx.ScrollG                       <PID>  <PROC>│
+│org.busx.ScrollH                       <PID>  <PROC>│
+└──────────────────────────────────────────────────────────────┘
+↑↓ select · Enter open · / filter · r refresh · q quit · ? help
