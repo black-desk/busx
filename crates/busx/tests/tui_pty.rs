@@ -554,7 +554,11 @@ fn listen_property_armed_then_esc() {
     // Back on Interface screen. Focus is on the actions column showing the
     // property actions (Get/Set/Listen) — distinct from the method-actions
     // variant in interface_loaded_actions_focused_80x20.
-    wait_for_snapshot!(&mut probe, "interface_loaded_property_actions_focused_80x20").unwrap();
+    wait_for_snapshot!(
+        &mut probe,
+        "interface_loaded_property_actions_focused_80x20"
+    )
+    .unwrap();
     insta::assert_snapshot!(probe.screen_contents());
 
     probe.send_key(KeyCode::Char('q')).unwrap();
