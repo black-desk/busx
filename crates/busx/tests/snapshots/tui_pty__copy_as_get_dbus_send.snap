@@ -1,0 +1,5 @@
+---
+source: crates/busx/tests/tui_pty.rs
+expression: clip.contents()
+---
+dbus-send --bus=<SOCKET> --print-reply --dest=org.busx.Test /org/busx/Test org.freedesktop.DBus.Properties.Get string:org.busx.Test string:volume

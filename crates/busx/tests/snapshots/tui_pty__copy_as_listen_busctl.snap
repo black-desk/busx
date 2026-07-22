@@ -1,0 +1,5 @@
+---
+source: crates/busx/tests/tui_pty.rs
+expression: clip.contents()
+---
+busctl --address=<SOCKET> monitor "type='method_call',interface='org.busx.Test',member='TakeHints',path='/org/busx/Test'"

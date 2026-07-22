@@ -14,6 +14,7 @@
 //! (main → CLI → crossterm → ratatui → render) and eliminates the 250ms-per-
 //! key sleep that made the old suite take 77+ seconds.
 
+use std::fs;
 use std::time::Duration;
 
 use portable_pty::CommandBuilder;
@@ -34,6 +35,79 @@ fn spawn_busx(addr: &str, w: u16, h: u16) -> TuiProbe {
     cmd.arg(addr);
     probe.spawn(cmd).expect("spawn busx");
     probe
+}
+
+/// Spawn busx with a ClipboardMock that intercepts wl-copy/xclip/xsel.
+/// The child's PATH is prepended with a tempdir of mock scripts, so
+/// busx's `write_to_clipboard` spawns the mock instead of the real tool.
+fn spawn_busx_with_clip(addr: &str, w: u16, h: u16) -> (TuiProbe, ClipboardMock) {
+    let clip = ClipboardMock::new();
+    let mut probe = TuiProbe::builder()
+        .cols(w)
+        .rows(h)
+        .timeout(Duration::from_secs(5))
+        .build()
+        .expect("create probe");
+    let mut cmd = CommandBuilder::new(busx_binary());
+    cmd.arg("--address");
+    cmd.arg(addr);
+    cmd.env("PATH", clip.child_path());
+    probe.spawn(cmd).expect("spawn busx");
+    (probe, clip)
+}
+
+/// RAII guard that creates mock `wl-copy` / `xclip` / `xsel` scripts in a
+/// tempdir. Each script appends its stdin to a shared log file. When busx's
+/// `write_to_clipboard` spawns `wl-copy` (the first tool tried), the mock
+/// captures the generated command line.
+///
+/// Unlike the old in-process ClipboardMock, this sets PATH only on the
+/// **child process** via `CommandBuilder::env` — no `unsafe set_var`, no
+/// `#[serial]` needed.
+struct ClipboardMock {
+    log_path: std::path::PathBuf,
+    _dir: tempfile::TempDir,
+}
+
+impl ClipboardMock {
+    fn new() -> Self {
+        let dir = tempfile::TempDir::new().expect("tempdir for clipboard mock");
+        let log_path = dir.path().join("clipboard.log");
+        // All three tools busx tries get the same script: append stdin to log.
+        let script = format!("#!/bin/sh\ncat >> '{}'\n", log_path.display());
+        for name in ["wl-copy", "xclip", "xsel"] {
+            let path = dir.path().join(name);
+            fs::write(&path, &script).expect("write mock script");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = fs::metadata(&path).unwrap().permissions();
+                perms.set_mode(0o755);
+                fs::set_permissions(&path, perms).unwrap();
+            }
+        }
+        ClipboardMock {
+            log_path,
+            _dir: dir,
+        }
+    }
+
+    /// The PATH value to inject into the child process: mock-dir + current PATH.
+    fn child_path(&self) -> String {
+        format!(
+            "{}:{}",
+            self._dir.path().display(),
+            std::env::var("PATH").unwrap_or_default()
+        )
+    }
+
+    /// Read everything busx has copied via the mock tools so far. Blocks
+    /// briefly because `write_to_clipboard` does **not** wait on the spawned
+    /// tool (it can daemonize) — give the mock a beat to finish draining.
+    fn contents(&self) -> String {
+        std::thread::sleep(Duration::from_millis(50));
+        fs::read_to_string(&self.log_path).unwrap_or_default()
+    }
 }
 
 /// Locate the compiled busx binary (tests run inside target/debug/deps/).
@@ -462,25 +536,125 @@ fn listen_property_armed_then_esc() {
     probe.send_key(KeyCode::Char('q')).unwrap();
 }
 
-// ── Copy-as popup ────────────────────────────────────────────────────────
+// ── Copy-as (clipboard command verification) ────────────────────────────
+//
+// These tests verify the **exact command text** busx generates for each
+// copy-as tool (dbus-send / busctl / qdbus / gdbus). A ClipboardMock
+// intercepts wl-copy's stdin, and we snapshot the full captured text —
+// not just `contains` — so any formatting change (arg order, quoting,
+// signature encoding) is caught.
+
+/// Open the copy-as popup, navigate to the given tool row (0=dbus-send,
+/// 1=busctl, 2=qdbus, 3=gdbus), press Enter to copy, and wait for the
+/// "copied" status.
+fn copy_tool(probe: &mut TuiProbe, tool_row: usize) {
+    probe.send_key(KeyCode::Char('c')).unwrap();
+    probe.wait_for_text("copy as").unwrap();
+    for _ in 0..tool_row {
+        probe.send_key(KeyCode::Down).unwrap();
+    }
+    probe.send_key(KeyCode::Enter).unwrap();
+    probe.wait_for_text("copied").unwrap();
+}
 
 #[test]
-fn copy_as_popup_on_interface() {
+fn copy_as_call_busctl() {
+    // TakeHints has signature a{sv} — dbus-send can't express it, so the
+    // popup shows "(unsupported)" for dbus-send. We copy the busctl command.
     let _g = pty_filter().bind_to_scope();
     let bus = testbus::bus_owned();
-    let mut probe = spawn_busx(&bus.address, 100, 28);
+    let (mut probe, clip) = spawn_busx_with_clip(&bus.address, 100, 28);
 
     drill_to_interface(&mut probe);
     probe.wait_for_text("volume").unwrap();
 
-    // Enter button bar, fire Call on TakeHints (a{sv}).
-    probe.send_key(KeyCode::Enter).unwrap();
+    // TakeHints (method 0), enter button bar, fire Call → Detail.
+    probe.send_key(KeyCode::Enter).unwrap(); // enter button bar
+    probe.send_key(KeyCode::Enter).unwrap(); // fire Call (a{sv} → Detail)
+
+    // Copy busctl command (row 1).
+    copy_tool(&mut probe, 1);
+    insta::assert_snapshot!(clip.contents());
+
+    probe.send_key(KeyCode::Char('q')).unwrap();
+}
+
+#[test]
+fn copy_as_get_dbus_send() {
+    // Get volume (signature d) — all tools can express. Copy the default
+    // (dbus-send, row 0) from the Result screen.
+    let _g = pty_filter().bind_to_scope();
+    let bus = testbus::bus_owned();
+    let (mut probe, clip) = spawn_busx_with_clip(&bus.address, 100, 28);
+
+    drill_to_interface(&mut probe);
+    probe.wait_for_text("volume").unwrap();
+
+    // Tab to Properties, Down to volume, Get → Result.
+    probe.send_key(KeyCode::Tab).unwrap();
+    probe.send_key(KeyCode::Down).unwrap();
+    probe.send_key(KeyCode::Down).unwrap();
+    probe.send_key(KeyCode::Down).unwrap();
+    probe.send_key(KeyCode::Enter).unwrap(); // button bar
+    probe.send_key(KeyCode::Enter).unwrap(); // fire Get → Result
+
+    // Copy dbus-send command (row 0).
+    copy_tool(&mut probe, 0);
+    insta::assert_snapshot!(clip.contents());
+
+    probe.send_key(KeyCode::Char('q')).unwrap();
+}
+
+#[test]
+fn copy_as_set_dbus_send() {
+    // Set volume = 1.5 (signature d) — copy from the Detail form (before
+    // firing). Tests that copy-as reflects the typed value.
+    let _g = pty_filter().bind_to_scope();
+    let bus = testbus::bus_owned();
+    let (mut probe, clip) = spawn_busx_with_clip(&bus.address, 100, 28);
+
+    drill_to_interface(&mut probe);
+    probe.wait_for_text("volume").unwrap();
+
+    // Tab to Properties, Down to volume, Set → Detail.
+    probe.send_key(KeyCode::Tab).unwrap();
+    probe.send_key(KeyCode::Down).unwrap();
+    probe.send_key(KeyCode::Down).unwrap();
+    probe.send_key(KeyCode::Down).unwrap();
+    probe.send_key(KeyCode::Enter).unwrap(); // button bar
+    probe.send_key(KeyCode::Down).unwrap(); // Set button
     probe.send_key(KeyCode::Enter).unwrap(); // push Detail
 
-    // Open copy-as popup.
-    probe.send_key(KeyCode::Char('c')).unwrap();
-    probe.wait_for_text("busctl").unwrap();
-    insta::assert_snapshot!(probe.screen_contents());
+    // Type the value.
+    for ch in "1.5".chars() {
+        probe.send_key(KeyCode::Char(ch)).unwrap();
+    }
+
+    // Copy dbus-send command (row 0) from the Detail screen.
+    copy_tool(&mut probe, 0);
+    insta::assert_snapshot!(clip.contents());
+
+    probe.send_key(KeyCode::Char('q')).unwrap();
+}
+
+#[test]
+fn copy_as_listen_busctl() {
+    // Listen on a signal — copy the busctl monitor command from Result.
+    let _g = pty_filter().bind_to_scope();
+    let bus = testbus::bus_owned();
+    let (mut probe, clip) = spawn_busx_with_clip(&bus.address, 100, 28);
+
+    drill_to_interface(&mut probe);
+    probe.wait_for_text("volume").unwrap();
+
+    // Enter button bar, Down to Listen, fire → Result.
+    probe.send_key(KeyCode::Enter).unwrap();
+    probe.send_key(KeyCode::Down).unwrap(); // Call → Listen
+    probe.send_key(KeyCode::Enter).unwrap(); // fire Listen → Result
+
+    // Copy busctl command (row 1 — dbus-send can't express match rules).
+    copy_tool(&mut probe, 1);
+    insta::assert_snapshot!(clip.contents());
 
     probe.send_key(KeyCode::Char('q')).unwrap();
 }
