@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
-// // SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 
 //! Keyboard / mouse event types and their encoding to terminal escape
 //! sequences.
@@ -40,10 +40,26 @@ pub struct KeyModifiers {
 }
 
 impl KeyModifiers {
-    pub const NONE: Self = Self { ctrl: false, alt: false, shift: false };
-    pub const CTRL: Self = Self { ctrl: true, alt: false, shift: false };
-    pub const ALT: Self = Self { ctrl: false, alt: true, shift: false };
-    pub const SHIFT: Self = Self { ctrl: false, alt: false, shift: true };
+    pub const NONE: Self = Self {
+        ctrl: false,
+        alt: false,
+        shift: false,
+    };
+    pub const CTRL: Self = Self {
+        ctrl: true,
+        alt: false,
+        shift: false,
+    };
+    pub const ALT: Self = Self {
+        ctrl: false,
+        alt: true,
+        shift: false,
+    };
+    pub const SHIFT: Self = Self {
+        ctrl: false,
+        alt: false,
+        shift: true,
+    };
 }
 
 /// A mouse button.

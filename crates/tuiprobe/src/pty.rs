@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
-// // SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 
 //! PTY management: spawn a child process in a pseudo-terminal, send input
 //! to it, and read output from it via a background reader thread.
@@ -21,9 +21,7 @@ use std::io::{Read, Write};
 use std::sync::mpsc;
 use std::thread;
 
-use portable_pty::{
-    Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native_pty_system,
-};
+use portable_pty::{Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native_pty_system};
 
 use crate::error::{Error, Result};
 

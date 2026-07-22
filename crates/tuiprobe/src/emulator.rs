@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
-// // SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 
 //! Terminal emulator backed by [`alacritty_terminal::Term`].
 //!

@@ -4,9 +4,9 @@ expression: probe.screen_contents()
 ---
                                                                 
 ┌Services──────────────────────────────────────────────────────┐
-│org.busx.ScrollC                       <PID>  <PROC>│
-│org.busx.ScrollD                       <PID>  <PROC>│
-│org.busx.ScrollE                       <PID>  <PROC>│
-│org.busx.ScrollF                       <PID>  <PROC>│
+│org.busx.ScrollC                        <PID>  <PROC>         │
+│org.busx.ScrollD                        <PID>  <PROC>         │
+│org.busx.ScrollE                        <PID>  <PROC>         │
+│org.busx.ScrollF                        <PID>  <PROC>         │
 └──────────────────────────────────────────────────────────────┘
 ↑↓ select · Enter open · / filter · r refresh · q quit · ? help
