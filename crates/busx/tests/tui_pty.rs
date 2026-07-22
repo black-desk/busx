@@ -407,7 +407,7 @@ fn esc_pops_result_back_to_interface() {
     let mut probe = spawn_busx(&bus.address, 80, 20);
 
     drill_to_interface(&mut probe, "80x20");
-    probe.wait_for_text("volume").unwrap();
+    wait_for_snapshot!(&mut probe, "interface_loaded_80x20").unwrap();
 
     // Call a zero-arg method to reach the Result screen, then Esc back.
     probe.send_key(KeyCode::Down).unwrap();
@@ -415,11 +415,12 @@ fn esc_pops_result_back_to_interface() {
     probe.send_key(KeyCode::Down).unwrap();
     probe.send_key(KeyCode::Enter).unwrap();
     probe.send_key(KeyCode::Enter).unwrap();
-    probe.wait_for_text("/dev/null").unwrap();
+    wait_for_snapshot!(&mut probe, "result_call_makefd_80x20").unwrap();
 
     probe.send_key(KeyCode::Esc).unwrap();
     // Back on Interface screen — should show methods/properties again.
-    probe.wait_for_text("volume").unwrap();
+    // Focus is on the actions column (left over from firing the Call).
+    wait_for_snapshot!(&mut probe, "interface_loaded_actions_focused_80x20").unwrap();
     insta::assert_snapshot!(probe.screen_contents());
 
     probe.send_key(KeyCode::Char('q')).unwrap();
@@ -448,7 +449,7 @@ fn r_refreshes_service_list() {
     let bus = testbus::bus_owned();
     let mut probe = spawn_busx(&bus.address, 64, 12);
 
-    probe.wait_for_text("org.busx.ScrollA").unwrap();
+    wait_for_snapshot!(&mut probe, "service_list_64x12").unwrap();
     probe.send_key(KeyCode::Char('r')).unwrap();
     wait_for_refresh_done(&mut probe);
     assert!(probe.contains("Services"));
@@ -464,13 +465,13 @@ fn r_refreshes_objects_list() {
     let mut probe = spawn_busx(&bus.address, 64, 12);
 
     // Drill to the Objects screen.
-    probe.wait_for_text("org.busx.ScrollA").unwrap();
+    wait_for_snapshot!(&mut probe, "service_list_64x12").unwrap();
     probe.send_key(KeyCode::Char('/')).unwrap();
     for ch in "test".chars() {
         probe.send_key(KeyCode::Char(ch)).unwrap();
     }
     probe.send_key(KeyCode::Enter).unwrap();
-    probe.wait_for_text("/org/busx/Test").unwrap();
+    wait_for_snapshot!(&mut probe, "objects_list_test_filter_64x12").unwrap();
 
     // Press r to refetch the object tree.
     probe.send_key(KeyCode::Char('r')).unwrap();
@@ -488,7 +489,7 @@ fn r_refreshes_interface_properties() {
     let mut probe = spawn_busx(&bus.address, 80, 20);
 
     drill_to_interface(&mut probe, "80x20");
-    probe.wait_for_text("volume").unwrap();
+    wait_for_snapshot!(&mut probe, "interface_loaded_80x20").unwrap();
 
     // Press r to refetch the property-value snapshot (GetAll).
     probe.send_key(KeyCode::Char('r')).unwrap();
