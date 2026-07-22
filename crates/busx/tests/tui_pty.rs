@@ -338,6 +338,21 @@ fn esc_pops_result_back_to_interface() {
 }
 
 // ── Refresh (r key) ─────────────────────────────────────────────────────
+//
+// r-refresh tests have a subtlety: the data on screen doesn't change (the
+// testbus fixture returns the same values), so wait_for_text can't detect
+// completion by looking for "new" content. Instead we wait for the loading
+// indicator to appear then disappear: busx sets `loading=true` on the
+// screen (rendered as "(loading…)" in the title) while the refetch is
+// in-flight, then clears it when the data arrives.
+
+/// Wait for a refetch to complete: first sleep briefly so the loading
+/// state has time to render, then poll until the "(loading…)" indicator
+/// disappears from the screen.
+fn wait_for_refresh_done(probe: &mut TuiProbe) {
+    std::thread::sleep(Duration::from_millis(50));
+    probe.wait_for(|s| !s.contains("loading")).unwrap();
+}
 
 #[test]
 fn r_refreshes_service_list() {
@@ -347,8 +362,7 @@ fn r_refreshes_service_list() {
 
     probe.wait_for_text("org.busx.ScrollA").unwrap();
     probe.send_key(KeyCode::Char('r')).unwrap();
-    // After refresh, the list should still show services.
-    probe.wait_for_text("org.busx.ScrollA").unwrap();
+    wait_for_refresh_done(&mut probe);
     assert!(probe.contains("Services"));
     insta::assert_snapshot!(probe.screen_contents());
 
@@ -372,7 +386,7 @@ fn r_refreshes_objects_list() {
 
     // Press r to refetch the object tree.
     probe.send_key(KeyCode::Char('r')).unwrap();
-    probe.wait_for_text("/org/busx/Test").unwrap();
+    wait_for_refresh_done(&mut probe);
     assert!(probe.contains("/org/busx/Test/sub"));
     insta::assert_snapshot!(probe.screen_contents());
 
@@ -390,7 +404,7 @@ fn r_refreshes_interface_properties() {
 
     // Press r to refetch the property-value snapshot (GetAll).
     probe.send_key(KeyCode::Char('r')).unwrap();
-    probe.wait_for_text("volume").unwrap();
+    wait_for_refresh_done(&mut probe);
     assert!(probe.contains("org.busx.Test"));
     insta::assert_snapshot!(probe.screen_contents());
 
