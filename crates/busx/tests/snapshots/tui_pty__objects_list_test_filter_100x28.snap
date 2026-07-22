@@ -1,0 +1,33 @@
+---
+source: crates/busx/tests/tui_pty.rs
+assertion_line: 173
+expression: screen
+---
+org.busx.Test
+┌Objects───────────────────────────────────────────────────────────────────────────────────────────┐
+│/                                                                                                 │
+│/org                                                                                              │
+│/org/busx                                                                                         │
+│/org/busx/Test                                                                                    │
+│/org/busx/Test/sub                                                                                │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+↑↓ select · Enter open · / filter · r refresh · Esc back · q quit · ? help
