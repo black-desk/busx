@@ -37,7 +37,7 @@ jobs:
 
   # Verify the project still builds and tests pass on its declared minimum
   # supported Rust (Cargo.toml's `rust-version`). Reuses the rust action at that
-  # toolchain — same clippy + test + coverage, just on 1.87.
+  # toolchain — same clippy + test + coverage, just on 1.88.
   msrv:
     runs-on: ubuntu-latest
     permissions:
@@ -47,7 +47,7 @@ jobs:
       - uses: black-desk/workflows/rust@master
         with:
           working-directory: crates/busx
-          toolchain: "1.87"
+          toolchain: "1.88"
 
   pass:
     name: pass
