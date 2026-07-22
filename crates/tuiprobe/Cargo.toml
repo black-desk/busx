@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+#
+# // SPDX-License-Identifier: MIT
+
+[package]
+name = "tuiprobe"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+description = "PTY-based integration testing for TUI applications"
+license = "MIT"
+repository = "https://github.com/black-desk/busx"
+keywords = ["tui", "testing", "pty", "terminal", "integration"]
+categories = ["development-tools::testing", "command-line-interface"]
+
+[dependencies]
+alacritty_terminal = "0.26"
+portable-pty = "0.8"
+vte = "0.15"
+
+[dev-dependencies]
+insta = "1"
