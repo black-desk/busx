@@ -12,7 +12,7 @@ fn echo_output_is_captured() {
     cmd.arg("-c");
     cmd.arg("echo hello-world");
     probe.spawn(cmd).unwrap();
-    probe.wait_for_text("hello-world").unwrap();
+    probe.wait_for(|s| s.contains("hello-world")).unwrap();
     assert!(probe.screen_contents().contains("hello-world"));
 }
 
@@ -24,7 +24,7 @@ fn enter_sends_carriage_return() {
     probe.send_text("abc").unwrap();
     probe.send_key(KeyCode::Enter).unwrap();
 
-    probe.wait_for_text("abc").unwrap();
+    probe.wait_for(|s| s.contains("abc")).unwrap();
 }
 
 #[test]
@@ -38,6 +38,6 @@ fn wait_for_times_out() {
     let mut cmd = CommandBuilder::new("sleep");
     cmd.arg("10");
     probe.spawn(cmd).unwrap();
-    let result = probe.wait_for_text("never-appears");
+    let result = probe.wait_for(|s| s.contains("never-appears"));
     assert!(result.is_err());
 }
