@@ -719,7 +719,7 @@ fn mouse_scroll_on_service_list() {
     for _ in 0..5 {
         probe.mouse_scroll(5, 5, ScrollDirection::Down).unwrap();
     }
-    insta::assert_snapshot!(probe.screen_contents());
+    wait_for_snapshot!(&mut probe, "mouse_scroll_on_service_list").unwrap();
 
     probe.send_key(KeyCode::Char('q')).unwrap();
 }
