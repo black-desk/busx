@@ -1,0 +1,16 @@
+---
+source: crates/busx/tests/tui_pty.rs
+expression: probe.screen_contents()
+---
+org.busx.Test
+┌Objects (loading…)────────────────────────────────────────────┐
+│/                                                             │
+│/org                                                          │
+│/org/busx                                                     │
+│/org/busx/Test                                                │
+│/org/busx/Test/sub                                            │
+│                                                              │
+│                                                              │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+↑↓ select · Enter open · / filter · r refresh · Esc back · q qui
