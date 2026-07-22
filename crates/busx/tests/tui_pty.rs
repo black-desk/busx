@@ -17,7 +17,7 @@
 use std::time::Duration;
 
 use portable_pty::CommandBuilder;
-use tuiprobe::{KeyCode, KeyModifiers, MouseButton, ScrollDirection, TuiProbe};
+use tuiprobe::{KeyCode, MouseButton, ScrollDirection, TuiProbe};
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -350,6 +350,48 @@ fn r_refreshes_service_list() {
     // After refresh, the list should still show services.
     probe.wait_for_text("org.busx.ScrollA").unwrap();
     assert!(probe.contains("Services"));
+    insta::assert_snapshot!(probe.screen_contents());
+
+    probe.send_key(KeyCode::Char('q')).unwrap();
+}
+
+#[test]
+fn r_refreshes_objects_list() {
+    let _g = pty_filter().bind_to_scope();
+    let bus = testbus::bus_owned();
+    let mut probe = spawn_busx(&bus.address, 64, 12);
+
+    // Drill to the Objects screen.
+    probe.wait_for_text("org.busx.ScrollA").unwrap();
+    probe.send_key(KeyCode::Char('/')).unwrap();
+    for ch in "test".chars() {
+        probe.send_key(KeyCode::Char(ch)).unwrap();
+    }
+    probe.send_key(KeyCode::Enter).unwrap();
+    probe.wait_for_text("/org/busx/Test").unwrap();
+
+    // Press r to refetch the object tree.
+    probe.send_key(KeyCode::Char('r')).unwrap();
+    probe.wait_for_text("/org/busx/Test").unwrap();
+    assert!(probe.contains("/org/busx/Test/sub"));
+    insta::assert_snapshot!(probe.screen_contents());
+
+    probe.send_key(KeyCode::Char('q')).unwrap();
+}
+
+#[test]
+fn r_refreshes_interface_properties() {
+    let _g = pty_filter().bind_to_scope();
+    let bus = testbus::bus_owned();
+    let mut probe = spawn_busx(&bus.address, 80, 20);
+
+    drill_to_interface(&mut probe);
+    probe.wait_for_text("volume").unwrap();
+
+    // Press r to refetch the property-value snapshot (GetAll).
+    probe.send_key(KeyCode::Char('r')).unwrap();
+    probe.wait_for_text("volume").unwrap();
+    assert!(probe.contains("org.busx.Test"));
     insta::assert_snapshot!(probe.screen_contents());
 
     probe.send_key(KeyCode::Char('q')).unwrap();
