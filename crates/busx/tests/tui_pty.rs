@@ -509,14 +509,14 @@ fn listen_method_armed() {
     let mut probe = spawn_busx(&bus.address, 80, 20);
 
     drill_to_interface(&mut probe, "80x20");
-    probe.wait_for_text("volume").unwrap();
+    wait_for_snapshot!(&mut probe, "interface_loaded_80x20").unwrap();
 
     // Enter button bar, Down to Listen, fire.
     probe.send_key(KeyCode::Enter).unwrap();
     probe.send_key(KeyCode::Down).unwrap(); // Call → Listen
     probe.send_key(KeyCode::Enter).unwrap(); // fire Listen → Result streaming
 
-    probe.wait_for_text("listen").unwrap();
+    wait_for_snapshot!(&mut probe, "result_listen_method_80x20").unwrap();
     insta::assert_snapshot!(probe.screen_contents());
 
     probe.send_key(KeyCode::Char('q')).unwrap();
@@ -529,7 +529,7 @@ fn listen_property_armed_then_esc() {
     let mut probe = spawn_busx(&bus.address, 80, 20);
 
     drill_to_interface(&mut probe, "80x20");
-    probe.wait_for_text("volume").unwrap();
+    wait_for_snapshot!(&mut probe, "interface_loaded_80x20").unwrap();
 
     // Tab to Properties, Down to volume.
     probe.send_key(KeyCode::Tab).unwrap();
@@ -541,11 +541,13 @@ fn listen_property_armed_then_esc() {
     probe.send_key(KeyCode::Down).unwrap(); // Set → Listen
     probe.send_key(KeyCode::Enter).unwrap(); // fire Listen → Result
 
-    probe.wait_for_text("listen").unwrap();
+    wait_for_snapshot!(&mut probe, "result_listen_property_80x20").unwrap();
     probe.send_key(KeyCode::Esc).unwrap(); // cancel + pop
 
-    // Back on Interface screen.
-    probe.wait_for_text("volume").unwrap();
+    // Back on Interface screen. Focus is on the actions column showing the
+    // property actions (Get/Set/Listen) — distinct from the method-actions
+    // variant in interface_loaded_actions_focused_80x20.
+    wait_for_snapshot!(&mut probe, "interface_loaded_property_actions_focused_80x20").unwrap();
     insta::assert_snapshot!(probe.screen_contents());
 
     probe.send_key(KeyCode::Char('q')).unwrap();
