@@ -44,50 +44,50 @@ probe.send_key(KeyCode::Char('q'));
 ## Why?
 
 Testing a TUI app with a mock backend (e.g. ratatui's `TestBackend`) skips
-everything between `main()` and the first render — CLI parsing, terminal
-setup, the real crossterm event loop, raw-mode negotiation. Bugs in any of
-those go uncaught.
+everything between `main()` and the first render — CLI parsing, terminal setup,
+the real crossterm event loop, raw-mode negotiation. Bugs in any of those go
+uncaught.
 
 `tuiprobe` runs the **real binary** in a **real PTY**, so you test the exact
 code path your users hit. The trade-off is that output comes as ANSI escape
-sequences rather than a ready-to-read buffer; `tuiprobe` bridges that gap with
-a full terminal emulator so you get clean text back.
+sequences rather than a ready-to-read buffer; `tuiprobe` bridges that gap with a
+full terminal emulator so you get clean text back.
 
 ## API overview
 
 ### Input
 
-| Method | Description |
-|---|---|
-| `send_key(KeyCode)` | Single key press (Enter, Down, Char('a'), …) |
-| `send_key_with_mods(key, KeyModifiers)` | Ctrl/Alt/Shift combos |
-| `send_text("&str")` | Type a string (one Char event per character) |
-| `mouse_click(col, row, MouseButton)` | Click at screen coordinates |
-| `mouse_scroll(col, row, ScrollDirection)` | Scroll wheel |
+| Method                                    | Description                                  |
+| ----------------------------------------- | -------------------------------------------- |
+| `send_key(KeyCode)`                       | Single key press (Enter, Down, Char('a'), …) |
+| `send_key_with_mods(key, KeyModifiers)`   | Ctrl/Alt/Shift combos                        |
+| `send_text("&str")`                       | Type a string (one Char event per character) |
+| `mouse_click(col, row, MouseButton)`      | Click at screen coordinates                  |
+| `mouse_scroll(col, row, ScrollDirection)` | Scroll wheel                                 |
 
 ### Waiting (Cypress-style)
 
-| Method | Description |
-|---|---|
+| Method                                      | Description                                   |
+| ------------------------------------------- | --------------------------------------------- |
 | `wait_for(\|screen\| screen.contains("x"))` | Custom condition, polls until true or timeout |
-| `wait_for_text("Ready")` | Convenience: wait for text anywhere on screen |
-| `wait_for_text_timeout("Ready", 2s)` | Same, with a custom timeout |
+| `wait_for_text("Ready")`                    | Convenience: wait for text anywhere on screen |
+| `wait_for_text_timeout("Ready", 2s)`        | Same, with a custom timeout                   |
 
 ### Output
 
-| Method | Description |
-|---|---|
-| `screen_contents()` | Full visible screen as a trimmed string |
-| `contains("text")` | Quick check for text presence |
-| `cell(row, col)` | Access the `alacritty_terminal::Cell` (char + colors + flags) |
+| Method              | Description                                                   |
+| ------------------- | ------------------------------------------------------------- |
+| `screen_contents()` | Full visible screen as a trimmed string                       |
+| `contains("text")`  | Quick check for text presence                                 |
+| `cell(row, col)`    | Access the `alacritty_terminal::Cell` (char + colors + flags) |
 
 ### Process control
 
-| Method | Description |
-|---|---|
-| `is_running()` | Check if the child is still alive |
-| `wait_exit()` | Block until child exits, return status |
-| `resize(cols, rows)` | Resize the PTY window |
+| Method               | Description                            |
+| -------------------- | -------------------------------------- |
+| `is_running()`       | Check if the child is still alive      |
+| `wait_exit()`        | Block until child exits, return status |
+| `resize(cols, rows)` | Resize the PTY window                  |
 
 ## How it works
 
@@ -115,12 +115,12 @@ a full terminal emulator so you get clean text back.
 
 2. **Background reader thread**: clones the PTY reader **once** at spawn time
    and continuously drains it into an mpsc channel. The main thread reads from
-   the channel — never touching the PTY fd directly. (This avoids the
-   data-loss bug that arises from cloning the reader on every `read()` call.)
+   the channel — never touching the PTY fd directly. (This avoids the data-loss
+   bug that arises from cloning the reader on every `read()` call.)
 
-3. **Terminal emulator** (`alacritty_terminal::Term`): PTY output bytes are
-   fed through `vte`'s parser into `Term`, which maintains the screen grid —
-   exactly what Alacritty does to render its window.
+3. **Terminal emulator** (`alacritty_terminal::Term`): PTY output bytes are fed
+   through `vte`'s parser into `Term`, which maintains the screen grid — exactly
+   what Alacritty does to render its window.
 
 ## Key encoding details
 
@@ -129,9 +129,9 @@ matters because most Rust TUI apps (ratatui, cursive) use crossterm as their
 backend.
 
 The critical gotcha: **Enter is `\r` (CR, 0x0D), not `\n` (LF, 0x0A)**. In raw
-mode crossterm maps `\r` → `KeyCode::Enter` but leaves `\n` as `Ctrl+J`. If
-your key encoder sends `\n` for Enter (as some libraries do), Enter will
-silently not work and you'll spend hours debugging.
+mode crossterm maps `\r` → `KeyCode::Enter` but leaves `\n` as `Ctrl+J`. If your
+key encoder sends `\n` for Enter (as some libraries do), Enter will silently not
+work and you'll spend hours debugging.
 
 ## License
 
