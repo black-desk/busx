@@ -6,8 +6,9 @@
 //!
 //! busx runs as a real subprocess (connected to a private testbus) inside a
 //! PTY. Each test sends keyboard/mouse events, waits for the rendered output
-//! to reach a known state (Cypress-style `wait_for_text`), then snapshots
-//! the terminal screen.
+//! to reach a known state (`wait_for_snapshot!`, which polls until the screen
+//! matches a named insta snapshot), then takes its own snapshot of the
+//! terminal screen.
 //!
 //! This replaces the old in-process `e2e_tests.rs` which used TestBackend +
 //! ScriptedSource + fixed sleeps. The PTY approach tests the full code path
@@ -694,14 +695,14 @@ fn mouse_click_drills_into_service() {
     let bus = testbus::bus_owned();
     let mut probe = spawn_busx(&bus.address, 80, 20);
 
-    probe.wait_for_text("org.busx.ScrollA").unwrap();
+    wait_for_snapshot!(&mut probe, "service_list_80x20").unwrap();
 
     // Click on the first service row (y=2 = first content row after
     // breadcrumb + border). Row 0 already selected → click drills.
     probe.mouse_click(5, 2, MouseButton::Left).unwrap();
 
     // Should navigate to Objects screen.
-    probe.wait_for_text("/org/busx/").unwrap();
+    wait_for_snapshot!(&mut probe, "objects_list_click_scrolla_80x20").unwrap();
     insta::assert_snapshot!(probe.screen_contents());
 
     probe.send_key(KeyCode::Char('q')).unwrap();
@@ -713,7 +714,7 @@ fn mouse_scroll_on_service_list() {
     let bus = testbus::bus_owned();
     let mut probe = spawn_busx(&bus.address, 64, 8);
 
-    probe.wait_for_text("org.busx.ScrollA").unwrap();
+    wait_for_snapshot!(&mut probe, "service_list_64x8").unwrap();
 
     for _ in 0..5 {
         probe.mouse_scroll(5, 5, ScrollDirection::Down).unwrap();
