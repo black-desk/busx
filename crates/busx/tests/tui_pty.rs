@@ -140,6 +140,12 @@ fn pty_filter() -> insta::Settings {
     // fixed-width `<PROC>         ` (15 chars) to preserve alignment.
     s.add_filter(r"tui_pty-[0-9a-f]+", "<PROC>         ");
     s.add_filter(r"busx-[0-9a-f]+", "<PROC>         ");
+    // PID fallback: at 100 cols the deliberately over-long service name
+    // (`org.busx.TestServiceName…`) overflows name_col and pushes its PID
+    // past the fixed-width prefix above, so the column anchor misses. Catch
+    // that row by anchoring on the already-masked PROC column that follows.
+    // Runs after the PROC filters above.
+    s.add_filter(r" {1,7}\d{1,7}(  <PROC>)", "  <PID>${1}");
     // testbus socket path + GUID.
     s.add_filter(r#"unix:path=[^,\s"]+,guid=[^,\s"]+"#, "<SOCKET>");
     s.add_filter(r#"unix:abstract=[^,\s"]+,guid=[^,\s"]+"#, "<SOCKET>");
@@ -564,14 +570,18 @@ fn listen_property_armed_then_esc() {
 /// Open the copy-as popup, navigate to the given tool row (0=dbus-send,
 /// 1=busctl, 2=qdbus, 3=gdbus), press Enter to copy, and wait for the
 /// "copied" status.
-fn copy_tool(probe: &mut TuiProbe, tool_row: usize) {
+///
+/// `snap_suffix` disambiguates the wait-for snapshots: the popup and the
+/// "copied" status overlay different background screens (Detail vs Result,
+/// different content), so each caller passes a unique tag.
+fn copy_tool(probe: &mut TuiProbe, tool_row: usize, snap_suffix: &str) {
     probe.send_key(KeyCode::Char('c')).unwrap();
-    probe.wait_for_text("copy as").unwrap();
+    wait_for_snapshot!(probe, format!("copy_as_popup_{}", snap_suffix)).unwrap();
     for _ in 0..tool_row {
         probe.send_key(KeyCode::Down).unwrap();
     }
     probe.send_key(KeyCode::Enter).unwrap();
-    probe.wait_for_text("copied").unwrap();
+    wait_for_snapshot!(probe, format!("copied_status_{}", snap_suffix)).unwrap();
 }
 
 #[test]
@@ -583,14 +593,14 @@ fn copy_as_call_busctl() {
     let (mut probe, clip) = spawn_busx_with_clip(&bus.address, 100, 28);
 
     drill_to_interface(&mut probe, "100x28");
-    probe.wait_for_text("volume").unwrap();
+    wait_for_snapshot!(&mut probe, "interface_loaded_100x28").unwrap();
 
     // TakeHints (method 0), enter button bar, fire Call → Detail.
     probe.send_key(KeyCode::Enter).unwrap(); // enter button bar
     probe.send_key(KeyCode::Enter).unwrap(); // fire Call (a{sv} → Detail)
 
     // Copy busctl command (row 1).
-    copy_tool(&mut probe, 1);
+    copy_tool(&mut probe, 1, "call_busctl");
     insta::assert_snapshot!(clip.contents());
 
     probe.send_key(KeyCode::Char('q')).unwrap();
@@ -605,7 +615,7 @@ fn copy_as_get_dbus_send() {
     let (mut probe, clip) = spawn_busx_with_clip(&bus.address, 100, 28);
 
     drill_to_interface(&mut probe, "100x28");
-    probe.wait_for_text("volume").unwrap();
+    wait_for_snapshot!(&mut probe, "interface_loaded_100x28").unwrap();
 
     // Tab to Properties, Down to volume, Get → Result.
     probe.send_key(KeyCode::Tab).unwrap();
@@ -616,7 +626,7 @@ fn copy_as_get_dbus_send() {
     probe.send_key(KeyCode::Enter).unwrap(); // fire Get → Result
 
     // Copy dbus-send command (row 0).
-    copy_tool(&mut probe, 0);
+    copy_tool(&mut probe, 0, "get_dbus_send");
     insta::assert_snapshot!(clip.contents());
 
     probe.send_key(KeyCode::Char('q')).unwrap();
@@ -631,7 +641,7 @@ fn copy_as_set_dbus_send() {
     let (mut probe, clip) = spawn_busx_with_clip(&bus.address, 100, 28);
 
     drill_to_interface(&mut probe, "100x28");
-    probe.wait_for_text("volume").unwrap();
+    wait_for_snapshot!(&mut probe, "interface_loaded_100x28").unwrap();
 
     // Tab to Properties, Down to volume, Set → Detail.
     probe.send_key(KeyCode::Tab).unwrap();
@@ -648,7 +658,7 @@ fn copy_as_set_dbus_send() {
     }
 
     // Copy dbus-send command (row 0) from the Detail screen.
-    copy_tool(&mut probe, 0);
+    copy_tool(&mut probe, 0, "set_dbus_send");
     insta::assert_snapshot!(clip.contents());
 
     probe.send_key(KeyCode::Char('q')).unwrap();
@@ -662,7 +672,7 @@ fn copy_as_listen_busctl() {
     let (mut probe, clip) = spawn_busx_with_clip(&bus.address, 100, 28);
 
     drill_to_interface(&mut probe, "100x28");
-    probe.wait_for_text("volume").unwrap();
+    wait_for_snapshot!(&mut probe, "interface_loaded_100x28").unwrap();
 
     // Enter button bar, Down to Listen, fire → Result.
     probe.send_key(KeyCode::Enter).unwrap();
@@ -670,7 +680,7 @@ fn copy_as_listen_busctl() {
     probe.send_key(KeyCode::Enter).unwrap(); // fire Listen → Result
 
     // Copy busctl command (row 1 — dbus-send can't express match rules).
-    copy_tool(&mut probe, 1);
+    copy_tool(&mut probe, 1, "listen_busctl");
     insta::assert_snapshot!(clip.contents());
 
     probe.send_key(KeyCode::Char('q')).unwrap();
