@@ -13,7 +13,9 @@ SPDX-License-Identifier: MIT
 
 **Tech Stack:** Rust (edition 2024), insta 1.48 (`filters` feature), tuiprobe, busx, ratatui/crossterm.
 
-**关键风险（务必知悉）：** `insta::_macro_support` 是 `#[doc(hidden)]`，insta 文档明说"不保证跨 minor 版本稳定"。busx 已 `pin insta = "1"`；每次升 insta minor 版本后必须重跑本计划 Task 7 的验证。
+**关键风险（务必知悉）：** ~~`insta::_macro_support` 是 `#[doc(hidden)]`~~（见下方修订——该方案已被 spike 否决）。
+
+**修订（T2 spike 后，2026-07-22）：** spike 否决了 `_macro_support::assert_snapshot` 方案——它不匹配时直接 `panic!()`（runtime.rs:719），`Result` 仅对 IO 错误有意义，无法用于判断匹配。**改用 `catch_unwind` 包公开 `insta::assert_snapshot!` 宏**（全 pub API，无 `doc(hidden)`；快照路径由 insta 宏自己算，避开 spike 发现的 workspace 路径重复 bug）。连锁：**T1（tuiprobe 加 insta dep）已回退**——宏在调用方 busx 展开、用 busx 的 insta，tuiprobe 不再依赖 insta。**T3 从"方法 + _macro_support"改成"纯宏"**。下方 T3 原文保留作历史记录，实际执行以本修订为准。
 
 **参考证据（spec）：** `docs/superpowers/specs/2026-07-22-wait-snapshot-design.md`
 
