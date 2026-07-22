@@ -6,7 +6,7 @@
 name = "busx"
 version = "0.1.3"
 edition = "2024"
-rust-version = "1.87"
+rust-version = "1.88"
 description = "A zbus-based dbus-send/busctl/qdbus replacement"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/black-desk/busx"
