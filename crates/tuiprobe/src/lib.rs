@@ -23,12 +23,12 @@
 //! probe.spawn(CommandBuilder::new("my-tui-app"))?;
 //!
 //! // Wait for the app to render its initial screen.
-//! probe.wait_for_text("Welcome")?;
+//! probe.wait_for(|s| s.contains("Welcome"))?;
 //!
 //! // Navigate.
 //! probe.send_key(KeyCode::Down);
 //! probe.send_key(KeyCode::Enter);
-//! probe.wait_for_text("Settings")?;
+//! probe.wait_for(|s| s.contains("Settings"))?;
 //!
 //! // Snapshot the rendered terminal.
 //! println!("{}", probe.screen_contents());
