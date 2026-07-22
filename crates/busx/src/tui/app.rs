@@ -502,10 +502,10 @@ impl Iterator for CrosstermSource {
                 // runs next, then the process exits.
                 Err(_) => return None,
             }
-            if let Ok(ev) = event::read() {
-                if let Some(msg) = non_mouse(ev) {
-                    return Some(msg);
-                }
+            if let Ok(ev) = event::read()
+                && let Some(msg) = non_mouse(ev)
+            {
+                return Some(msg);
             }
         }
     }

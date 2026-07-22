@@ -261,10 +261,10 @@ async fn stream_msgs(
                     out.flush()?; // line-buffered so a pipe consumer sees each line promptly
 
                     count += 1;
-                    if let Some(n) = limit {
-                        if count >= n {
-                            break;
-                        }
+                    if let Some(n) = limit
+                        && count >= n
+                    {
+                        break;
                     }
                 }
             },

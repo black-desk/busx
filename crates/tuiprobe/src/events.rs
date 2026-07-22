@@ -84,19 +84,19 @@ pub enum ScrollDirection {
 /// inside the child will decode them back into key events.
 pub fn encode_key(key: KeyCode, mods: KeyModifiers) -> Vec<u8> {
     // Ctrl + Char → ASCII control character (0x00–0x1F).
-    if mods.ctrl {
-        if let KeyCode::Char(c) = key {
-            return encode_ctrl(c);
-        }
+    if mods.ctrl
+        && let KeyCode::Char(c) = key
+    {
+        return encode_ctrl(c);
     }
 
     // Alt + Char → ESC prefix.
-    if mods.alt {
-        if let KeyCode::Char(c) = key {
-            let mut bytes = vec![0x1b];
-            bytes.extend_from_slice(c.to_string().as_bytes());
-            return bytes;
-        }
+    if mods.alt
+        && let KeyCode::Char(c) = key
+    {
+        let mut bytes = vec![0x1b];
+        bytes.extend_from_slice(c.to_string().as_bytes());
+        return bytes;
     }
 
     match key {

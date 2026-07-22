@@ -155,13 +155,13 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
     // screens `y` falls through to the normal dispatch (a Detail's printable
     // chars go to its input fields, so `y` must reach that handler, not this one).
     // No-op (returns None) when the Result has nothing to copy.
-    if matches!(k.code, KeyCode::Char('y')) {
-        if let Screen::Result(r) = state.top() {
-            if let Some(text) = copy_result_text(r) {
-                return Some(Effect::CopyToClipboard(text));
-            }
-            return None;
+    if matches!(k.code, KeyCode::Char('y'))
+        && let Screen::Result(r) = state.top()
+    {
+        if let Some(text) = copy_result_text(r) {
+            return Some(Effect::CopyToClipboard(text));
         }
+        return None;
     }
     // `r` refreshes the current view: re-fetch the service list / object tree /
     // introspection / property snapshot for the top screen. No-op on Detail/
@@ -173,11 +173,11 @@ fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
     if matches!(k.code, KeyCode::Esc) {
         // On the Interface screen, Esc first backs out of the action-button bar
         // (back to the member column); only a second Esc pops the screen.
-        if let Screen::Interface(i) = state.top_mut() {
-            if i.in_buttons {
-                i.in_buttons = false;
-                return None;
-            }
+        if let Screen::Interface(i) = state.top_mut()
+            && i.in_buttons
+        {
+            i.in_buttons = false;
+            return None;
         }
         if !state.pop_screen() {
             state.quit = true;
@@ -552,12 +552,12 @@ fn update_popup_key(state: &mut State, code: KeyCode) -> Option<Effect> {
 fn enter_interface_action(state: &mut State) -> Option<Effect> {
     // If focus is still on a member column, Enter drills INTO the action button
     // bar (does not fire anything yet). Once `in_buttons`, Enter fires.
-    if let Screen::Interface(i) = state.top_mut() {
-        if !i.in_buttons {
-            i.in_buttons = true;
-            i.button_selected = 0;
-            return None;
-        }
+    if let Screen::Interface(i) = state.top_mut()
+        && !i.in_buttons
+    {
+        i.in_buttons = true;
+        i.button_selected = 0;
+        return None;
     }
     // Gather all owned data from the Interface screen in a tight scope so the
     // immutable `state.top()` borrow ends before we mutate `state` (push the

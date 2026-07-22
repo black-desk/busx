@@ -61,10 +61,10 @@ pub fn init_tui(
     log_path: Option<&str>,
 ) -> Result<tracing_appender::non_blocking::WorkerGuard, std::io::Error> {
     let path = log_path.map(PathBuf::from).unwrap_or_else(default_log_path);
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)?;
     }
     let file = std::fs::OpenOptions::new()
         .create(true)

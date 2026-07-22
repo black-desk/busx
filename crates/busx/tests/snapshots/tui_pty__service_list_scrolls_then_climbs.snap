@@ -2,7 +2,7 @@
 source: crates/busx/tests/tui_pty.rs
 expression: probe.screen_contents()
 ---
-                                                                
+
 ┌Services──────────────────────────────────────────────────────┐
 │org.busx.ScrollH                        <PID>  <PROC>         │
 │org.busx.ScrollI                        <PID>  <PROC>         │
