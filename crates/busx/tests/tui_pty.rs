@@ -312,9 +312,9 @@ fn help_overlay_renders() {
     let bus = testbus::bus_owned();
     let mut probe = spawn_busx(&bus.address, 80, 24);
 
-    probe.wait_for_text("org.busx.ScrollA").unwrap();
+    wait_for_snapshot!(&mut probe, "service_list_80x24").unwrap();
     probe.send_key(KeyCode::Char('?')).unwrap();
-    probe.wait_for_text("keybindings").unwrap();
+    wait_for_snapshot!(&mut probe, "help_overlay_80x24").unwrap();
     insta::assert_snapshot!(probe.screen_contents());
 
     probe.send_key(KeyCode::Char('q')).unwrap();
@@ -329,7 +329,7 @@ fn call_zero_arg_method() {
     let mut probe = spawn_busx(&bus.address, 80, 20);
 
     drill_to_interface(&mut probe, "80x20");
-    probe.wait_for_text("volume").unwrap();
+    wait_for_snapshot!(&mut probe, "interface_loaded_80x20").unwrap();
 
     // Down to MakeFd (methods: TakeHints, Join, BumpVolume, MakeFd, ...).
     probe.send_key(KeyCode::Down).unwrap();
@@ -338,7 +338,7 @@ fn call_zero_arg_method() {
     probe.send_key(KeyCode::Enter).unwrap(); // enter button bar
     probe.send_key(KeyCode::Enter).unwrap(); // fire Call (zero-arg → Result)
 
-    probe.wait_for_text("/dev/null").unwrap();
+    wait_for_snapshot!(&mut probe, "result_call_makefd_80x20").unwrap();
     insta::assert_snapshot!(probe.screen_contents());
 
     probe.send_key(KeyCode::Char('q')).unwrap();
@@ -351,7 +351,7 @@ fn get_property() {
     let mut probe = spawn_busx(&bus.address, 80, 20);
 
     drill_to_interface(&mut probe, "80x20");
-    probe.wait_for_text("volume").unwrap();
+    wait_for_snapshot!(&mut probe, "interface_loaded_80x20").unwrap();
 
     // Tab to Properties column, Down to volume.
     probe.send_key(KeyCode::Tab).unwrap();
@@ -374,7 +374,7 @@ fn set_property() {
     let mut probe = spawn_busx(&bus.address, 80, 20);
 
     drill_to_interface(&mut probe, "80x20");
-    probe.wait_for_text("volume").unwrap();
+    wait_for_snapshot!(&mut probe, "interface_loaded_80x20").unwrap();
 
     // Tab to Properties, Down to volume.
     probe.send_key(KeyCode::Tab).unwrap();
@@ -392,7 +392,7 @@ fn set_property() {
     probe.send_key(KeyCode::Tab).unwrap(); // field → trigger
     probe.send_key(KeyCode::Enter).unwrap(); // fire Set → Result
 
-    probe.wait_for_text("ok").unwrap();
+    wait_for_snapshot!(&mut probe, "result_set_80x20").unwrap();
     insta::assert_snapshot!(probe.screen_contents());
 
     probe.send_key(KeyCode::Char('q')).unwrap();
