@@ -32,12 +32,12 @@ cmd.arg("test.toml");
 probe.spawn(cmd)?;
 
 // Wait for the app to render its initial screen.
-probe.wait_for_text("Welcome")?;
+probe.wait_for(|s| s.contains("Welcome"))?;
 
 // Navigate.
 probe.send_key(KeyCode::Down);
 probe.send_key(KeyCode::Enter);
-probe.wait_for_text("Settings")?;
+probe.wait_for(|s| s.contains("Settings"))?;
 
 // Snapshot the rendered terminal.
 insta::assert_snapshot!(probe.screen_contents());
@@ -75,8 +75,7 @@ full terminal emulator so you get clean text back.
 | Method                                      | Description                                   |
 | ------------------------------------------- | --------------------------------------------- |
 | `wait_for(\|screen\| screen.contains("x"))` | Custom condition, polls until true or timeout |
-| `wait_for_text("Ready")`                    | Convenience: wait for text anywhere on screen |
-| `wait_for_text_timeout("Ready", 2s)`        | Same, with a custom timeout                   |
+| `wait_for_with_timeout(cond, 2s)`           | Same, with a custom timeout                   |
 
 ### Output
 

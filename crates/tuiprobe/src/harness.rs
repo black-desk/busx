@@ -11,9 +11,9 @@
 //!
 //! let mut probe = TuiProbe::new(80, 24)?;
 //! probe.spawn(CommandBuilder::new("my-tui-app"))?;
-//! probe.wait_for_text("Ready")?;
+//! probe.wait_for(|s| s.contains("Ready"))?;
 //! probe.send_key(KeyCode::Enter);
-//! probe.wait_for_text("Results")?;
+//! probe.wait_for(|s| s.contains("Results"))?;
 //! println!("{}", probe.screen_contents());
 //! # Ok::<(), tuiprobe::Error>(())
 //! ```
@@ -148,25 +148,6 @@ impl TuiProbe {
             }
             std::thread::sleep(self.poll_interval);
         }
-    }
-
-    /// Wait until `text` appears anywhere on the screen.
-    pub fn wait_for_text(&mut self, text: &str) -> Result<()> {
-        let needle = text.to_string();
-        let result = self.wait_for(move |s| s.contains(&needle));
-        if result.is_err() {
-            return Err(Error::Timeout {
-                what: format!("text: {text}"),
-                screen: self.screen.contents(),
-            });
-        }
-        Ok(())
-    }
-
-    /// Wait until `text` appears, with a custom timeout.
-    pub fn wait_for_text_timeout(&mut self, text: &str, timeout: Duration) -> Result<()> {
-        let text = text.to_string();
-        self.wait_for_with_timeout(move |s| s.contains(&text), timeout)
     }
 
     // ── Output ─────────────────────────────────────────────────────────
