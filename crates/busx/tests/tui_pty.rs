@@ -18,7 +18,7 @@ use std::fs;
 use std::time::Duration;
 
 use portable_pty::CommandBuilder;
-use tuiprobe::{KeyCode, MouseButton, ScrollDirection, TuiProbe};
+use tuiprobe::{KeyCode, MouseButton, ScrollDirection, TuiProbe, wait_for_snapshot};
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -357,7 +357,7 @@ fn get_property() {
     probe.send_key(KeyCode::Enter).unwrap(); // enter button bar
     probe.send_key(KeyCode::Enter).unwrap(); // fire Get → Result
 
-    probe.wait_for_text("0.5").unwrap();
+    wait_for_snapshot!(&mut probe, "get_property_result").unwrap();
     insta::assert_snapshot!(probe.screen_contents());
 
     probe.send_key(KeyCode::Char('q')).unwrap();
