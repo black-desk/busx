@@ -79,13 +79,12 @@ impl Screen {
         let cols = self.term.columns();
         let mut out = String::with_capacity(lines * cols);
         for row in 0..lines {
-            let mut line_end = cols;
-            // Trim trailing spaces for clean snapshots.
-            for col in (0..cols).rev() {
-                let c = self.cell(row, col).c;
-                if c != ' ' {
+            // Track the position after the last non-space char, so
+            // trailing spaces (and all-space rows) are trimmed.
+            let mut line_end = 0;
+            for col in 0..cols {
+                if self.cell(row, col).c != ' ' {
                     line_end = col + 1;
-                    break;
                 }
             }
             for col in 0..line_end {
