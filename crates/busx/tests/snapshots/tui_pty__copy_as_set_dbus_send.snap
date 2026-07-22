@@ -1,0 +1,5 @@
+---
+source: crates/busx/tests/tui_pty.rs
+expression: clip.contents()
+---
+dbus-send --bus=<SOCKET> --print-reply --dest=org.busx.Test /org/busx/Test org.freedesktop.DBus.Properties.Set string:org.busx.Test string:volume variant:double:1.5
