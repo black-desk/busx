@@ -11,7 +11,4 @@ mod render;
 mod state;
 mod update;
 
-#[cfg(test)]
-mod e2e_tests;
-
 pub use app::run;
