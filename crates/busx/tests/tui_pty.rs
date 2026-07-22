@@ -149,8 +149,12 @@ fn pty_filter() -> insta::Settings {
 /// Drill from the service list all the way into the org.busx.Test Interface
 /// screen. Uses filter to narrow the service list, then navigates to
 /// /org/busx/Test and enters it.
-fn drill_to_interface(probe: &mut TuiProbe) {
-    probe.wait_for_text("org.busx.ScrollA").unwrap();
+///
+/// `suffix` disambiguates the wait-for snapshots by terminal size (the service
+/// list and filtered objects list render differently at different sizes), so
+/// callers pass e.g. `"80x20"` or `"100x28"`.
+fn drill_to_interface(probe: &mut TuiProbe, suffix: &str) {
+    wait_for_snapshot!(probe, format!("service_list_{}", suffix)).unwrap();
 
     // Filter to org.busx.Test.
     probe.send_key(KeyCode::Char('/')).unwrap();
@@ -160,7 +164,7 @@ fn drill_to_interface(probe: &mut TuiProbe) {
     probe.send_key(KeyCode::Enter).unwrap(); // → Objects
 
     // Navigate to /org/busx/Test (4th path after /, /org, /org/busx).
-    probe.wait_for_text("/org").unwrap();
+    wait_for_snapshot!(probe, format!("objects_list_test_filter_{}", suffix)).unwrap();
     for _ in 0..3 {
         probe.send_key(KeyCode::Down).unwrap();
     }
@@ -220,7 +224,7 @@ fn drill_into_objects_shows_paths() {
     let bus = testbus::bus_owned();
     let mut probe = spawn_busx(&bus.address, 64, 12);
 
-    probe.wait_for_text("org.busx.ScrollA").unwrap();
+    wait_for_snapshot!(&mut probe, "service_list_64x12").unwrap();
 
     // Filter + Enter to drill into org.busx.Test's objects.
     probe.send_key(KeyCode::Char('/')).unwrap();
@@ -228,7 +232,7 @@ fn drill_into_objects_shows_paths() {
         probe.send_key(KeyCode::Char(ch)).unwrap();
     }
     probe.send_key(KeyCode::Enter).unwrap();
-    probe.wait_for_text("/org/busx/Test").unwrap();
+    wait_for_snapshot!(&mut probe, "objects_list_test_filter_64x12").unwrap();
 
     assert!(probe.contains("/org/busx/Test"));
     insta::assert_snapshot!(probe.screen_contents());
@@ -242,8 +246,8 @@ fn drill_to_interface_shows_methods_and_properties() {
     let bus = testbus::bus_owned();
     let mut probe = spawn_busx(&bus.address, 80, 20);
 
-    drill_to_interface(&mut probe);
-    probe.wait_for_text("volume").unwrap();
+    drill_to_interface(&mut probe, "80x20");
+    wait_for_snapshot!(&mut probe, "interface_loaded_80x20").unwrap();
     assert!(probe.contains("org.busx.Test"));
     insta::assert_snapshot!(probe.screen_contents());
 
@@ -256,7 +260,7 @@ fn sub_object_has_distinct_volume() {
     let bus = testbus::bus_owned();
     let mut probe = spawn_busx(&bus.address, 80, 20);
 
-    probe.wait_for_text("org.busx.ScrollA").unwrap();
+    wait_for_snapshot!(&mut probe, "service_list_80x20").unwrap();
 
     // Drill into org.busx.Test, navigate to /org/busx/Test/sub.
     probe.send_key(KeyCode::Char('/')).unwrap();
@@ -264,7 +268,7 @@ fn sub_object_has_distinct_volume() {
         probe.send_key(KeyCode::Char(ch)).unwrap();
     }
     probe.send_key(KeyCode::Enter).unwrap();
-    probe.wait_for_text("/org/busx/Test").unwrap();
+    wait_for_snapshot!(&mut probe, "objects_list_test_filter_80x20").unwrap();
 
     // Navigate to /sub (it's after /Test).
     probe.send_key(KeyCode::Down).unwrap();
@@ -273,7 +277,7 @@ fn sub_object_has_distinct_volume() {
     probe.send_key(KeyCode::Down).unwrap();
     probe.send_key(KeyCode::Enter).unwrap();
 
-    probe.wait_for_text("volume").unwrap();
+    wait_for_snapshot!(&mut probe, "interface_loaded_sub_80x20").unwrap();
     insta::assert_snapshot!(probe.screen_contents());
 
     probe.send_key(KeyCode::Char('q')).unwrap();
@@ -324,7 +328,7 @@ fn call_zero_arg_method() {
     let bus = testbus::bus_owned();
     let mut probe = spawn_busx(&bus.address, 80, 20);
 
-    drill_to_interface(&mut probe);
+    drill_to_interface(&mut probe, "80x20");
     probe.wait_for_text("volume").unwrap();
 
     // Down to MakeFd (methods: TakeHints, Join, BumpVolume, MakeFd, ...).
@@ -346,7 +350,7 @@ fn get_property() {
     let bus = testbus::bus_owned();
     let mut probe = spawn_busx(&bus.address, 80, 20);
 
-    drill_to_interface(&mut probe);
+    drill_to_interface(&mut probe, "80x20");
     probe.wait_for_text("volume").unwrap();
 
     // Tab to Properties column, Down to volume.
@@ -369,7 +373,7 @@ fn set_property() {
     let bus = testbus::bus_owned();
     let mut probe = spawn_busx(&bus.address, 80, 20);
 
-    drill_to_interface(&mut probe);
+    drill_to_interface(&mut probe, "80x20");
     probe.wait_for_text("volume").unwrap();
 
     // Tab to Properties, Down to volume.
@@ -402,7 +406,7 @@ fn esc_pops_result_back_to_interface() {
     let bus = testbus::bus_owned();
     let mut probe = spawn_busx(&bus.address, 80, 20);
 
-    drill_to_interface(&mut probe);
+    drill_to_interface(&mut probe, "80x20");
     probe.wait_for_text("volume").unwrap();
 
     // Call a zero-arg method to reach the Result screen, then Esc back.
@@ -483,7 +487,7 @@ fn r_refreshes_interface_properties() {
     let bus = testbus::bus_owned();
     let mut probe = spawn_busx(&bus.address, 80, 20);
 
-    drill_to_interface(&mut probe);
+    drill_to_interface(&mut probe, "80x20");
     probe.wait_for_text("volume").unwrap();
 
     // Press r to refetch the property-value snapshot (GetAll).
@@ -503,7 +507,7 @@ fn listen_method_armed() {
     let bus = testbus::bus_owned();
     let mut probe = spawn_busx(&bus.address, 80, 20);
 
-    drill_to_interface(&mut probe);
+    drill_to_interface(&mut probe, "80x20");
     probe.wait_for_text("volume").unwrap();
 
     // Enter button bar, Down to Listen, fire.
@@ -523,7 +527,7 @@ fn listen_property_armed_then_esc() {
     let bus = testbus::bus_owned();
     let mut probe = spawn_busx(&bus.address, 80, 20);
 
-    drill_to_interface(&mut probe);
+    drill_to_interface(&mut probe, "80x20");
     probe.wait_for_text("volume").unwrap();
 
     // Tab to Properties, Down to volume.
@@ -575,7 +579,7 @@ fn copy_as_call_busctl() {
     let bus = testbus::bus_owned();
     let (mut probe, clip) = spawn_busx_with_clip(&bus.address, 100, 28);
 
-    drill_to_interface(&mut probe);
+    drill_to_interface(&mut probe, "100x28");
     probe.wait_for_text("volume").unwrap();
 
     // TakeHints (method 0), enter button bar, fire Call → Detail.
@@ -597,7 +601,7 @@ fn copy_as_get_dbus_send() {
     let bus = testbus::bus_owned();
     let (mut probe, clip) = spawn_busx_with_clip(&bus.address, 100, 28);
 
-    drill_to_interface(&mut probe);
+    drill_to_interface(&mut probe, "100x28");
     probe.wait_for_text("volume").unwrap();
 
     // Tab to Properties, Down to volume, Get → Result.
@@ -623,7 +627,7 @@ fn copy_as_set_dbus_send() {
     let bus = testbus::bus_owned();
     let (mut probe, clip) = spawn_busx_with_clip(&bus.address, 100, 28);
 
-    drill_to_interface(&mut probe);
+    drill_to_interface(&mut probe, "100x28");
     probe.wait_for_text("volume").unwrap();
 
     // Tab to Properties, Down to volume, Set → Detail.
@@ -654,7 +658,7 @@ fn copy_as_listen_busctl() {
     let bus = testbus::bus_owned();
     let (mut probe, clip) = spawn_busx_with_clip(&bus.address, 100, 28);
 
-    drill_to_interface(&mut probe);
+    drill_to_interface(&mut probe, "100x28");
     probe.wait_for_text("volume").unwrap();
 
     // Enter button bar, Down to Listen, fire → Result.
