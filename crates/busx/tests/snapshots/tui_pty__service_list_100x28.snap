@@ -1,0 +1,33 @@
+---
+source: crates/busx/tests/tui_pty.rs
+assertion_line: 163
+expression: screen
+---
+
+┌Services──────────────────────────────────────────────────────────────────────────────────────────┐
+│org.busx.ScrollA                        <PID>  <PROC>         │
+│org.busx.ScrollB                        <PID>  <PROC>         │
+│org.busx.ScrollC                        <PID>  <PROC>         │
+│org.busx.ScrollD                        <PID>  <PROC>         │
+│org.busx.ScrollE                        <PID>  <PROC>         │
+│org.busx.ScrollF                        <PID>  <PROC>         │
+│org.busx.ScrollG                        <PID>  <PROC>         │
+│org.busx.ScrollH                        <PID>  <PROC>         │
+│org.busx.ScrollI                        <PID>  <PROC>         │
+│org.busx.ScrollJ                        <PID>  <PROC>         │
+│org.busx.ScrollK                        <PID>  <PROC>         │
+│org.busx.ScrollL                        <PID>  <PROC>         │
+│org.busx.Test                           <PID>  <PROC>         │
+│org.busx.TestServiceNameThatIsIntentionallyVeryLongSoItExceedsTheNameCo…  <PID>  <PROC>         │
+│org.freedesktop.DBus                    <PID>      dbus-daemon│
+│:1.0                                    <PID>  <PROC>         │
+│:1.1                                    <PID>             busx│
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+↑↓ select · Enter open · / filter · r refresh · q quit · ? help
