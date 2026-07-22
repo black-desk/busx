@@ -83,9 +83,9 @@ impl TuiProbe {
     pub fn send_key_with_mods(&mut self, key: KeyCode, mods: KeyModifiers) -> Result<()> {
         let bytes = encode_key(key, mods);
         self.write(&bytes)?;
-        // Brief pause so the child's event loop can process the input and
-        // render a frame before we proceed.
-        std::thread::sleep(Duration::from_millis(20));
+        // No sleep needed: the caller's `wait_for_snapshot!`/`wait_for` polls
+        // until the target screen is reached, so any intermediate state is
+        // handled by the polling loop rather than a fixed delay.
         self.drain_into_emulator();
         Ok(())
     }
@@ -104,7 +104,6 @@ impl TuiProbe {
         let release = encode_mouse(col, row, button, false);
         self.write(&press)?;
         self.write(&release)?;
-        std::thread::sleep(Duration::from_millis(20));
         self.drain_into_emulator();
         Ok(())
     }
@@ -113,7 +112,6 @@ impl TuiProbe {
     pub fn mouse_scroll(&mut self, col: u16, row: u16, dir: ScrollDirection) -> Result<()> {
         let bytes = encode_scroll(col, row, dir);
         self.write(&bytes)?;
-        std::thread::sleep(Duration::from_millis(20));
         self.drain_into_emulator();
         Ok(())
     }
