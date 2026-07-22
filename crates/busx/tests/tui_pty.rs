@@ -175,7 +175,7 @@ fn service_list_renders() {
     let bus = testbus::bus_owned();
     let mut probe = spawn_busx(&bus.address, 64, 12);
 
-    probe.wait_for_text("org.busx.ScrollA").unwrap();
+    wait_for_snapshot!(&mut probe, "service_list_64x12").unwrap();
     assert!(probe.contains("Services"));
     insta::assert_snapshot!(probe.screen_contents());
 
@@ -188,7 +188,7 @@ fn down_arrow_moves_selection() {
     let bus = testbus::bus_owned();
     let mut probe = spawn_busx(&bus.address, 64, 8);
 
-    probe.wait_for_text("org.busx.ScrollA").unwrap();
+    wait_for_snapshot!(&mut probe, "service_list_64x8").unwrap();
     probe.send_key(KeyCode::Down).unwrap();
     probe.send_key(KeyCode::Down).unwrap();
     insta::assert_snapshot!(probe.screen_contents());
@@ -202,11 +202,11 @@ fn service_list_scrolls_then_climbs() {
     let bus = testbus::bus_owned();
     let mut probe = spawn_busx(&bus.address, 64, 8);
 
-    probe.wait_for_text("org.busx.ScrollA").unwrap();
+    wait_for_snapshot!(&mut probe, "service_list_64x8").unwrap();
     for _ in 0..10 {
         probe.send_key(KeyCode::Down).unwrap();
     }
-    probe.wait_for_text("ScrollJ").unwrap();
+    wait_for_snapshot!(&mut probe, "service_list_scrolled_scrollj").unwrap();
     insta::assert_snapshot!(probe.screen_contents());
 
     probe.send_key(KeyCode::Char('q')).unwrap();
@@ -287,13 +287,13 @@ fn filter_narrows_service_list() {
     let bus = testbus::bus_owned();
     let mut probe = spawn_busx(&bus.address, 64, 12);
 
-    probe.wait_for_text("org.busx.ScrollA").unwrap();
+    wait_for_snapshot!(&mut probe, "service_list_64x12").unwrap();
 
     probe.send_key(KeyCode::Char('/')).unwrap();
     for ch in "scroll".chars() {
         probe.send_key(KeyCode::Char(ch)).unwrap();
     }
-    probe.wait_for_text("ScrollA").unwrap();
+    wait_for_snapshot!(&mut probe, "service_list_filtered_scroll").unwrap();
     assert!(probe.contains("org.busx.ScrollA"));
     insta::assert_snapshot!(probe.screen_contents());
 
