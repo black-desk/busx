@@ -1,9 +1,0 @@
-Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-
-Files: crates/busx/src/tui/snapshots/*
-Copyright: 2026 Chen Linxuan <me@black-desk.cn>
-License: GPL-3.0-or-later
-
-Files: Cargo.lock
-Copyright: 2026 Chen Linxuan <me@black-desk.cn>
-License: MIT

@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+SPDX-License-Identifier: MIT
+-->
+
 # tuiprobe
 
 PTY-based integration testing for TUI applications.
