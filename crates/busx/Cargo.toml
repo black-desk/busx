@@ -43,4 +43,4 @@ serial_test = "3"
 tempfile = "3"
 testbus = { path = "../testbus" }
 tuiprobe = { path = "../tuiprobe" }
-portable-pty = "0.8"
+portable-pty = "0.9"
