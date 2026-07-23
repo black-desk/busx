@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+# SPDX-FileCopyrightText: 2026 Chen Linxian <me@black-desk.cn>
 #
 # SPDX-License-Identifier: MIT
 
@@ -14,4 +14,3 @@ resolver = "2"
 # upstream insta again, remove this patch and the submodule.
 [patch.crates-io]
 insta = { path = "crates/insta/insta" }
-
