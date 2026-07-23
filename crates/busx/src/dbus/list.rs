@@ -11,8 +11,7 @@ use zbus::names::BusName;
 
 pub async fn list_names(
     conn: &zbus::Connection,
-    unique: bool,
-    acquired: bool,
+    no_unique: bool,
     activatable: bool,
 ) -> Result<Vec<ServiceInfo>> {
     let dbus = DBusProxy::new(conn).await?;
@@ -25,10 +24,9 @@ pub async fn list_names(
     .map(|n| n.to_string())
     .collect();
 
-    // `--unique` and `--acquired` are mutually-exclusive filters; both set = no filter.
-    if unique && !acquired {
-        names.retain(|n| n.starts_with(':'));
-    } else if acquired && !unique {
+    // `--no-unique` hides the `:1.x` connection-name plumbing; well-known
+    // (acquired) names — the meaningful service names — always remain.
+    if no_unique {
         names.retain(|n| !n.starts_with(':'));
     }
     // Well-known names first (alphabetical), then unique (`:1.x`) names — the

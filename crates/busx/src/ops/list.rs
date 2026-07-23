@@ -65,13 +65,12 @@ pub fn run(
     system: bool,
     address: Option<&str>,
     json: bool,
-    unique: bool,
-    acquired: bool,
+    no_unique: bool,
     activatable: bool,
 ) -> Result<()> {
     let names = async_global_executor::block_on(async {
         let conn = dbus::conn::connect(user, system, address).await?;
-        dbus::list::list_names(&conn, unique, acquired, activatable).await
+        dbus::list::list_names(&conn, no_unique, activatable).await
     })?;
 
     if json {

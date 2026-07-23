@@ -191,7 +191,7 @@ fn run_effect(
     match effect {
         Effect::FetchServices => {
             async_global_executor::spawn(async move {
-                let res = dbus::list::list_names(&conn, false, false, false).await;
+                let res = dbus::list::list_names(&conn, false, false).await;
                 let _ = tx.send(Msg::ServicesLoaded(res.map_err(|e| e.to_string())));
             })
             .detach();
