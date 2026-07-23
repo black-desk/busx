@@ -77,11 +77,14 @@ pub enum Tool {
     Busctl,
     Qdbus,
     Gdbus,
+    /// busx itself — same syntax family as busctl, so copy-as can export an
+    /// explored TUI op back into a reusable busx CLI command.
+    Busx,
 }
 
 impl Tool {
     /// All tools, in popup-display order.
-    pub const ALL: [Tool; 4] = [Tool::DbusSend, Tool::Busctl, Tool::Qdbus, Tool::Gdbus];
+    pub const ALL: [Tool; 5] = [Tool::DbusSend, Tool::Busctl, Tool::Qdbus, Tool::Gdbus, Tool::Busx];
 
     /// The tool's command name (e.g. `"dbus-send"`).
     pub fn name(self) -> &'static str {
@@ -90,6 +93,7 @@ impl Tool {
             Self::Busctl => "busctl",
             Self::Qdbus => "qdbus",
             Self::Gdbus => "gdbus",
+            Self::Busx => "busx",
         }
     }
 }
@@ -158,6 +162,12 @@ fn bus_flag(bus: &Bus, tool: Tool) -> Option<String> {
         (Bus::Session, Tool::Gdbus) => Some("--session".into()),
         (Bus::System, Tool::Gdbus) => Some("--system".into()),
         (Bus::Other(a), Tool::Gdbus) => Some(format!("--address={}", quote(a))),
+
+        // busx defaults to the session bus (with silent system fallback), so
+        // session needs no flag; --system / --address= target the others.
+        (Bus::Session, Tool::Busx) => None,
+        (Bus::System, Tool::Busx) => Some("--system".into()),
+        (Bus::Other(a), Tool::Busx) => Some(format!("--address={}", quote(a))),
     }
 }
 
@@ -244,6 +254,28 @@ fn call(
             }
             Some(out)
         }
+        // busx call has the SAME positional layout as busctl (it's
+        // busctl-style), so reuse that rendering with the busx command name.
+        Tool::Busx => {
+            let mut parts: Vec<String> = vec!["busx".into()];
+            if let Some(f) = bus_flag(bus, tool) {
+                parts.push(f);
+            }
+            parts.extend([
+                "call".into(),
+                service.into(),
+                object.into(),
+                iface.into(),
+                method.into(),
+            ]);
+            if !signature.is_empty() {
+                parts.push(signature.into());
+            }
+            for a in args {
+                parts.push(quote(a));
+            }
+            Some(parts.join(" "))
+        }
     }
 }
 
@@ -280,6 +312,10 @@ fn get(service: &str, object: &str, iface: &str, property: &str, tool: Tool, bus
                 "gdbus call {flag}--dest {service} --object-path {object} \
                  --method org.freedesktop.DBus.Properties.Get \"{iface}\" \"{property}\""
             )
+        }
+        Tool::Busx => {
+            let flag = bus_prefix(bus, tool);
+            format!("busx {flag}get {service} {object} {iface} {property}")
         }
     }
 }
@@ -372,6 +408,25 @@ fn set(
                  \"{iface}\" \"{property}\" {gv}"
             ))
         }
+        // busx set mirrors busctl set-property exactly.
+        Tool::Busx => {
+            let mut parts: Vec<String> = vec!["busx".into()];
+            if let Some(f) = bus_flag(bus, tool) {
+                parts.push(f);
+            }
+            parts.extend([
+                "set".into(),
+                service.into(),
+                object.into(),
+                iface.into(),
+                property.into(),
+                signature.into(),
+            ]);
+            for v in value {
+                parts.push(quote(v));
+            }
+            Some(parts.join(" "))
+        }
     }
 }
 
@@ -407,6 +462,10 @@ fn listen(rule: &str, tool: Tool, bus: &Bus) -> Option<String> {
             Some(format!(
                 "gdbus monitor {flag}\n# gdbus monitor is unfiltered — it ignores the rule"
             ))
+        }
+        Tool::Busx => {
+            let flag = bus_prefix(bus, tool);
+            Some(format!("busx {flag}monitor --match {}", quote(rule)))
         }
     }
 }
@@ -513,8 +572,8 @@ fn render_args(signature: &str, args: &[String], tool: Tool) -> (Vec<Rendered>, 
             Tool::DbusSend => dbus_send_value(ty, &mut tok),
             Tool::Qdbus => qdbus_value(ty, &mut tok),
             Tool::Gdbus => gdbus_value(ty, &mut tok),
-            // busctl is 1:1 and handled separately; never reached here.
-            Tool::Busctl => Rendered::ok(tok.next().into()),
+            // busctl/busx are 1:1 and handled separately; never reached here.
+            Tool::Busctl | Tool::Busx => Rendered::ok(tok.next().into()),
         };
         if let Some(n) = &r.unsupported {
             notes.push(n.clone());
