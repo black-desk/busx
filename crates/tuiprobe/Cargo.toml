@@ -15,7 +15,7 @@ categories = ["development-tools::testing", "command-line-interface"]
 
 [dependencies]
 alacritty_terminal = "0.26"
-portable-pty = "0.8"
+portable-pty = "0.9"
 vte = "0.15"
 
 [dev-dependencies]
