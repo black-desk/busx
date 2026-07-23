@@ -7,7 +7,8 @@ use serde_json::Value;
 
 #[test]
 fn getall_returns_tagged_json() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -65,7 +66,8 @@ fn getall_returns_tagged_json() {
 
 #[test]
 fn get_single_property() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -91,7 +93,8 @@ fn get_single_property() {
 /// `d  0.5` for the fixture's `volume`.
 #[test]
 fn get_single_property_human() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
