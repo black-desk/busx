@@ -201,6 +201,21 @@ impl TuiProbe {
     }
 }
 
+impl Drop for TuiProbe {
+    fn drop(&mut self) {
+        // Wait for the child to exit *before* the PTY master is dropped (which
+        // happens next, in field-destruction order). Closing the PTY first
+        // would SIGHUP a still-running child, skipping its LLVM coverage
+        // finalizer and leaving a half-written / empty `.profraw` that
+        // corrupts `cargo llvm-cov`'s profdata merge. Waiting (PTY still open)
+        // lets the child shut down cleanly and flush its profile. Bounded so a
+        // stuck child can't hang the test suite.
+        if let Some(pty) = self.pty.as_mut() {
+            let _ = pty.wait_for_exit_timeout(Duration::from_secs(2));
+        }
+    }
+}
+
 impl TuiProbeBuilder {
     pub fn cols(mut self, cols: u16) -> Self {
         self.cols = cols;
