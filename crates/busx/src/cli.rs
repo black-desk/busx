@@ -117,7 +117,9 @@ pub enum Command {
         signature: String,
         value: Vec<String>,
     },
-    /// Monitor bus messages.
+    /// Monitor bus messages. Defaults to a signal subscription (no privileges).
+    /// Pass --all to see method calls/returns/errors too (BecomeMonitor; may be
+    /// refused by the bus, in which case the command errors out).
     Monitor {
         #[arg(add = ArgValueCompleter::new(complete::complete_service))]
         services: Vec<String>,
@@ -131,8 +133,9 @@ pub enum Command {
         sender: Option<String>,
         #[arg(long, value_name = "MATCH")]
         r#match: Option<String>,
-        #[arg(long)]
-        signals: bool,
+        /// See method calls/returns/errors too (BecomeMonitor; privileged).
+        #[arg(long, help = "Also capture method calls/returns/errors (BecomeMonitor)")]
+        all: bool,
         #[arg(long, value_name = "N")]
         limit_messages: Option<u64>,
         #[arg(long, value_name = "DUR")]

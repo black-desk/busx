@@ -15,16 +15,17 @@
 //!
 //! There are two delivery modes:
 //!
-//! * `--signals` (and the default "all messages" mode): a D-Bus match rule is
-//!   built from the convenience flags and `--match`, then either registered via
-//!   `MessageStream::for_match_rule` (signal subscription) or handed to
-//!   [`org.freedesktop.DBus.Monitoring.BecomeMonitor`].
-//! * Default (no `--signals`): the connection is converted into a bus monitor
-//!   via `BecomeMonitor`, so it sees every message crossing the bus
-//!   (method_call / method_return / error / signal) — the same mechanism
-//!   `busctl monitor` uses. `BecomeMonitor` is privileged and may be refused by
-//!   some bus configurations; when that happens we fall back to a signal-only
-//!   match rule so the command degrades gracefully instead of hard-failing.
+//! * Default (no `--all`): a signal subscription. A D-Bus match rule — type
+//!   pinned to `signal` — is built from the convenience flags and `--match`,
+//!   then registered via `MessageStream::for_match_rule`. No privileges needed;
+//!   this is what every bus accepts.
+//! * `--all`: the connection is converted into a bus monitor via
+//!   [`org.freedesktop.DBus.Monitoring.BecomeMonitor`], so it sees every message
+//!   crossing the bus (method_call / method_return / error / signal) — the same
+//!   mechanism `busctl monitor` uses. `BecomeMonitor` is privileged and may be
+//!   refused by some bus configurations; when it is, the command **errors out**
+//!   (the user explicitly asked for all message types) rather than silently
+//!   degrading to signals-only. Drop `--all` for plain signal monitoring.
 
 use crate::dbus;
 use crate::error::{Error, Result};
@@ -169,39 +170,39 @@ pub fn run(
     path: Option<String>,
     sender: Option<String>,
     raw_match: Option<String>,
-    signals: bool,
+    all: bool,
     limit_messages: Option<u64>,
     timeout: Option<&str>,
 ) -> Result<()> {
     async_global_executor::block_on(async {
         let conn = dbus::conn::connect(user, system, address).await?;
 
+        // Default = signal subscription (a plain match rule; type pinned to
+        // Signal). --all instead requests BecomeMonitor so method calls/returns/
+        // errors are visible too — a privileged op the bus may refuse; when it
+        // does we error out (the user explicitly asked for methods) and never
+        // silently degrade to signals-only.
         let rule = crate::dbus::monitor::build_match_rule(
             interface.as_deref(),
             member.as_deref(),
             path.as_deref(),
             sender.as_deref(),
             raw_match.as_deref(),
-            if signals { Some(Type::Signal) } else { None },
+            if all { None } else { Some(Type::Signal) },
         )?;
 
-        // In signal-only mode we subscribe via the match rule. In all-messages
-        // mode we try BecomeMonitor (which sees method_call/return/error too);
-        // if the bus refuses it (some daemons/configs disallow monitoring) we
-        // fall back to a signal subscription so the command still works.
-        let stream = if signals {
-            // Pure signal subscription; for_match_rule does the right thing.
-            MessageStream::for_match_rule(rule.clone(), &conn, None).await?
+        let stream = if all {
+            dbus::monitor::become_monitor(&conn, Some(&rule))
+                .await
+                .map_err(|e| {
+                    crate::error::Error::Msg(format!(
+                        "BecomeMonitor refused by the bus ({e}); cannot capture method calls. \
+                         Omit --all for signal-only monitoring."
+                    ))
+                })?;
+            MessageStream::from(&conn)
         } else {
-            match dbus::monitor::become_monitor(&conn, Some(&rule)).await {
-                Ok(()) => MessageStream::from(&conn),
-                Err(e) => {
-                    tracing::debug!(
-                        "BecomeMonitor refused ({e}); falling back to signal subscription"
-                    );
-                    MessageStream::for_match_rule(rule.clone(), &conn, None).await?
-                }
-            }
+            MessageStream::for_match_rule(rule.clone(), &conn, None).await?
         };
 
         stream_msgs(stream, &services, limit_messages, timeout, json).await

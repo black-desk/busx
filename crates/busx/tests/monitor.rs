@@ -8,8 +8,9 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// `busx monitor --signals ... --limit-messages 1` must emit one NDJSON line
-/// for the `PropertiesChanged` signal triggered by `BumpVolume`.
+/// `busx monitor ... --limit-messages 1` (default = signal subscription) must
+/// emit one NDJSON line for the `PropertiesChanged` signal triggered by a
+/// property set.
 ///
 /// This is a concurrent test: the monitor subscribes first, then a second
 /// `busx call` mutates the `volume` property (the fixture emits
@@ -29,7 +30,6 @@ fn monitor_emits_propertieschanged() {
             "--address",
             &addr,
             "monitor",
-            "--signals",
             "--interface",
             "org.freedesktop.DBus.Properties",
             "--member",
@@ -110,7 +110,6 @@ fn monitor_human_emits_block() {
             "--address",
             &addr,
             "monitor",
-            "--signals",
             "--interface",
             "org.freedesktop.DBus.Properties",
             "--member",
@@ -184,7 +183,6 @@ fn monitor_timeout_fires_on_idle_bus() {
             "--address",
             &addr,
             "monitor",
-            "--signals",
             "--sender",
             ":1.999999", // a unique name that will never speak on the test bus
             "--timeout",
@@ -219,5 +217,61 @@ fn monitor_timeout_fires_on_idle_bus() {
         out.stdout.is_empty(),
         "expected no output for a never-matching rule: {:?}",
         String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+/// Default `monitor` subscribes to signals only (no BecomeMonitor): a
+/// PropertiesChanged from a property set is captured, no `--signals` flag
+/// needed. Documents the new default.
+#[test]
+fn monitor_default_captures_signal() {
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
+
+    // Start monitor as a subprocess; it exits after 1 matching message
+    // (`--limit-messages`). No `--signals`/`--all`: the default is the
+    // signal subscription under test.
+    let child = Command::new(cargo_bin!("busx"))
+        .args([
+            "--address",
+            &addr,
+            "monitor",
+            "--interface",
+            "org.freedesktop.DBus.Properties",
+            "--limit-messages",
+            "1",
+            "--timeout",
+            "5s",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn monitor");
+
+    // Give the monitor time to register its match rule on the bus.
+    thread::sleep(Duration::from_millis(300));
+
+    // Trigger a PropertiesChanged by setting the fixture's `volume`.
+    let trigger = Command::new(cargo_bin!("busx"))
+        .args([
+            "--address",
+            &addr,
+            "set",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "volume",
+            "d",
+            "0.5",
+        ])
+        .status()
+        .expect("trigger set");
+    assert!(trigger.success(), "set volume call failed");
+
+    let out = child.wait_with_output().expect("monitor exit");
+    assert!(out.status.success(), "monitor should exit 0: {out:?}");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("PropertiesChanged") || stdout.contains("Properties"),
+        "should capture the signal: {stdout}"
     );
 }
