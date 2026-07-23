@@ -181,7 +181,7 @@ fn run_command(
             path,
             sender,
             r#match,
-            signals,
+            all,
             limit_messages,
             timeout,
         } => ops::monitor::run(
@@ -195,7 +195,7 @@ fn run_command(
             path,
             sender,
             r#match,
-            signals,
+            all,
             limit_messages,
             timeout.as_deref(),
         ),
