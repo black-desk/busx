@@ -820,8 +820,8 @@ fn render_keyhint(frame: &mut Frame, area: Rect, screen: &Screen) {
     frame.render_widget(Paragraph::new(hint), area);
 }
 
-/// Render the copy-as popup overlay: a centered, bordered block listing the four
-/// tools (each with its command or "(unsupported)"), the selected row REVERSED,
+/// Render the copy-as popup overlay: a centered, bordered block listing every
+/// tool in [`Tool::ALL`] (each with its command or "(unsupported)"), the selected row REVERSED,
 /// a preview area below showing the selected tool's full command (or the
 /// unsupported reason), and a status line at the bottom showing the result of the
 /// last copy attempt ("copying…" / "copied" / "error: …"). `Clear` wipes the
