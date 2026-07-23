@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 pub mod call;
+pub mod emit;
 pub mod introspect;
 pub mod list;
 pub mod monitor;

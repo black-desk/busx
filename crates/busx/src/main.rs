@@ -202,6 +202,24 @@ fn run_command(
         Command::Tree { service } => {
             ops::tree::run(user, system, address.as_deref(), json, &service)
         }
+        Command::Emit {
+            destination,
+            object,
+            interface,
+            member,
+            signature,
+            args,
+        } => ops::emit::run(
+            user,
+            system,
+            address.as_deref(),
+            destination.as_deref(),
+            &object,
+            &interface,
+            &member,
+            &signature,
+            &args,
+        ),
         Command::Completion { shell } => {
             complete::emit_script(shell);
             Ok(())
