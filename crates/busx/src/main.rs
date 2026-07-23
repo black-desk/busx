@@ -99,16 +99,14 @@ fn run_command(
 ) -> error::Result<()> {
     match command {
         Command::List {
-            unique,
-            acquired,
+            no_unique,
             activatable,
         } => ops::list::run(
             user,
             system,
             address.as_deref(),
             json,
-            unique,
-            acquired,
+            no_unique,
             activatable,
         ),
         Command::Get {

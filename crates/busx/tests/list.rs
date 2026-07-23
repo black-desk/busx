@@ -99,3 +99,26 @@ fn list_piped_is_tab_separated_and_untruncated() {
         "piped (non-TTY) output must not truncate names:\n{stdout}"
     );
 }
+
+/// `--no-unique` hides `:1.x` names, keeping only well-known names.
+#[test]
+fn list_no_unique_hides_unique_names() {
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
+    let out = Command::cargo_bin("busx")
+        .unwrap()
+        .args(["--json", "--address", &addr, "list", "--no-unique"])
+        .ok()
+        .unwrap();
+    let v: Value = serde_json::from_slice(&out.stdout).expect("valid json");
+    let arr = v.as_array().expect("array");
+    assert!(
+        arr.iter()
+            .all(|e| !e["name"].as_str().unwrap_or("").starts_with(':')),
+        "--no-unique must hide all :1.x names: {v}"
+    );
+    assert!(
+        arr.iter().any(|e| e["name"] == "org.busx.Test"),
+        "well-known service must remain: {v}"
+    );
+}

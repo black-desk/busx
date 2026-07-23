@@ -65,11 +65,9 @@ pub struct Cli {
 pub enum Command {
     /// List service names on the bus.
     List {
-        #[arg(long)]
-        unique: bool,
-        #[arg(long)]
-        acquired: bool,
-        #[arg(long)]
+        #[arg(long, help = "Hide unique (`:1.x`) connection names")]
+        no_unique: bool,
+        #[arg(long, help = "List activatable (auto-startable) services instead of current ones")]
         activatable: bool,
     },
     /// Show interfaces/methods/signals/properties of an object.
