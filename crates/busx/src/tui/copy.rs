@@ -26,13 +26,14 @@
 //! `# note` rather than a command the tool would reject (no broken values).
 //!
 //! Bus selection: each tool defaults to a *different* bus (busctl → system;
-//! dbus-send/qdbus → session; gdbus needs an explicit flag), so [`generate`]
-//! takes the bus busx is on and emits the flag that makes the generated
-//! command target that same bus (omitted when it's the tool's default). Every
-//! tool can also target a custom `--address` ([`Bus::Other`]), so the address
-//! is carried along and rendered in each tool's own syntax (busctl
-//! `--address=`, dbus-send `--bus=`, dbus-monitor `--address`, qdbus `--bus`,
-//! gdbus `--address=`) — no `# note` is needed for a custom bus.
+//! dbus-send/qdbus → session; gdbus needs an explicit flag; busx → session),
+//! so [`generate`] takes the bus busx is on and emits the flag that makes the
+//! generated command target that same bus (omitted when it's the tool's
+//! default). Every tool can also target a custom `--address` ([`Bus::Other`]),
+//! so the address is carried along and rendered in each tool's own syntax
+//! (busctl `--address=`, dbus-send `--bus=`, dbus-monitor `--address`, qdbus
+//! `--bus`, gdbus `--address=`, busx `--system`/`--address=`) — no `# note`
+//! is needed for a custom bus.
 
 use crate::dbus::conn::Bus;
 
