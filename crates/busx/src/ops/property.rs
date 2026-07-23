@@ -37,7 +37,7 @@ pub fn get(
             print_map(&map, json)
         }
         None | Some("") => Err(Error::Msg(
-            "get: --interface is required when reading individual properties".into(),
+            "get: an interface argument is required when reading individual properties".into(),
         )),
         // Named interface.
         Some(name) => {
