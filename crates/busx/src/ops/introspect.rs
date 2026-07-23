@@ -29,12 +29,22 @@ pub fn run(
     })?;
 
     // Optional interface filter: keep only the named interface (still an array).
+    // A named-but-absent interface is an error (exit non-zero) rather than
+    // silent empty output, so scripts can detect typos.
     let interfaces: Vec<&Interface> = node.interfaces().iter().collect();
     let interfaces: Vec<&Interface> = match interface {
-        Some(filter) => interfaces
-            .into_iter()
-            .filter(|i| i.name().as_ref() == filter)
-            .collect(),
+        Some(filter) => {
+            let matched: Vec<&Interface> = interfaces
+                .into_iter()
+                .filter(|i| i.name().as_ref() == filter)
+                .collect();
+            if matched.is_empty() {
+                return Err(crate::error::Error::Msg(format!(
+                    "introspect: interface `{filter}` not found on {service} {object}"
+                )));
+            }
+            matched
+        }
         None => interfaces,
     };
 

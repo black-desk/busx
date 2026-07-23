@@ -77,8 +77,10 @@ fn introspect_interface_filter_returns_single_match() {
     assert_eq!(arr[0]["name"], "org.busx.Test");
 }
 
+/// Filtering by a nonexistent interface errors with a "not found" message on
+/// stderr and a non-zero exit (regression for the old silent-empty behavior).
 #[test]
-fn introspect_interface_filter_unknown_is_empty() {
+fn introspect_interface_filter_unknown_errors() {
     let bus = testbus::bus_owned();
     let addr = bus.address.clone();
     let out = Command::cargo_bin("busx")
@@ -92,11 +94,38 @@ fn introspect_interface_filter_unknown_is_empty() {
             "/org/busx/Test",
             "org.does.Not.Exist",
         ])
-        .ok()
-        .unwrap();
-    let v: Value = serde_json::from_slice(&out.stdout).expect("valid json");
-    let arr = v.as_array().expect("still an array when filtered");
-    assert!(arr.is_empty(), "unknown iface filter → empty array: {v}");
+        .assert()
+        .failure();
+    let stderr = String::from_utf8_lossy(&out.get_output().stderr);
+    assert!(
+        stderr.contains("not found"),
+        "should say not found: {stderr}"
+    );
+}
+
+/// Filtering by a nonexistent interface must error (exit non-zero) with a clear
+/// "not found" message, not silently emit empty output.
+#[test]
+fn introspect_unknown_interface_errors() {
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
+    let out = Command::cargo_bin("busx")
+        .unwrap()
+        .args([
+            "--address",
+            &addr,
+            "introspect",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.DoesNotExist",
+        ])
+        .assert()
+        .failure(); // exit non-zero is expected
+    let stderr = String::from_utf8_lossy(&out.get_output().stderr);
+    assert!(
+        stderr.contains("not found"),
+        "should say not found: {stderr}"
+    );
 }
 
 /// Human introspect output groups members under their interface name, listing
