@@ -178,6 +178,55 @@ fn drill_to_interface(probe: &mut TuiProbe, suffix: &str) {
     probe.send_key(KeyCode::Enter).unwrap(); // → Interfaces (auto-skip) → Interface
 }
 
+// ── wait_for_snapshot! contract ──────────────────────────────────────────
+
+/// `wait_for_snapshot!` must stay silent while polling (no `.snap.new` for
+/// intermediate frames) but write a `.snap.new` on a *genuine* timeout, so a
+/// real failure can still be reviewed with `cargo insta review`.
+///
+/// We drive it with a fabricated snapshot name that has no reference, so
+/// `matches_snapshot!` never matches → the poll runs to the short timeout →
+/// the macro runs one real `assert_snapshot!`, which writes the `.snap.new`
+/// and panics.
+#[test]
+fn wait_for_snapshot_writes_new_only_on_timeout() {
+    let _g = pty_filter().bind_to_scope();
+    let bus = testbus::bus_owned();
+    let mut probe = TuiProbe::builder()
+        .cols(64)
+        .rows(12)
+        .timeout(Duration::from_millis(400))
+        .build()
+        .expect("create probe");
+    let mut cmd = CommandBuilder::new(busx_binary());
+    cmd.arg("--address");
+    cmd.arg(&bus.address);
+    probe.spawn(cmd).expect("spawn busx");
+
+    // Unique name with no committed reference; the `ZZ_` prefix keeps it clear
+    // of real snapshots.
+    let name = "ZZ_contract_timeout_no_reference";
+    let new_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/snapshots")
+        .join(format!("tui_pty__{name}.snap.new"));
+    let _ = fs::remove_file(&new_path); // clear any prior leftover
+
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = wait_for_snapshot!(&mut probe, name);
+    }))
+    .is_err();
+    assert!(panicked, "wait_for_snapshot! must panic on timeout");
+    assert!(
+        new_path.exists(),
+        "timeout must write a .snap.new for review (expected at {})",
+        new_path.display(),
+    );
+
+    // Self-clean so the generated file never lingers or gets committed.
+    let _ = fs::remove_file(&new_path);
+    let _ = probe.send_key(KeyCode::Char('q'));
+}
+
 // ── Service list ─────────────────────────────────────────────────────────
 
 #[test]
