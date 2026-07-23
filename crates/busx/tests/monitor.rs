@@ -17,7 +17,8 @@ use std::time::{Duration, Instant};
 /// captured stdout must contain the matching line.
 #[test]
 fn monitor_emits_propertieschanged() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
 
     // Start monitor as a subprocess; it exits after 1 matching message
     // (`--limit-messages`). A `--timeout` backstop keeps the test from hanging
@@ -101,7 +102,8 @@ fn monitor_emits_propertieschanged() {
 /// then each body argument. `set` triggers a `PropertiesChanged` signal.
 #[test]
 fn monitor_human_emits_block() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
 
     let child = Command::new(cargo_bin!("busx"))
         .args([
@@ -171,7 +173,8 @@ fn monitor_human_emits_block() {
 /// message landed — `--timeout` hung forever on an idle bus. This guards that.
 #[test]
 fn monitor_timeout_fires_on_idle_bus() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
 
     // Subscribe to a sender that never emits on the test bus → the match-rule
     // stream yields nothing, so the ONLY way this process returns is the

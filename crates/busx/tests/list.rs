@@ -10,7 +10,8 @@ use serde_json::Value;
 /// structure is asserted (a present, optional `pid`).
 #[test]
 fn list_returns_json_array_with_test_service() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args(["--json", "--address", &addr, "list"])
@@ -32,7 +33,8 @@ fn list_returns_json_array_with_test_service() {
 /// header and the test service on its own line.
 #[test]
 fn list_human_shows_table_with_test_service() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args(["--address", &addr, "list"])
@@ -54,7 +56,8 @@ fn list_human_shows_table_with_test_service() {
 /// Well-known names are listed before unique (`:1.x`) names.
 #[test]
 fn list_orders_well_known_before_unique() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args(["--json", "--address", &addr, "list"])
@@ -78,7 +81,8 @@ fn list_orders_well_known_before_unique() {
 /// `ops::list::tests`, since it needs a real terminal width.)
 #[test]
 fn list_piped_is_tab_separated_and_untruncated() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args(["--address", &addr, "list"])

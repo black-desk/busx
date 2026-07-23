@@ -4,20 +4,17 @@
 
 //! Test bus fixture.
 //!
-//! [`bus`] returns a process-wide singleton test bus (started once per
-//! test binary); [`bus_owned`] starts a fresh, owned test bus so each
-//! caller sees a deterministic `:1.x` table regardless of what other
-//! tests are running concurrently. Both spin up a private `dbus-daemon`
-//! and register the `org.busx.Test` interface against it in-process.
+//! [`bus_owned`] starts a fresh, owned test bus: it spins up a private
+//! `dbus-daemon` and registers the `org.busx.Test` interface against it
+//! in-process. Drop the returned [`TestBus`] to SIGTERM the daemon.
 //!
-//! Integration tests that drive `busx` as a subprocess via `assert_cmd`
-//! can use [`bus`] — each subprocess connects, does its work, exits.
-//! End-to-end tests that drive the TUI in-process and snapshot the
-//! service list should use [`bus_owned`] so list_names' output is
-//! invariant across concurrent test threads.
+//! Each test takes its own bus (rather than sharing a process-wide
+//! singleton) so that (a) every bus is reaped when its test ends — a
+//! `static` singleton is never dropped and would leak its daemon — and
+//! (b) callers see a deterministic `:1.x` table regardless of what other
+//! tests are running concurrently.
 
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
 
 use zbus::blocking::connection::Builder;
 use zbus::interface;
@@ -142,21 +139,13 @@ impl Drop for TestBus {
     }
 }
 
-static BUS: OnceLock<TestBus> = OnceLock::new();
-
-/// Returns the shared test bus (started once per test binary). Use this
-/// from integration tests that drive `busx` as a subprocess via
-/// `assert_cmd` — each subprocess connects, does its work, and exits,
-/// so they don't need isolation from one another.
-pub fn bus() -> &'static TestBus {
-    BUS.get_or_init(start_bus_with_fixture)
-}
-
 /// Starts a fresh, owned test bus. Drop the returned `TestBus` to
-/// SIGTERM the underlying daemon. Use this from tests that need
-/// isolation — e.g. e2e TUI tests that list_names and snapshot the
-/// result, where a deterministic `:1.0` (daemon) + `:1.1` (fixture) +
-/// `:1.2` (self) naming matters regardless of concurrent tests.
+/// SIGTERM the underlying daemon.
+///
+/// Use this from tests that need a deterministic `:1.x` naming table —
+/// e.g. e2e TUI tests that list_names and snapshot the result, where a
+/// deterministic `:1.0` (daemon) + `:1.1` (fixture) + `:1.2` (self)
+/// naming matters regardless of concurrent tests.
 pub fn bus_owned() -> TestBus {
     start_bus_with_fixture()
 }

@@ -7,7 +7,8 @@ use serde_json::Value;
 
 #[test]
 fn set_then_get_roundtrips() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     // Set volume to 0.75 (double).
     Command::cargo_bin("busx")
         .unwrap()

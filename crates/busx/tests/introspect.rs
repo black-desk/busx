@@ -7,7 +7,8 @@ use serde_json::Value;
 
 #[test]
 fn introspect_lists_test_interface() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -51,7 +52,8 @@ fn introspect_lists_test_interface() {
 
 #[test]
 fn introspect_interface_filter_returns_single_match() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -77,7 +79,8 @@ fn introspect_interface_filter_returns_single_match() {
 
 #[test]
 fn introspect_interface_filter_unknown_is_empty() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
@@ -100,7 +103,8 @@ fn introspect_interface_filter_unknown_is_empty() {
 /// methods/properties (and signals) with their signatures.
 #[test]
 fn introspect_human_lists_interface_members() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([

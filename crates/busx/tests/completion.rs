@@ -88,7 +88,8 @@ fn complete_after_busx_offers_global_flags() {
 /// flag and always hit the session bus.
 #[test]
 fn complete_service_uses_address_bus() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     // words: busx --address <ADDR> call "" ; cursor on the empty service slot.
     let out = complete_bash(&["busx", "--address", &addr, "call", ""], 4);
     assert!(
@@ -143,7 +144,8 @@ fn complete_service_system_flag_runs() {
 /// offers the fixture's `/org` child.
 #[test]
 fn complete_path_position_lists_child_paths() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     let out = complete_bash(
         &[
             "busx",
@@ -165,7 +167,8 @@ fn complete_path_position_lists_child_paths() {
 /// object's interfaces, including the fixture's own and the standard ones.
 #[test]
 fn complete_interface_position_lists_interfaces() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     let out = complete_bash(
         &[
             "busx",
@@ -192,7 +195,8 @@ fn complete_interface_position_lists_interfaces() {
 /// interface's methods, including the fixture's `BumpVolume`.
 #[test]
 fn complete_method_position_lists_methods() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     let out = complete_bash(
         &[
             "busx",
@@ -218,7 +222,8 @@ fn complete_method_position_lists_methods() {
 /// signature `as`.
 #[test]
 fn complete_signature_position_returns_join_input_sig() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     // words: busx(0) --address(1) <addr>(2) call(3) svc(4) obj(5) iface(6)
     //        Join(7) ""(8) ; cursor on the empty signature slot.
     let out = complete_bash(
@@ -245,7 +250,8 @@ fn complete_signature_position_returns_join_input_sig() {
 /// signature `a{sv}`.
 #[test]
 fn complete_signature_position_returns_takehints_input_sig() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     let out = complete_bash(
         &[
             "busx",
@@ -272,7 +278,8 @@ fn complete_signature_position_returns_takehints_input_sig() {
 /// flags at an empty position, which is harmless structural behavior.
 #[test]
 fn complete_signature_position_no_arg_method_is_empty() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     let out = complete_bash(
         &[
             "busx",
@@ -306,7 +313,8 @@ fn complete_signature_position_no_arg_method_is_empty() {
 /// so the first prop sits at position 3.
 #[test]
 fn complete_get_property_position_lists_properties() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     // words: busx(0) --address(1) <addr>(2) get(3) svc(4) obj(5) iface(6) ""(7)
     //        ; cursor on the empty property slot.
     let out = complete_bash(
@@ -334,7 +342,8 @@ fn complete_get_property_position_lists_properties() {
 /// still completes property names, not nothing.
 #[test]
 fn complete_get_second_property_still_completes() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     // words: busx(0) --address(1) <addr>(2) get(3) svc(4) obj(5) iface(6)
     //        volume(7) ""(8) ; cursor on the next variadic prop slot.
     let out = complete_bash(
@@ -362,7 +371,8 @@ fn complete_get_second_property_still_completes() {
 /// so the property sits at position 3.
 #[test]
 fn complete_set_property_position_lists_properties() {
-    let addr = testbus::bus().address.clone();
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
     // words: busx(0) --address(1) <addr>(2) set(3) svc(4) obj(5) iface(6) ""(7)
     //        ; cursor on the empty property slot.
     let out = complete_bash(
