@@ -197,7 +197,11 @@ fn parse_args() -> Option<ParsedArgs> {
                 t if t.starts_with("--address=") => {
                     address = Some(t["--address=".len()..].to_string());
                 }
-                t if SERVICE_SUBS.contains(&t) || t == "list" || t == "completion" || t == "emit" => {
+                t if SERVICE_SUBS.contains(&t)
+                    || t == "list"
+                    || t == "completion"
+                    || t == "emit" =>
+                {
                     // Record the subcommand name as a `&'static str`. The match
                     // arms below pin each branch to a literal, so the returned
                     // lifetime is `'static`.

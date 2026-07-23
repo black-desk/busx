@@ -2,9 +2,9 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+use assert_cmd::Command;
 use std::thread;
 use std::time::Duration;
-use assert_cmd::Command;
 
 /// `emit` with no args succeeds (broadcasts a signal whose body is empty).
 #[test]

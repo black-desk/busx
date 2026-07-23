@@ -23,7 +23,13 @@ pub fn run(
     async_global_executor::block_on(async {
         let conn = dbus::conn::connect(user, system, address).await?;
         dbus::emit::emit_signal(
-            &conn, destination, object, interface, member, signature, args,
+            &conn,
+            destination,
+            object,
+            interface,
+            member,
+            signature,
+            args,
         )
         .await
     })

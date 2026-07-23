@@ -67,7 +67,10 @@ pub enum Command {
     List {
         #[arg(long, help = "Hide unique (`:1.x`) connection names")]
         no_unique: bool,
-        #[arg(long, help = "List activatable (auto-startable) services instead of current ones")]
+        #[arg(
+            long,
+            help = "List activatable (auto-startable) services instead of current ones"
+        )]
         activatable: bool,
     },
     /// Show interfaces/methods/signals/properties of an object.
@@ -134,7 +137,10 @@ pub enum Command {
         #[arg(long, value_name = "MATCH")]
         r#match: Option<String>,
         /// See method calls/returns/errors too (BecomeMonitor; privileged).
-        #[arg(long, help = "Also capture method calls/returns/errors (BecomeMonitor)")]
+        #[arg(
+            long,
+            help = "Also capture method calls/returns/errors (BecomeMonitor)"
+        )]
         all: bool,
         #[arg(long, value_name = "N")]
         limit_messages: Option<u64>,

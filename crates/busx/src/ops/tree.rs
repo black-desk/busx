@@ -45,7 +45,10 @@ fn node_to_json(n: &ObjectNode) -> Json {
 /// Recursively render a node indented by `depth`; one line per path.
 fn render_node(n: &ObjectNode, depth: usize, out: &mut String) {
     let indent = "  ".repeat(depth);
-    out.push_str(&format!("{}{} ({} interfaces)\n", indent, n.path, n.interfaces));
+    out.push_str(&format!(
+        "{}{} ({} interfaces)\n",
+        indent, n.path, n.interfaces
+    ));
     for child in &n.children {
         render_node(child, depth + 1, out);
     }

@@ -85,7 +85,13 @@ pub enum Tool {
 
 impl Tool {
     /// All tools, in popup-display order.
-    pub const ALL: [Tool; 5] = [Tool::DbusSend, Tool::Busctl, Tool::Qdbus, Tool::Gdbus, Tool::Busx];
+    pub const ALL: [Tool; 5] = [
+        Tool::DbusSend,
+        Tool::Busctl,
+        Tool::Qdbus,
+        Tool::Gdbus,
+        Tool::Busx,
+    ];
 
     /// The tool's command name (e.g. `"dbus-send"`).
     pub fn name(self) -> &'static str {

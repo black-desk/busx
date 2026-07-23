@@ -135,7 +135,7 @@ fn get_without_interface_errors_clearly() {
             "get",
             "org.busx.Test",
             "/org/busx/Test",
-            "", // explicit empty interface positional
+            "",       // explicit empty interface positional
             "volume", // property name → reaches the no-interface error path
         ])
         .assert() // execute regardless of exit status

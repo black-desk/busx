@@ -19,8 +19,14 @@ fn tree_lists_test_service_paths() {
         .unwrap();
     assert!(out.status.success(), "tree should succeed: {out:?}");
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("/org/busx/Test"), "missing Test path:\n{stdout}");
-    assert!(stdout.contains("/org/busx/Test/sub"), "missing sub path:\n{stdout}");
+    assert!(
+        stdout.contains("/org/busx/Test"),
+        "missing Test path:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("/org/busx/Test/sub"),
+        "missing sub path:\n{stdout}"
+    );
     assert!(stdout.contains('/'), "root path should appear:\n{stdout}");
 }
 
@@ -40,7 +46,9 @@ fn tree_json_is_nested_object() {
         if n["path"] == path {
             Some(n)
         } else {
-            n["children"].as_array().and_then(|cs| cs.iter().find_map(|c| find(c, path)))
+            n["children"]
+                .as_array()
+                .and_then(|cs| cs.iter().find_map(|c| find(c, path)))
         }
     }
     let test = find(&v, "/org/busx/Test").expect("/org/busx/Test node");
