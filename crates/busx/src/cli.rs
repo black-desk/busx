@@ -141,6 +141,11 @@ pub enum Command {
         #[arg(long, value_name = "DUR")]
         timeout: Option<String>,
     },
+    /// Recursively list an object-path tree of a service.
+    Tree {
+        #[arg(add = ArgValueCompleter::new(complete::complete_service))]
+        service: String,
+    },
     /// Generate shell completion script.
     #[command(hide = true)]
     Completion { shell: clap_complete::Shell },
