@@ -20,6 +20,7 @@
 use std::io::{Read, Write};
 use std::sync::mpsc;
 use std::thread;
+use std::time::{Duration, Instant};
 
 use portable_pty::{Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native_pty_system};
 
@@ -131,6 +132,28 @@ impl Pty {
     pub fn wait_exit(&mut self) -> Result<ExitStatus> {
         let child = self.child.as_mut().ok_or(Error::ProcessExited)?;
         Ok(child.wait()?)
+    }
+
+    /// Wait for the child to exit, but at most `timeout`.
+    ///
+    /// Polls `try_wait` so a stuck child can't hang the caller (a plain
+    /// [`wait`](Self::wait_exit) blocks forever in that case). Returns the
+    /// exit status if the child exited in time, `None` on timeout. The PTY
+    /// master is kept open for the duration so the child can shut down
+    /// cleanly (rather than being SIGHUP'd when it closes) — important when
+    /// the child writes an LLVM coverage profile on exit, which is only
+    /// finalized by a clean exit.
+    pub fn wait_for_exit_timeout(&mut self, timeout: Duration) -> Option<ExitStatus> {
+        let child = self.child.as_mut()?;
+        let deadline = Instant::now() + timeout;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => return Some(status),
+                Ok(None) if Instant::now() >= deadline => return None,
+                Ok(None) => thread::sleep(Duration::from_millis(5)),
+                Err(_) => return None,
+            }
+        }
     }
 
     /// Resize the PTY window.
