@@ -6,3 +6,12 @@
 members = ["crates/busx", "crates/testbus", "crates/tuiprobe"]
 default-members = ["crates/busx"]
 resolver = "2"
+
+# Use our fork of insta (crates/insta submodule) instead of the crates.io
+# release. The fork adds `matches_snapshot!` — a side-effect-free snapshot
+# match used by `wait_for_snapshot!` to poll without writing a `.snap.new` on
+# every intermediate frame. Track upstream via the submodule; to follow
+# upstream insta again, remove this patch and the submodule.
+[patch.crates-io]
+insta = { path = "crates/insta/insta" }
+
