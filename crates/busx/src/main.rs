@@ -199,6 +199,9 @@ fn run_command(
             limit_messages,
             timeout.as_deref(),
         ),
+        Command::Tree { service } => {
+            ops::tree::run(user, system, address.as_deref(), json, &service)
+        }
         Command::Completion { shell } => {
             complete::emit_script(shell);
             Ok(())

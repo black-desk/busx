@@ -32,7 +32,7 @@ use zbus_xml::{ArgDirection, Node};
 use crate::error::Result;
 
 /// Names of subcommands that take a service as their first positional.
-const SERVICE_SUBS: &[&str] = &["call", "get", "set", "introspect", "monitor"];
+const SERVICE_SUBS: &[&str] = &["call", "get", "set", "introspect", "monitor", "tree"];
 
 /// Entry point invoked very early in `main`. If `COMPLETE=<shell>` is set the
 /// shell is asking us to produce candidates (or the registration script); we do
@@ -209,6 +209,7 @@ fn parse_args() -> Option<ParsedArgs> {
                         "set" => "set",
                         "introspect" => "introspect",
                         "monitor" => "monitor",
+                        "tree" => "tree",
                         _ => "call",
                     });
                 }
