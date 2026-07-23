@@ -1,7 +1,6 @@
 ---
 source: crates/busx/tests/tui_pty.rs
-assertion_line: 584
-expression: screen
+expression: screen.as_str()
 ---
 
 
@@ -15,8 +14,8 @@ expression: screen
           │busctl: busctl --address=<SOCKET>
           │qdbus: qdbus --bus <SOCKET>
           │gdbus: gdbus call --address=<SOCKET>
+          │busx: busx --address=<SOCKET>
           │dbus-send --bus=<SOCKET>
-          │                                                                              │
           │                                                                              │
           │                                                                              │
           │                                                                              │

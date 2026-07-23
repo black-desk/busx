@@ -845,14 +845,14 @@ fn render_popup(
         .title("copy as — ↑↓ choose · Enter copy · Esc");
     frame.render_widget(&block, popup_area);
 
-    // Content sits INSIDE the border. Three regions: the 4-row tool list, a
-    // preview area (selected tool's full command / unsupported reason), and a
-    // 1-line status line for the last copy attempt.
+    // Content sits INSIDE the border. Three regions: the tool list (one row per
+    // tool), a preview area (selected tool's full command / unsupported reason),
+    // and a 1-line status line for the last copy attempt.
     let inner = block.inner(popup_area);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),
+            Constraint::Length(Tool::ALL.len() as u16),
             Constraint::Min(1),
             Constraint::Length(1),
         ])

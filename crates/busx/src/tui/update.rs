@@ -510,7 +510,7 @@ fn open_copy_as_popup(state: &mut State, op: CopyOp) {
 /// Key handling for the open copy-as popup. The flow keeps the popup open so the
 /// copy result can be shown:
 /// - No copy yet (`status.is_none()`): ↑↓/jk move the tool selection (clamped
-///   0..=3); Enter copies the focused tool's command — sets a transient
+///   to the row count); Enter copies the focused tool's command — sets a transient
 ///   "copying…" status and emits `Effect::CopyToClipboard` WITHOUT closing. A
 ///   no-op if the tool can't express the op.
 /// - After a copy (`status.is_some()`): navigation is locked; Enter dismisses
@@ -529,7 +529,7 @@ fn update_popup_key(state: &mut State, code: KeyCode) -> Option<Effect> {
             None
         }
         KeyCode::Down | KeyCode::Char('j') if !copy_done => {
-            popup.selected = (popup.selected + 1).min(3);
+            popup.selected = (popup.selected + 1).min(popup.commands.len() - 1);
             None
         }
         KeyCode::Enter if copy_done => {

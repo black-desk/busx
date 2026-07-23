@@ -86,8 +86,8 @@ pub struct CopyAsPopup {
     pub op: CopyOp,
     /// Per-tool generated command (`None` = the tool can't express it). Indexed
     /// in [`Tool::ALL`] order so `selected` indexes both this and the popup rows.
-    pub commands: [(Tool, Option<String>); 4],
-    /// The focused tool row (0..=3), in [`Tool::ALL`] order.
+    pub commands: [(Tool, Option<String>); Tool::ALL.len()],
+    /// The focused tool row (0..=`Tool::ALL.len()-1`), in [`Tool::ALL`] order.
     pub selected: usize,
     /// Status shown after a copy attempt: `None` = no copy yet;
     /// `Some("copying…")` / `Some("copied")` / `Some("error: …")`. Rendered as a
