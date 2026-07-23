@@ -114,3 +114,39 @@ fn get_single_property_human() {
         "expected `d  0.5` in human output:\n{stdout}"
     );
 }
+
+/// Giving property names but no interface must error (Get needs an interface).
+/// The message must NOT mention a nonexistent `--interface` flag — interface is
+/// a positional in `get`.
+#[test]
+fn get_without_interface_errors_clearly() {
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
+    // Note: clap fills the optional `interface` positional before `props`, so
+    // `get S O volume` parses `volume` AS the interface (→ invalid-interface
+    // error elsewhere, never reaching the no-interface path). To reach the
+    // no-interface path we pass an explicit empty interface, leaving `volume`
+    // as a property name.
+    let out = Command::cargo_bin("busx")
+        .unwrap()
+        .args([
+            "--address",
+            &addr,
+            "get",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "", // explicit empty interface positional
+            "volume", // property name → reaches the no-interface error path
+        ])
+        .assert() // execute regardless of exit status
+        .failure(); // exit 1 is expected here
+    let stderr = String::from_utf8_lossy(&out.get_output().stderr);
+    assert!(
+        stderr.to_lowercase().contains("interface"),
+        "should mention interface: {stderr}"
+    );
+    assert!(
+        !stderr.contains("--interface"),
+        "must not reference nonexistent --interface flag: {stderr}"
+    );
+}
