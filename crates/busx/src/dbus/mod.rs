@@ -8,6 +8,7 @@
 
 pub mod call;
 pub mod conn;
+pub mod emit;
 pub mod introspect;
 pub mod list;
 pub mod monitor;

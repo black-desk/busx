@@ -146,6 +146,17 @@ pub enum Command {
         #[arg(add = ArgValueCompleter::new(complete::complete_service))]
         service: String,
     },
+    /// Emit a D-Bus signal (for testing listeners on a private bus).
+    Emit {
+        /// Send to DEST (unicast) instead of broadcasting to all listeners.
+        #[arg(long, value_name = "DEST")]
+        destination: Option<String>,
+        object: String,
+        interface: String,
+        member: String,
+        signature: String,
+        args: Vec<String>,
+    },
     /// Generate shell completion script.
     #[command(hide = true)]
     Completion { shell: clap_complete::Shell },
