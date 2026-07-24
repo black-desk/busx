@@ -85,12 +85,6 @@ Following this principle, tests are split into two layers: **integration tests**
 (`crates/busx/tests/tui_pty.rs`, via `tuiprobe`), both driven by the `testbus`
 fixture.
 
-> Historical note: earlier versions used a ratatui `TestBackend` with in-process
-> scripts driving `State` → `render` snapshot tests
-> (`crates/busx/src/tui/snapshot_tests.rs`); this was rewritten to PTY
-> end-to-end snapshots (see below) in commit `818ce2af`, and that file was
-> deleted.
-
 ### The testbus fixture
 
 `testbus::bus_owned()` spins up a standalone `dbus-daemon` in the background,
@@ -218,7 +212,15 @@ chore(deps): bump clap from 4.6.1 to 4.6.2
 See the full history with `git log --oneline`. For commits touching a GitHub
 issue / PR, add `Closes #42` or `Refs #42` in the body at the end.
 
+CI lints commit messages on every pull request with [commitlint][cl] using the
+`@commitlint/config-conventional` ruleset (the `generic` job in
+`.github/workflows/ci.yaml`). The hard rule to remember: **the body is
+hard-wrapped at 100 columns** (`body-max-line-length`). The subject line and
+footer share the same 100-column limit, so a body line over 100 columns fails
+the `generic` CI job.
+
 [cc]: https://www.conventionalcommits.org/en/v1.0.0/
+[cl]: https://commitlint.js.org/
 
 ## Pull request workflow
 
