@@ -729,36 +729,78 @@ fn render_result(frame: &mut Frame, area: Rect, r: &ResultScreen) {
     };
     let block = Block::default().borders(Borders::ALL).title(title);
 
-    // Streaming-listen mode takes precedence over the one-shot result/loading:
-    // if any message block has arrived, show the joined blocks (skipped by scroll).
-    let body = if let Some(err) = &r.error {
-        format!("error: {err}")
+    // Collect the body as logical lines — each rendered independently so a long
+    // line is clipped with `<`/`>` scroll hints instead of overrunning or
+    // wrapping. Vertical scroll (`r.scroll`) skips leading logical lines.
+    let mut lines: Vec<String> = if let Some(err) = &r.error {
+        vec![format!("error: {err}")]
     } else if !r.messages.is_empty() {
+        // Each listen message block may itself span multiple display lines.
         r.messages
             .iter()
             .skip(r.scroll)
-            .map(String::as_str)
-            .collect::<Vec<_>>()
-            .join("\n")
+            .flat_map(|m| m.split('\n').map(str::to_string))
+            .collect()
     } else if r.loading {
-        "…".to_string()
+        vec!["…".to_string()]
     } else {
         match &r.result {
-            Some(ActionResult::Call(lines)) => {
-                // Skip `scroll` leading lines (update clamps the scroll value).
-                lines
-                    .iter()
-                    .skip(r.scroll)
-                    .map(String::as_str)
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            }
-            Some(ActionResult::Get(v)) => v.clone(),
-            Some(ActionResult::Set) => "ok".to_string(),
-            None => String::new(),
+            Some(ActionResult::Call(vs)) => vs.iter().skip(r.scroll).cloned().collect(),
+            Some(ActionResult::Get(v)) => v.split('\n').map(str::to_string).collect(),
+            Some(ActionResult::Set) => vec!["ok".to_string()],
+            None => vec![],
         }
     };
-    frame.render_widget(Paragraph::new(body).block(block), area);
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.height == 0 {
+        return;
+    }
+    lines.truncate(inner.height as usize);
+    let width = inner.width as usize;
+    let rendered: Vec<Line> = lines
+        .iter()
+        .map(|l| clipped_row(l, r.hscroll, width))
+        .collect();
+    frame.render_widget(Paragraph::new(rendered), inner);
+}
+
+/// Render one body line, clipped to `width` columns at the horizontal offset
+/// `hscroll`. A yellow `<` at the left marks content scrolled off the start; a
+/// yellow `>` at the right marks content cut off the end — the journalctl/less
+/// convention that invites scrolling instead of losing data to an invisible
+/// truncation. (Row-precise because render knows `area.width`, unlike `update`.)
+fn clipped_row(line: &str, hscroll: usize, width: usize) -> Line<'static> {
+    if width == 0 {
+        return Line::raw("");
+    }
+    let chars: Vec<char> = line.chars().collect();
+    let n = chars.len();
+    // `<` only when this row actually has content hidden to the left; `>` only
+    // when content survives the right edge. Both are computed per-row so short
+    // rows show no marker while a long sibling row does.
+    let has_left = hscroll > 0 && hscroll < n;
+    let left_pad = if has_left { 1 } else { 0 };
+    let content_w = width.saturating_sub(left_pad);
+    let has_right = hscroll.saturating_add(content_w) < n;
+    let content_w = if has_right {
+        content_w.saturating_sub(1)
+    } else {
+        content_w
+    };
+    let shown: String = chars.iter().skip(hscroll).take(content_w).collect();
+    let mut spans: Vec<Span<'static>> = Vec::with_capacity(3);
+    if has_left {
+        spans.push(Span::styled("<", Style::default().fg(Color::Yellow)));
+    }
+    if !shown.is_empty() {
+        spans.push(Span::raw(shown));
+    }
+    if has_right {
+        spans.push(Span::styled(">", Style::default().fg(Color::Yellow)));
+    }
+    Line::from(spans)
 }
 
 /// A titled list. The focused column gets a `▶` title prefix + bold border; the
@@ -813,9 +855,11 @@ fn render_keyhint(frame: &mut Frame, area: Rect, screen: &Screen) {
         // live cancel sender; on those, Esc both pops the screen and stops the
         // listen (the cancel sender drops). One-shot Results keep "Esc back".
         Screen::Result(r) if !r.messages.is_empty() || r.cancel.is_some() => {
-            "↑↓ scroll · c copy-as · y copy · Esc back/stop · q quit · ? help"
+            "↑↓ scroll · ←→ scroll · c copy-as · y copy · Esc back/stop · q quit · ? help"
         }
-        Screen::Result(_) => "↑↓ scroll · c copy-as · y copy · Esc back · q quit · ? help",
+        Screen::Result(_) => {
+            "↑↓ scroll · ←→ scroll · c copy-as · y copy · Esc back · q quit · ? help"
+        }
     };
     frame.render_widget(Paragraph::new(hint), area);
 }
@@ -934,6 +978,7 @@ busx — keybindings
 
 global:
   ↑↓ / jk     move selection (or scroll on the Result screen)
+  ←→ / hl     (Result) scroll a long line sideways; `<`/`>` mark hidden text
   Enter       open / activate / drill in / fire the focused button
   Esc         back (or stop a listen); at the root Service screen, quit
   q           quit
@@ -953,7 +998,11 @@ navigation: Service → Objects → Interfaces → Interface → Detail → Resu
 /// close hint) wrapping the `HELP_TEXT`. `Clear` wipes the underlying screen so
 /// the text reads cleanly on top. Not clickable — records no click targets.
 fn render_help(frame: &mut Frame, area: Rect) {
-    let popup_area = centered_rect(70, 70, area);
+    // Size the box to fit the full keybinding list: wider (88%) so most
+    // entries don't wrap, and tall (96%) so the whole reference stays
+    // visible. The fixed 70%×70% box the help used to silently clipped
+    // the bottom half (r / c / y / mouse / navigation) at 80x24.
+    let popup_area = centered_rect(88, 96, area);
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
         .borders(Borders::ALL)

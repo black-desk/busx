@@ -122,6 +122,14 @@ impl TestIface {
     fn echo_bool(&self, b: bool) -> bool {
         b
     }
+
+    /// Returns a long string — exercises the Result screen's horizontal
+    /// `<`/`>` clipping + scroll in the TUI snapshot tests (the value is
+    /// deliberately longer than the 80-column result area's inner width).
+    fn long_string(&self) -> String {
+        "the quick brown fox jumps over the lazy dog near the riverbank; a truly lovely afternoon"
+            .to_string()
+    }
 }
 
 pub struct TestBus {

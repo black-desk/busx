@@ -351,6 +351,59 @@ fn call_zero_arg_method() {
     probe.send_key(KeyCode::Char('q')).unwrap();
 }
 
+// ── Result horizontal scroll ────────────────────────────────────────────
+//
+// A long single-line reply overflows the bordered Result area. Instead of
+// wrapping (which breaks the per-line scroll model) or silently truncating,
+// render clips it with a yellow `>` at the right edge and lets the user
+// scroll sideways (←/→ or h/l); once scrolled, a `<` marks the hidden left.
+
+/// Navigate to `LongString` — the last method (declaration order:
+/// TakeHints, Join, BumpVolume, MakeFd, MakePipeFd, MakeBytes, MakeRawBytes,
+/// MakeControlString, EchoBool, then LongString = index 9). Zero-arg, so
+/// firing Call goes straight to the Result screen.
+fn drill_to_long_string(probe: &mut TuiProbe) {
+    drill_to_interface(probe, "80x20");
+    wait_for_snapshot!(probe, "interface_loaded_80x20").unwrap();
+    for _ in 0..9 {
+        probe.send_key(KeyCode::Down).unwrap();
+    }
+    probe.send_key(KeyCode::Enter).unwrap(); // enter the action button bar
+    probe.send_key(KeyCode::Enter).unwrap(); // fire Call → Result
+    // Wait for the actual reply text (not the "(loading…)" title frame).
+    probe
+        .wait_for(|s| s.contains("the quick brown fox"))
+        .unwrap();
+}
+
+#[test]
+fn result_long_line_clipped() {
+    let _g = pty_filter().bind_to_scope();
+    let bus = testbus::bus_owned();
+    let mut probe = spawn_busx(&bus.address, 80, 20);
+
+    drill_to_long_string(&mut probe);
+    // The long reply is clipped; a `>` at the right edge signals more text.
+    insta::assert_snapshot!(probe.screen_contents());
+
+    probe.send_key(KeyCode::Char('q')).unwrap();
+}
+
+#[test]
+fn result_long_line_scrolled() {
+    let _g = pty_filter().bind_to_scope();
+    let bus = testbus::bus_owned();
+    let mut probe = spawn_busx(&bus.address, 80, 20);
+
+    drill_to_long_string(&mut probe);
+    // Scroll one column right: the row now shows `<` (hidden left) and `>`.
+    probe.send_key(KeyCode::Right).unwrap();
+    probe.wait_for(|s| s.contains("<")).unwrap();
+    insta::assert_snapshot!(probe.screen_contents());
+
+    probe.send_key(KeyCode::Char('q')).unwrap();
+}
+
 #[test]
 fn get_property() {
     let _g = pty_filter().bind_to_scope();

@@ -1,7 +1,6 @@
 ---
 source: crates/busx/tests/tui_pty.rs
-assertion_line: 395
-expression: screen
+expression: screen.as_str()
 ---
 org.busx.Test > /org/busx/Test > org.busx.Test > set volume > Result
 ┌org.busx.Test.volume──────────────────────────────────────────────────────────┐
@@ -22,4 +21,4 @@ org.busx.Test > /org/busx/Test > org.busx.Test > set volume > Result
 │                                                                              │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
-↑↓ scroll · c copy-as · y copy · Esc back · q quit · ? help
+↑↓ scroll · ←→ scroll · c copy-as · y copy · Esc back · q quit · ? help

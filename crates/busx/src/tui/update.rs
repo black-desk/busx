@@ -846,6 +846,12 @@ fn update_result_key(r: &mut ResultScreen, code: KeyCode) {
         KeyCode::Up | KeyCode::Char('k') => {
             r.scroll = r.scroll.saturating_sub(1);
         }
+        KeyCode::Right | KeyCode::Char('l') => {
+            r.hscroll = r.hscroll.saturating_add(1);
+        }
+        KeyCode::Left | KeyCode::Char('h') => {
+            r.hscroll = r.hscroll.saturating_sub(1);
+        }
         _ => {}
     }
 }
@@ -1390,6 +1396,7 @@ fn build_detail_result(d: &DetailScreen, nav: &NavContext) -> (ResultScreen, Eff
         error: None,
         loading: true,
         scroll: 0,
+        hscroll: 0,
         messages: vec![],
         cancel: None,
         op: Some(copy_op),

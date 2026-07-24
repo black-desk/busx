@@ -1,10 +1,10 @@
 ---
 source: crates/busx/tests/tui_pty.rs
-expression: screen.as_str()
+expression: probe.screen_contents()
 ---
 org.busx.Test > /org/busx/Test > org.busx.Test > Result
-┌listen org.busx.Test.TakeHints────────────────────────────────────────────────┐
-│                                                                              │
+┌org.busx.Test.LongString──────────────────────────────────────────────────────┐
+│<the quick brown fox jumps over the lazy dog near the riverbank; a truly love>│
 │                                                                              │
 │                                                                              │
 │                                                                              │
@@ -21,4 +21,4 @@ org.busx.Test > /org/busx/Test > org.busx.Test > Result
 │                                                                              │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
-↑↓ scroll · ←→ scroll · c copy-as · y copy · Esc back/stop · q quit · ? help
+↑↓ scroll · ←→ scroll · c copy-as · y copy · Esc back · q quit · ? help

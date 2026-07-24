@@ -223,6 +223,10 @@ pub struct ResultScreen {
     pub error: Option<String>,
     pub loading: bool,
     pub scroll: usize,
+    /// Horizontal scroll offset (in chars) for a long single line that
+    /// overflows the result area. Render shows `<`/`>` at the edges to hint at
+    /// hidden content (←/→ or h/l to scroll).
+    pub hscroll: usize,
     /// Streaming-listen mode: appended message blocks (`format_message` output).
     pub messages: Vec<String>,
     /// Cancel sender for an active listen. Stored when `Msg::ListenStarted`
