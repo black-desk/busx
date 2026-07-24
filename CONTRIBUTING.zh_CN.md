@@ -60,24 +60,29 @@ cargo run                         # 进入 TUI
 
 `busx` 是纯 binary crate（根 `Cargo.toml` 没有 lib
 target），对外公开的表面只有两个：CLI 子命令的输入 / 输出，和 TUI 的交互 / 渲染。所有测试都应该从这两层入手——`crates/busx/tests/`
-用 `assert_cmd` 起子进程跑真实的 `busx` 二进制；TUI 用 ratatui `TestBackend`
-驱动 `State` → `render` 管线。内部模块（`dbus/`、`value/`、`ops/`
+用 `assert_cmd` 起子进程跑真实的 `busx` 二进制；TUI 测试把真实的 `busx`
+作为子进程跑在一个伪终端（PTY）里，由 `tuiprobe`
+喂键鼠事件、读取渲染输出。内部模块（`dbus/`、`value/`、`ops/`
 等里的私有函数）不该有独立的单元测试，它们的行为应该能通过公开表面间接验证到。换句话说：**如果一个测试需要
 `pub(crate)` 或者更窄的可见性才能写，那它就是错的测试位置**——把断言挪到 `tests/`
 下，通过一条 `busx` 命令行 / 一帧 TUI 输出去验证。
 
 基于这条原则，测试分两层：**集成测试**（`crates/busx/tests/`）和
-**TUI 快照测试** （`crates/busx/src/tui/snapshot_tests.rs`），两者都由 `testbus`
-夹具驱动。
+**TUI 快照测试** （`crates/busx/tests/tui_pty.rs`，用 `tuiprobe`），两者都由
+`testbus` 夹具驱动。
+
+> 历史说明：早期版本用过 ratatui `TestBackend` + 进程内脚本驱动 `State` →
+> `render` 的快照测试（`crates/busx/src/tui/snapshot_tests.rs`），后在 commit
+> `818ce2af` 重写为 PTY 端到端快照（见下），该文件已删除。
 
 ### testbus 夹具
 
-`testbus::bus()` 会在后台拉起一个独立的 `dbus-daemon`，注册一个名为
+`testbus::bus_owned()` 会在后台拉起一个独立的 `dbus-daemon`，注册一个名为
 `org.busx.Test` 的测试服务，返回它的地址。集成测试用 `--address` 把 `busx`
 指向这个总线，因此**不依赖系统 / 会话总线的状态**，跑出来是确定的。
 
 ```rust
-let addr = testbus::bus().address.clone();
+let addr = testbus::bus_owned().address.clone();
 Command::cargo_bin("busx")?
     .args(["--address", &addr, "list"])
     ...
@@ -88,8 +93,12 @@ Command::cargo_bin("busx")?
 ### 快照测试（insta）
 
 TUI 渲染逻辑用 [`insta`][insta] 做快照对比，金快照放在
-`crates/busx/src/tui/snapshots/*.snap`。**没有真实总线、没有真实终端**——纯粹驱动
-`State` → `update` → `render` → 与 ratatui `TestBackend` 的输出做对比。
+`crates/busx/tests/snapshots/*.snap`。测试在 `tuiprobe` 拉起的真实终端里起真实的
+`busx`（连到 `testbus`
+私有总线），喂键鼠事件驱动到目标状态，再对终端屏幕做快照——走完整的 `main` → CLI
+→ crossterm → ratatui → `render` 管线。用 `wait_for_snapshot!`
+轮询直到屏幕匹配某个已有金快照（收敛前的中间帧不落盘），再用
+`insta::assert_snapshot!` 断言新帧。
 
 [insta]: https://insta.rs
 
