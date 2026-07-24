@@ -56,6 +56,10 @@ Long result rows now scroll horizontally instead of wrapping the layout.
 Assisted-by: Codex:gpt-5
 ```
 
+If you cannot reliably determine your own `AGENT` or `MODEL` — most agents have
+no way to inspect the exact model they are running — do not guess. Ask the user
+which agent/model produced the change and record exactly what they tell you.
+
 The human author stays fully responsible for reviewing the output and meeting
 every rule in CONTRIBUTING.md.
 
