@@ -7,10 +7,19 @@ members = ["crates/busx", "crates/testbus", "crates/tuiprobe"]
 default-members = ["crates/busx"]
 resolver = "2"
 
+[workspace.dependencies]
+# Declared here to mirror upstream insta's own `[workspace.dependencies]`. When
+# insta is consumed as a path/patch dependency from this workspace, cargo
+# resolves its `clap = { workspace = true, optional = true }` against *this*
+# root rather than insta's, so `clap` must exist here too or the manifest fails
+# to parse. Keep the version/features in sync with insta's declaration.
+clap = { version = "4.1", features = ["derive", "env"] }
+
 # Use our fork of insta (crates/insta submodule) instead of the crates.io
-# release. The fork adds `matches_snapshot!` — a side-effect-free snapshot
-# match used by `wait_for_snapshot!` to poll without writing a `.snap.new` on
-# every intermediate frame. Track upstream via the submodule; to follow
-# upstream insta again, remove this patch and the submodule.
+# release. The submodule tracks the `matches_snapshot!` contribution proposed
+# upstream in mitsuhiko/insta#931 — a side-effect-free snapshot match used by
+# `wait_for_snapshot!` to poll without writing a `.snap.new` on every
+# intermediate frame. Once that PR lands and is released, drop this patch and
+# the submodule and depend on crates.io insta again.
 [patch.crates-io]
 insta = { path = "crates/insta/insta" }
