@@ -175,6 +175,11 @@ configuration, and so on.
 When adding / editing docs, prune and weigh against this standard — do not stuff
 in generic tutorials.
 
+**Keep the docs in sync.** `README.md` and `CONTRIBUTING.md` must always reflect
+the current state of the project. Whenever a change alters CLI / TUI behavior,
+build / CI configuration, or any documented convention, update the affected doc
+in the same PR — do not let the docs drift out of date.
+
 ## Commit messages
 
 Follow [Conventional Commits][cc]; the first line of a commit message has the

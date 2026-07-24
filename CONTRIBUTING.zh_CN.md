@@ -152,6 +152,10 @@ CI 通过 [`black-desk/workflows/rust`][wf-rust] 上报到
 
 新增 / 修改文档时按这条标准删减和取舍，不要把通用教程塞进来。
 
+**保持文档同步。** `README.md` 和 `CONTRIBUTING.md`
+必须始终反映项目当前的状态。每当改动改变了 CLI / TUI 行为、构建 /
+CI 配置或任何已记录的约定，就要在同一个 PR 里更新对应文档，不要让文档与代码脱节。
+
 ## 提交信息规范
 
 使用 [Conventional Commits][cc]，提交信息第一行格式为：
