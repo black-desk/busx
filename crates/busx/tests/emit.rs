@@ -26,8 +26,8 @@ fn emit_no_body_succeeds() {
         .success();
 }
 
-/// A broadcast `emit` is capturable by `monitor` on the same bus (default
-/// signal subscription). This is the real end-to-end proof the signal left
+/// A broadcast `emit` is capturable by `monitor` on the same bus (`--type
+/// signal` subscription). This is the real end-to-end proof the signal left
 /// busx and crossed the bus.
 #[test]
 fn emit_signal_is_captured_by_monitor() {
@@ -42,6 +42,8 @@ fn emit_signal_is_captured_by_monitor() {
                 "--address",
                 &addr2,
                 "monitor",
+                "--type",
+                "signal",
                 "--interface",
                 "org.busx.Test",
                 "--limit-messages",
