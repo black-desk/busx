@@ -2,10 +2,27 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use clap_complete::ArgValueCompleter;
 
 use crate::complete;
+/// D-Bus message type to capture for `monitor`.
+///
+/// `signal` is special: it uses a plain, unprivileged signal subscription
+/// (every bus accepts it). Any other type — or omitting `--type` entirely —
+/// switches `monitor` into BecomeMonitor mode, which also sees method calls /
+/// returns / errors but is privileged and may be refused by the bus.
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
+pub enum MonitorType {
+    #[value(name = "signal")]
+    Signal,
+    #[value(name = "method_call")]
+    MethodCall,
+    #[value(name = "method_return")]
+    MethodReturn,
+    #[value(name = "error")]
+    Error,
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -120,9 +137,17 @@ pub enum Command {
         signature: String,
         value: Vec<String>,
     },
-    /// Monitor bus messages. Defaults to a signal subscription (no privileges).
-    /// Pass --all to see method calls/returns/errors too (BecomeMonitor; may be
-    /// refused by the bus, in which case the command errors out).
+    /// Monitor bus messages.
+    ///
+    /// With no `--type`, `monitor` becomes a bus monitor (BecomeMonitor) and
+    /// shows every message crossing the bus — method calls, returns, errors,
+    /// and signals — the same as `busctl monitor`. BecomeMonitor is privileged
+    /// and may be refused by the bus; when it is, the command errors out rather
+    /// than silently degrading.
+    ///
+    /// `--type signal` instead uses a plain signal subscription, which every
+    /// bus accepts with no privileges. Any other `--type` (or none at all)
+    /// selects BecomeMonitor.
     Monitor {
         #[arg(add = ArgValueCompleter::new(complete::complete_service))]
         services: Vec<String>,
@@ -136,12 +161,11 @@ pub enum Command {
         sender: Option<String>,
         #[arg(long, value_name = "MATCH")]
         r#match: Option<String>,
-        /// See method calls/returns/errors too (BecomeMonitor; privileged).
-        #[arg(
-            long,
-            help = "Also capture method calls/returns/errors (BecomeMonitor)"
-        )]
-        all: bool,
+        /// Message type to capture. `signal` uses an unprivileged signal
+        /// subscription; any other type (or omitting `--type`) uses
+        /// BecomeMonitor so method calls/returns/errors are visible too.
+        #[arg(long, value_name = "TYPE")]
+        r#type: Option<MonitorType>,
         #[arg(long, value_name = "N")]
         limit_messages: Option<u64>,
         #[arg(long, value_name = "DUR")]

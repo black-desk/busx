@@ -13,19 +13,22 @@
 //!  "args":[ <type-tagged values...> ]}
 //! ```
 //!
-//! There are two delivery modes:
+//! There are two delivery modes, chosen from the resolved match rule's message
+//! type:
 //!
-//! * Default (no `--all`): a signal subscription. A D-Bus match rule — type
-//!   pinned to `signal` — is built from the convenience flags and `--match`,
-//!   then registered via `MessageStream::for_match_rule`. No privileges needed;
+//! * `--type signal` (a rule whose `type=` is `signal`): a signal subscription.
+//!   The match rule is built from the convenience flags and `--match`, then
+//!   registered via `MessageStream::for_match_rule`. No privileges needed;
 //!   this is what every bus accepts.
-//! * `--all`: the connection is converted into a bus monitor via
-//!   [`org.freedesktop.DBus.Monitoring.BecomeMonitor`], so it sees every message
-//!   crossing the bus (method_call / method_return / error / signal) — the same
-//!   mechanism `busctl monitor` uses. `BecomeMonitor` is privileged and may be
-//!   refused by some bus configurations; when it is, the command **errors out**
-//!   (the user explicitly asked for all message types) rather than silently
-//!   degrading to signals-only. Drop `--all` for plain signal monitoring.
+//! * Any other `--type` (method_call / method_return / error), or **no
+//!   `--type` at all**: the connection becomes a bus monitor via
+//!   [`org.freedesktop.DBus.Monitoring.BecomeMonitor`], so it sees every
+//!   message crossing the bus — the same mechanism `busctl monitor` uses.
+//!   With no filters this is every message; with filters (`--interface`,
+//!   `--member`, …) BecomeMonitor applies them at the bus. `BecomeMonitor` is
+//!   privileged and may be refused by some bus configurations; when it is, the
+//!   command **errors out** rather than silently degrading to signals-only.
+//!   Use `--type signal` for plain signal monitoring.
 
 use crate::dbus;
 use crate::error::{Error, Result};
@@ -170,42 +173,67 @@ pub fn run(
     path: Option<String>,
     sender: Option<String>,
     raw_match: Option<String>,
-    all: bool,
+    msg_type: Option<Type>,
     limit_messages: Option<u64>,
     timeout: Option<&str>,
 ) -> Result<()> {
     async_global_executor::block_on(async {
         let conn = dbus::conn::connect(user, system, address).await?;
 
-        // Default = signal subscription (a plain match rule; type pinned to
-        // Signal). --all instead requests BecomeMonitor so method calls/returns/
-        // errors are visible too — a privileged op the bus may refuse; when it
-        // does we error out (the user explicitly asked for methods) and never
-        // silently degrade to signals-only.
+        // Build the match rule from the convenience flags + `--type`. When the
+        // rule pins `type=signal` we use a plain signal subscription (no
+        // privileges); anything else — including no `--type` at all — becomes a
+        // bus monitor so method calls/returns/errors are visible too.
         let rule = crate::dbus::monitor::build_match_rule(
             interface.as_deref(),
             member.as_deref(),
             path.as_deref(),
             sender.as_deref(),
             raw_match.as_deref(),
-            if all { None } else { Some(Type::Signal) },
+            msg_type,
         )?;
 
-        let stream = if all {
-            dbus::monitor::become_monitor(&conn, Some(&rule))
+        let (stream, monitor_own_name) = if rule.msg_type() == Some(Type::Signal) {
+            // Unprivileged signal subscription: every bus accepts it.
+            (
+                MessageStream::for_match_rule(rule, &conn, None).await?,
+                None,
+            )
+        } else {
+            // BecomeMonitor: sees method_call / method_return / error (and
+            // signals) crossing the bus — privileged; the bus may refuse it, in
+            // which case we error out rather than silently degrading to signals.
+            let has_filters = msg_type.is_some()
+                || interface.is_some()
+                || member.is_some()
+                || path.is_some()
+                || sender.is_some()
+                || raw_match.is_some();
+            crate::dbus::monitor::become_monitor(&conn, has_filters.then_some(&rule))
                 .await
                 .map_err(|e| {
                     crate::error::Error::Msg(format!(
                         "BecomeMonitor refused by the bus ({e}); cannot capture method calls. \
-                         Omit --all for signal-only monitoring."
+                         Use --type signal for signal-only monitoring (no privileges needed)."
                     ))
                 })?;
-            MessageStream::from(&conn)
-        } else {
-            MessageStream::for_match_rule(rule.clone(), &conn, None).await?
+            // Mirror `busctl monitor`: the daemon emits NameAcquired / NameLost
+            // signals for this connection's own unique name as BecomeMonitor
+            // takes effect. Capture it so stream_msgs can discard that
+            // lifecycle noise until the confirming NameLost(own_name) lands.
+            let own_name = conn.unique_name().map(|n| n.to_string());
+            (MessageStream::from(&conn), own_name)
         };
 
-        stream_msgs(stream, &services, limit_messages, timeout, json).await
+        stream_msgs(
+            stream,
+            &services,
+            limit_messages,
+            timeout,
+            json,
+            monitor_own_name,
+        )
+        .await
     })
 }
 
@@ -225,6 +253,7 @@ async fn stream_msgs(
     limit: Option<u64>,
     timeout: Option<&str>,
     json: bool,
+    monitor_own_name: Option<String>,
 ) -> Result<()> {
     let deadline = timeout.map(parse_duration).transpose()?;
 
@@ -239,6 +268,14 @@ async fn stream_msgs(
     let mut timer = OptionFuture::from(deadline.map(async_io::Timer::after)).fuse();
     let mut stream = stream.fuse();
 
+    // In BecomeMonitor mode (`monitor_own_name` set), mirror `busctl monitor`:
+    // the daemon emits NameAcquired / NameLost signals for this connection's
+    // own unique name as BecomeMonitor takes effect — bus plumbing the user
+    // didn't ask for. Discard everything until the confirming
+    // `NameLost(own_name)` lands, then forward normally. In signal-subscription
+    // mode (`None`) there's no such noise, so we start already "ready".
+    let mut monitor_ready = monitor_own_name.is_none();
+
     let mut count: u64 = 0;
     loop {
         futures::select! {
@@ -250,6 +287,14 @@ async fn stream_msgs(
                     continue;
                 }
                 Some(Ok(msg)) => {
+                    if !monitor_ready {
+                        if let Some(name) = &monitor_own_name
+                            && crate::dbus::monitor::is_monitor_ready_signal(&msg, name)
+                        {
+                            monitor_ready = true;
+                        }
+                        continue;
+                    }
                     if !matches_service(&msg, services) {
                         continue;
                     }

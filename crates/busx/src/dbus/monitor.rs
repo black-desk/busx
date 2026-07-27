@@ -66,6 +66,34 @@ pub async fn become_monitor(conn: &zbus::Connection, rule: Option<&MatchRule<'_>
     Ok(())
 }
 
+/// Is `m` the `NameLost(own_name)` signal the daemon sends to confirm that
+/// BecomeMonitor has taken effect? `busctl monitor` waits for exactly this
+/// signal before it starts displaying messages — anything earlier is
+/// BecomeMonitor lifecycle noise (NameAcquired, the implicit name release the
+/// daemon does as part of the transition, etc.).
+///
+/// Best-effort: on parse failure, return `false` (don't suppress on
+/// uncertainty — the worst case is the user sees one extra message).
+pub fn is_monitor_ready_signal(m: &zbus::Message, own_name: &str) -> bool {
+    use zbus::message::Type;
+    if m.header().message_type() != Type::Signal {
+        return false;
+    }
+    let h = m.header();
+    let iface_matches = h.interface().is_some_and(|i| i == "org.freedesktop.DBus");
+    let member_matches = h.member().is_some_and(|memb| memb == "NameLost");
+    let path_matches = h
+        .path()
+        .is_some_and(|p| p.as_str() == "/org/freedesktop/DBus");
+    if !iface_matches || !member_matches || !path_matches {
+        return false;
+    }
+    let Ok((name,)) = m.body().deserialize::<(String,)>() else {
+        return false;
+    };
+    name == own_name
+}
+
 /// Render a single received message as a `dbus-send`-style human block (
 /// human form). The first line names the type plus sender/destination/path; the
 /// second line carries interface/member/serial (and reply_serial or error when
