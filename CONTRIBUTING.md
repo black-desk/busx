@@ -10,17 +10,14 @@ en | [zh_CN](CONTRIBUTING.zh_CN.md)
 
 > [!WARNING]
 >
-> This project is in an **early development stage**; its code has **never been
-> reviewed by a human**, and the CLI surface may change frequently.
+> Early development: code has **never been human-reviewed**; the CLI surface may
+> change frequently.
 
 > [!NOTE]
 >
-> This English CONTRIBUTING is translated from the Chinese version and may
-> contain errors.
+> Translated from the Chinese version; may contain errors.
 
-Contributions to `busx` are very welcome — whether you install `busx` to use it,
-fix a bug, add a test, or build a new feature. This document lists the
-conventions you need to know to contribute.
+Conventions for contributing to `busx`.
 
 ## Table of contents
 
@@ -30,34 +27,27 @@ conventions you need to know to contribute.
 - [Code style](#code-style)
 - [Documentation](#documentation)
 - [Commit messages](#commit-messages)
-- [Pull request workflow](#pull-request-workflow)
+- [AI-assisted changes](#ai-assisted-changes)
 - [License & REUSE](#license--reuse)
 
 ## Clone
 
-The repository ships a `.format` submodule (shared `EditorConfig` / `prettier` /
-formatting config), so always clone with `--recurse-submodules`:
+A `.format` submodule ships shared `EditorConfig` / `prettier` config, so clone
+with `--recurse-submodules`:
 
 ```bash
 git clone --recurse-submodules https://github.com/black-desk/busx.git
 ```
 
-If you already cloned it without submodules, catch up:
-
-```bash
-git submodule update --init --recursive
-```
-
 ## Build & run
 
-`busx` is a Cargo workspace (the root `Cargo.toml` is a virtual manifest); the
-actual code lives in `crates/busx/` and the test fixtures live in
-`crates/testbus/`. All `cargo` commands can be run straight from the
-**repository root**:
+Cargo workspace (root `Cargo.toml` is a virtual manifest); code lives in
+`crates/busx/`, test fixtures in `crates/testbus/`. Run all `cargo` commands
+from the **repository root**:
 
 ```bash
-cargo build                       # debug build
-cargo run -- <args>               # run directly, e.g. cargo run -- list
+cargo build
+cargo run -- <args>               # e.g. cargo run -- list
 cargo run -- --help               # show the CLI
 cargo run                         # enter the TUI
 ```
@@ -68,29 +58,26 @@ cargo run                         # enter the TUI
 do not write unit tests for internal modules.**
 
 `busx` is a pure binary crate (the root `Cargo.toml` has no lib target), so it
-exposes only two public surfaces: the input / output of the CLI subcommands, and
-the interaction / rendering of the TUI. Every test should enter through one of
-these two layers — `crates/busx/tests/` uses `assert_cmd` to spawn a subprocess
-running the real `busx` binary; TUI tests run the real `busx` as a subprocess
-inside a pseudo-terminal (PTY), where `tuiprobe` feeds keyboard / mouse events
-and reads the rendered output. Internal modules (private functions in `dbus/`,
-`value/`, `ops/`, etc.) should not have standalone unit tests; their behavior
-should be verifiable indirectly through the public surface. In other words: **if
-a test needs `pub(crate)` or narrower visibility to be written, it is in the
-wrong place** — move the assertion into `tests/` and verify it through a `busx`
-command line / a TUI output frame.
+exposes only two public surfaces: CLI subcommand input / output, and TUI
+interaction / rendering. Every test enters through one of them —
+`crates/busx/tests/` uses `assert_cmd` to spawn the real `busx` binary; TUI
+tests run the real `busx` as a subprocess inside a PTY where `tuiprobe` feeds
+keyboard / mouse events and reads the rendered output. Internal modules
+(`dbus/`, `value/`, `ops/`, …) get no standalone unit tests; their behavior is
+verified indirectly through the public surface. **If a test needs `pub(crate)`
+or narrower visibility, it is in the wrong place** — move it into `tests/` and
+verify via a CLI / TUI output frame.
 
-Following this principle, tests are split into two layers: **integration tests**
-(`crates/busx/tests/`) and **TUI snapshot tests**
-(`crates/busx/tests/tui_pty.rs`, via `tuiprobe`), both driven by the `testbus`
-fixture.
+Tests split into two layers: **integration tests** (`crates/busx/tests/`) and
+**TUI snapshot tests** (`crates/busx/tests/tui_pty.rs`, via `tuiprobe`), both
+driven by the `testbus` fixture.
 
 ### The testbus fixture
 
 `testbus::bus_owned()` spins up a standalone `dbus-daemon` in the background,
-registers a test service named `org.busx.Test`, and returns its address.
-Integration tests point `busx` at this bus via `--address`, so they **do not
-depend on the system / session bus state** and are deterministic:
+registers a test service `org.busx.Test`, and returns its address. Integration
+tests point `busx` at it via `--address`, so they **do not depend on the system
+/ session bus state** and stay deterministic:
 
 ```rust
 let addr = testbus::bus_owned().address.clone();
@@ -103,21 +90,19 @@ A typical usage lives in `crates/busx/tests/list.rs`.
 
 ### Snapshot tests (insta)
 
-TUI rendering logic is snapshot-tested with [`insta`][insta]; the golden
+TUI rendering logic is snapshot-tested with [`insta`][insta]; the expected
 snapshots live in `crates/busx/tests/snapshots/*.snap`. Each test launches the
-real `busx` (connected to the `testbus` private bus) inside a real terminal
-spawned by `tuiprobe`, feeds it keyboard / mouse events to drive it to the
-target state, then snapshots the terminal screen — exercising the full `main` →
-CLI → crossterm → ratatui → `render` pipeline. `wait_for_snapshot!` polls until
-the screen matches an existing golden snapshot (intermediate frames before
-convergence are never persisted), then `insta::assert_snapshot!` asserts the new
-frame.
+real `busx` (on the `testbus` private bus) inside a real terminal from
+`tuiprobe`, drives it to the target state, then snapshots the screen —
+exercising the full `main` → CLI → crossterm → ratatui → `render` pipeline.
+`wait_for_snapshot!` polls until the screen matches an existing expected
+snapshot (intermediate frames are never persisted), then
+`insta::assert_snapshot!` asserts the new frame.
 
 [insta]: https://insta.rs
 
-When you **intentionally** change the TUI rendering (e.g. tweaking layout, copy,
-or colors), the snapshot tests will fail. This is expected — accept the new
-output with `cargo insta`:
+When you **intentionally** change TUI rendering (layout, copy, colors), the
+snapshot tests fail — expected. Accept the new output:
 
 ```bash
 cargo install cargo-insta          # one-time install
@@ -125,22 +110,18 @@ cargo insta accept                 # accept all new snapshots
 cargo insta review                 # review one by one, safer
 ```
 
-Do not commit snapshot changes you **did not intend** to accept; if it is an
-unintended regression, first go back and check `render.rs` / `update.rs` instead
-of blindly accepting to hide the problem.
+Never commit snapshot changes you did not intend; if it is an unintended
+regression, check `render.rs` / `update.rs` instead of blindly accepting.
 
-### Coverage
-
-CI reports to [codecov][codecov] via [`black-desk/workflows/rust`][wf-rust]. You
-do not need to run coverage locally, but please try to add tests when you change
-core paths (`dbus/`, `value/`, `tui/update.rs`).
+CI reports test coverage to [codecov][codecov] via
+[`black-desk/workflows/rust`][wf-rust]. Add test cases relevant to your changes.
 
 [wf-rust]: https://github.com/black-desk/workflows
 [codecov]: https://codecov.io/github/black-desk/busx
 
 ## Code style
 
-Style is fixed by the `.format` submodule, not by word of mouth:
+Style is fixed by the `.format` submodule:
 
 - **Rust**: 4-space indent (see `[*.rs]` in `.format/.editorconfig`).
 
@@ -151,7 +132,7 @@ Style is fixed by the `.format` submodule, not by word of mouth:
 
 - **Markdown / YAML / JSON / TOML**: 2-space indent, hard wrap at 80 columns
   (`printWidth: 80, proseWrap: "always"`, see `.format/.prettierrc`). After
-  editing docs, run prettier once (or just use your editor's prettier-on-save):
+  editing docs, run prettier (or use prettier-on-save):
 
   ```bash
   npx prettier --write '**/*.md'
@@ -164,21 +145,17 @@ Style is fixed by the `.format` submodule, not by word of mouth:
 
 **Project docs should only contain project-specific knowledge.**
 
-`README.md`, `CONTRIBUTING.md`, and any future `docs/` all follow this standard:
-generic tool usage (how to run `cargo test`, how to use `git`, what Rust syntax
-is) is never written — readers can look that up in the official docs themselves.
-The bar is simple: **if a sentence still holds when you swap to a different
-project, it should not be here**. What belongs here is: this project's own
-commands, conventions, design decisions, CLI / TUI behavior, build / CI
-configuration, and so on.
+`README.md`, `CONTRIBUTING.md`, and future `docs/` never cover generic tool
+usage (how to run `cargo test`, git, Rust syntax) — readers can look that up in
+the official docs. The bar: **if a sentence still holds for a different project,
+it does not belong here.** What belongs: this project's own commands,
+conventions, design decisions, CLI / TUI behavior, build / CI config.
 
-When adding / editing docs, prune and weigh against this standard — do not stuff
-in generic tutorials.
+When editing docs, prune against this standard — no generic tutorials.
 
 **Keep the docs in sync.** `README.md` and `CONTRIBUTING.md` must always reflect
-the current state of the project. Whenever a change alters CLI / TUI behavior,
-build / CI configuration, or any documented convention, update the affected doc
-in the same PR — do not let the docs drift out of date.
+the current state. When a change alters CLI / TUI behavior, build / CI config,
+or any documented convention, update the affected doc in the same PR.
 
 ## Commit messages
 
@@ -189,74 +166,55 @@ format:
 <type>(<scope>): <subject>
 ```
 
-- **`type`** — one of:
-  - `feat` — a new feature (CLI subcommand, TUI interaction, new output format,
-    etc.)
-  - `fix` — a bug fix
-  - `refactor` — a refactor with no behavior change
-  - `docs` — documentation changes
-  - `test` — test-only changes
-  - `style` — formatting / indentation / whitespace
-  - `perf` — a performance improvement
-  - `ci` / `chore` — CI / build / deps (`chore(deps)` for dependabot bumps)
-- **`scope`** (optional but recommended): the affected module, e.g. `tui`,
-  `cli`, `complete`, `dbus`, `value`, `ops`, `monitor`, `list`, `cd`, `ci`.
-- **`subject`**: imperative mood, present tense, lowercase first word, no
-  trailing period.
-
-For example:
-
-```
-feat(tui): add / inline filter to list screens
-fix(monitor): respect --timeout on idle bus
-refactor(value): share sig_str/access_str helpers
-docs(readme): update --help blocks for -v and --log
-chore(deps): bump clap from 4.6.1 to 4.6.2
-```
-
-See the full history with `git log --oneline`. For commits touching a GitHub
-issue / PR, add `Closes #42` or `Refs #42` in the body at the end.
-
-CI lints commit messages on every pull request with [commitlint][cl] using the
-`@commitlint/config-conventional` ruleset (the `generic` job in
-`.github/workflows/ci.yaml`). The hard rule to remember: **the body is
-hard-wrapped at 100 columns** (`body-max-line-length`). The subject line and
-footer share the same 100-column limit, so a body line over 100 columns fails
-the `generic` CI job.
+CI lints commit messages with [commitlint][cl]
+(`@commitlint/config-conventional`, the `generic` job in
+`.github/workflows/ci.yaml`). Hard rule: **body lines hard-wrap at 100 columns**
+(`body-max-line-length`); subject and footer share that limit, so a body line
+over 100 columns fails `generic`.
 
 [cc]: https://www.conventionalcommits.org/en/v1.0.0/
 [cl]: https://commitlint.js.org/
 
-## Pull request workflow
+## AI-assisted changes
 
-1. Branch off `master`:
-   ```bash
-   git checkout -b feat/my-feature master
-   ```
-2. One PR does one thing. PRs that mix several unrelated changes are painful to
-   review and will usually be asked to be split up.
-3. Run the core checks locally:
-   ```bash
-   cargo fmt --all -- --check
-   cargo clippy --all-targets --all-features -- -D warnings
-   cargo test
-   npx prettier --check '**/*.md'   # only if you touched docs
-   ```
-4. **Add tests.** New features get an integration test; TUI rendering changes
-   update the snapshots; bug fixes get a regression test. If you are not sure
-   how to write one, look at the existing tests under `crates/busx/tests/` or
-   just ask in the PR.
-5. In the PR description, explain **what you did / why / how you tested it**. If
-   there is a related issue, add `Closes #N`.
-6. Wait for review once CI is fully green. The `pass` job is the CI master
-   switch and must be green.
+Any change made with an AI tool MUST be attributed.
+
+### Attribution — `Assisted-by`
+
+Add an `Assisted-by` trailer to the commit message, per the Linux kernel's
+[coding assistants][kernel-ca] guidance (see also the "Using Assisted-by"
+section of [submitting-patches][kernel-sp]).
+
+The required format:
+
+```
+Assisted-by: AGENT:MODEL
+```
+
+- `AGENT` — the AI tool or framework, e.g. `Codex`, `Claude`.
+- `MODEL` — the model version, e.g. `gpt-5`, `claude-3-opus`.
+
+Optional specialized analysis tools may follow (basic tools like git / cargo /
+editors are never listed):
+
+```
+Assisted-by: Codex:gpt-5
+Assisted-by: Claude:claude-3-opus sparse
+```
+
+If you cannot reliably determine your own `AGENT` / `MODEL`, do not guess — ask
+the user and record exactly what they tell you.
+
+[kernel-ca]:
+  https://www.kernel.org/doc/html/latest/process/coding-assistants.html
+[kernel-sp]:
+  https://www.kernel.org/doc/html/latest/process/submitting-patches.html
 
 ## License & REUSE
 
-The code in this repository is open source under **GPL-3.0-or-later**;
-documentation / config / scripts are open source under **MIT** (see `LICENSE`
-and `LICENSES/`). The repository follows the [REUSE specification][reuse], and
-**every new / modified file must carry an SPDX header**:
+Code is **GPL-3.0-or-later**; docs / config / scripts are **MIT** (see `LICENSE`
+and `LICENSES/`). The repo follows the [REUSE spec][reuse], and **every new /
+modified file must carry an SPDX header**:
 
 - Rust / Shell / TOML / YAML files use a comment header:
   ```rust
@@ -268,15 +226,15 @@ and `LICENSES/`). The repository follows the [REUSE specification][reuse], and
   `GPL-3.0-or-later`.)
 - Markdown files use an HTML comment header (see the top of this file).
 
-Use the **current year**; if you are adding a new substantive change to an
-existing file, you may **append a new line** below the existing
-`SPDX-FileCopyrightText` line — do not overwrite the original year.
+Use the **current year**. For a new substantive change to an existing file,
+**append a line** below the existing `SPDX-FileCopyrightText` — do not overwrite
+the original year.
 
 ```bash
 reuse lint
 ```
 
-The `format` job in CI runs `reuse lint`; a missing / incorrect header will fail
-the PR.
+The `format` CI job runs `reuse lint`; a missing / incorrect header fails the
+PR.
 
 [reuse]: https://reuse.software/spec-3.3/
