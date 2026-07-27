@@ -4,9 +4,28 @@
 
 use assert_cmd::cargo_bin;
 use serde_json::Value;
+use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
+
+/// First stdout line that is an actual captured message, skipping the
+/// `{"event":"ready",...}` (JSON mode) or `busx: monitoring ...` (human mode)
+/// line `monitor` emits once it is live on the bus.
+fn first_message_line(stdout: &str) -> &str {
+    stdout.lines().find(|l| !is_ready_line(l)).unwrap_or("")
+}
+
+/// All captured-message lines, skipping the ready line (see
+/// [`first_message_line`]).
+fn message_lines(stdout: &str) -> Vec<&str> {
+    stdout.lines().filter(|l| !is_ready_line(l)).collect()
+}
+
+/// Is `line` monitor's ready event (JSON or human form)?
+fn is_ready_line(line: &str) -> bool {
+    line.contains("\"event\":\"ready\"") || line.starts_with("busx: monitoring")
+}
 
 /// `busx monitor --type signal ... --limit-messages 1` must
 /// emit one NDJSON line for the `PropertiesChanged` signal triggered by a
@@ -73,7 +92,9 @@ fn monitor_emits_propertieschanged() {
     let stdout = String::from_utf8_lossy(&out.stdout);
 
     // Each line must be a JSON object whose `member` is PropertiesChanged.
-    let lines: Vec<&str> = stdout.lines().collect();
+    // (stdout also carries the `{"event":"ready",...}` line emitted once the
+    // subscription is live; first_message_line skips it.)
+    let lines = message_lines(&stdout);
     assert!(!lines.is_empty(), "monitor produced no output:\n{stdout}");
 
     let first: Value = serde_json::from_str(lines[0])
@@ -150,8 +171,12 @@ fn monitor_human_emits_block() {
     let stdout = String::from_utf8_lossy(&out.stdout);
 
     // The block must NOT be JSON (no leading `{`) and must carry the signal's
-    // identity fields. The first non-empty line names the message type.
-    let first_line = stdout.lines().next().unwrap_or("");
+    // identity fields. stdout also carries the `busx: monitoring ...` ready
+    // line; the first *message* line names the message type.
+    let first_line = stdout
+        .lines()
+        .find(|l| !l.starts_with("busx: monitoring"))
+        .unwrap_or("");
     assert!(
         first_line.starts_with("signal"),
         "human block should start with `signal`:\n{stdout}"
@@ -216,63 +241,108 @@ fn monitor_timeout_fires_on_idle_bus() {
     }
 
     let out = child.wait_with_output().expect("read output");
-    // No matching traffic → no stdout.
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // No matching traffic → no *message* output. (stdout does carry the single
+    // ready line `monitor` prints once the subscription is live.)
+    let msgs = message_lines(&stdout);
     assert!(
-        out.stdout.is_empty(),
-        "expected no output for a never-matching rule: {:?}",
-        String::from_utf8_lossy(&out.stdout)
+        msgs.is_empty(),
+        "expected no messages for a never-matching rule: {msgs:?}"
     );
 }
 
-/// Default `monitor` (no `--type`) becomes a bus monitor and sees method calls
-/// too — not just signals. A `busx call` is a `method_call`; the unprivileged
-/// signal-subscription path could never capture it, so finding it proves
-/// BecomeMonitor was used. With no filters BecomeMonitor sees every message
-/// (including bus lifecycle noise), so the window is bounded by `--timeout` and
-/// we scan all captured lines for the one we triggered.
+/// Default `monitor` (no `--type`) routes to BecomeMonitor, so it sees method
+/// calls too — not just signals. A `busx call` is a `method_call`; the
+/// unprivileged signal subscription could never capture one, so catching it
+/// proves BecomeMonitor was the default.
+///
+/// The race that used to make this flaky (call landing before BecomeMonitor
+/// took effect) is removed by waiting for the `{"event":"ready"}` line monitor
+/// emits once it is actually live on the bus — only then do we trigger the
+/// call. The interface/member filter + `--limit-messages 1` make it exit the
+/// instant the call is captured.
 #[test]
 fn monitor_default_captures_method_call() {
     let bus = testbus::bus_owned();
     let addr = bus.address.clone();
 
-    let child = Command::new(cargo_bin!("busx"))
-        .args(["--json", "--address", &addr, "monitor", "--timeout", "3s"])
+    let mut child = Command::new(cargo_bin!("busx"))
+        .args([
+            "--json",
+            "--address",
+            &addr,
+            "monitor",
+            // No --type: the default (BecomeMonitor) is what's under test.
+            "--interface",
+            "org.busx.Test",
+            "--member",
+            "BumpVolume",
+            "--limit-messages",
+            "1",
+            "--timeout",
+            "10s",
+        ])
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .expect("spawn monitor");
 
-    // Give BecomeMonitor time to register before we generate traffic.
-    thread::sleep(Duration::from_millis(800));
+    // Read stdout line-by-line. The ready event is the real synchronization
+    // point that monitor is live on the bus; only once we see it do we fire
+    // the method call (from a background thread, so this loop keeps draining
+    // until monitor exits via --limit-messages). This removes the fixed-sleep
+    // race entirely.
+    let stdout = child.stdout.take().expect("piped stdout");
+    let reader = BufReader::new(stdout);
+    let mut ready = false;
+    let mut collected = String::new();
+    for line in reader.lines() {
+        let line = line.expect("read monitor line");
+        if !ready && line.contains("\"event\":\"ready\"") {
+            ready = true;
+            let addr2 = addr.clone();
+            thread::spawn(move || {
+                let status = Command::new(cargo_bin!("busx"))
+                    .args([
+                        "--address",
+                        &addr2,
+                        "call",
+                        "org.busx.Test",
+                        "/org/busx/Test",
+                        "org.busx.Test",
+                        "BumpVolume",
+                        "",
+                    ])
+                    .status()
+                    .expect("trigger call");
+                assert!(status.success(), "BumpVolume call failed");
+            });
+        }
+        collected.push_str(&line);
+        collected.push('\n');
+    }
+    assert!(ready, "monitor did not emit a ready event");
 
-    let trigger = Command::new(cargo_bin!("busx"))
-        .args([
-            "--address",
-            &addr,
-            "call",
-            "org.busx.Test",
-            "/org/busx/Test",
-            "org.busx.Test",
-            "BumpVolume",
-            "",
-        ])
-        .status()
-        .expect("trigger call");
-    assert!(trigger.success(), "BumpVolume call failed");
+    let status = child.wait().expect("monitor exit");
+    assert!(status.success(), "monitor failed: {status}");
 
-    let out = child.wait_with_output().expect("monitor exit");
-    assert!(out.status.success(), "monitor failed: {:?}", out.status);
-    let stdout = String::from_utf8_lossy(&out.stdout);
-
-    let found = stdout.lines().any(|line| {
-        let Ok(v) = serde_json::from_str::<Value>(line) else {
-            return false;
-        };
-        v["type"] == "method_call" && v["member"] == "BumpVolume"
-    });
-    assert!(
-        found,
-        "default monitor did not capture the BumpVolume method_call          (BecomeMonitor not used?):
-{stdout}"
+    // The ready event is line 1; the captured method_call is the remaining
+    // line (--limit-messages 1 guarantees exactly one message).
+    let msg = collected
+        .lines()
+        .find(|l| !l.contains("\"event\":\"ready\""))
+        .unwrap_or("");
+    let v: Value = serde_json::from_str(msg)
+        .unwrap_or_else(|_| panic!("captured line is not JSON:\n{collected}"));
+    assert_eq!(
+        v["type"], "method_call",
+        "default monitor should capture a method_call:
+{collected}"
+    );
+    assert_eq!(
+        v["member"], "BumpVolume",
+        "expected BumpVolume:
+{collected}"
     );
 }
 
@@ -284,7 +354,7 @@ fn monitor_type_method_call_captures_call() {
     let bus = testbus::bus_owned();
     let addr = bus.address.clone();
 
-    let child = Command::new(cargo_bin!("busx"))
+    let mut child = Command::new(cargo_bin!("busx"))
         .args([
             "--json",
             "--address",
@@ -302,40 +372,55 @@ fn monitor_type_method_call_captures_call() {
             "10s",
         ])
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .expect("spawn monitor");
 
-    thread::sleep(Duration::from_millis(800));
+    // Wait for the ready event before firing the call (race-free), then drain
+    // until monitor exits via --limit-messages.
+    let stdout = child.stdout.take().expect("piped stdout");
+    let reader = BufReader::new(stdout);
+    let mut ready = false;
+    let mut collected = String::new();
+    for line in reader.lines() {
+        let line = line.expect("read monitor line");
+        if !ready && line.contains("\"event\":\"ready\"") {
+            ready = true;
+            let addr2 = addr.clone();
+            thread::spawn(move || {
+                let status = Command::new(cargo_bin!("busx"))
+                    .args([
+                        "--address",
+                        &addr2,
+                        "call",
+                        "org.busx.Test",
+                        "/org/busx/Test",
+                        "org.busx.Test",
+                        "BumpVolume",
+                        "",
+                    ])
+                    .status()
+                    .expect("trigger call");
+                assert!(status.success(), "BumpVolume call failed");
+            });
+        }
+        collected.push_str(&line);
+        collected.push('\n');
+    }
+    assert!(ready, "monitor did not emit a ready event");
 
-    let trigger = Command::new(cargo_bin!("busx"))
-        .args([
-            "--address",
-            &addr,
-            "call",
-            "org.busx.Test",
-            "/org/busx/Test",
-            "org.busx.Test",
-            "BumpVolume",
-            "",
-        ])
-        .status()
-        .expect("trigger call");
-    assert!(trigger.success(), "BumpVolume call failed");
+    let status = child.wait().expect("monitor exit");
+    assert!(status.success(), "monitor failed: {status}");
 
-    let out = child.wait_with_output().expect("monitor exit");
-    assert!(out.status.success(), "monitor failed: {:?}", out.status);
-    let stdout = String::from_utf8_lossy(&out.stdout);
     let first: Value =
-        serde_json::from_str(stdout.lines().next().unwrap_or("")).expect("first line must be JSON");
+        serde_json::from_str(first_message_line(&collected)).expect("first message must be JSON");
     assert_eq!(
         first["type"], "method_call",
-        "expected a method_call:
-{stdout}"
+        "expected a method_call:\n{collected}"
     );
     assert_eq!(
         first["member"], "BumpVolume",
-        "expected BumpVolume:
-{stdout}"
+        "expected BumpVolume:\n{collected}"
     );
 }
 /// `--match` takes a raw D-Bus match rule, parsed directly — a separate branch
@@ -387,7 +472,7 @@ fn monitor_match_signal_rule_captures_signal() {
     assert!(out.status.success(), "monitor failed: {:?}", out.status);
     let stdout = String::from_utf8_lossy(&out.stdout);
     let first: Value =
-        serde_json::from_str(stdout.lines().next().unwrap_or("")).expect("first line must be JSON");
+        serde_json::from_str(first_message_line(&stdout)).expect("first line must be JSON");
     assert_eq!(
         first["type"], "signal",
         "--match with type='signal' should capture a signal:\n{stdout}"
