@@ -10,7 +10,7 @@ use crate::error::Result;
 pub async fn object_tree(conn: &zbus::Connection, service: &str) -> Result<ObjectNode> {
     let mut root = ObjectNode {
         path: "/".to_string(),
-        interfaces: 0,
+        interfaces: vec![],
         children: vec![],
     };
     let mut visited = std::collections::HashSet::from(["/".to_string()]);
@@ -29,9 +29,14 @@ async fn walk(
     // Reuse the shared introspection helper (proxy + Introspect + XML parse) so
     // the bus access path lives in exactly one place.
     let parsed = crate::dbus::introspect::introspect(conn, service, &node.path).await?;
-    // How many interfaces this object exposes. 0 ⇒ a pure container path (exists
-    // only to host sub-objects); the flat TUI view filters such paths out.
-    node.interfaces = parsed.interfaces().len();
+    // The names of the interfaces this object exposes. Empty ⇒ a pure container
+    // path (exists only to host sub-objects); the flat TUI view filters such
+    // paths out.
+    node.interfaces = parsed
+        .interfaces()
+        .iter()
+        .map(|i| i.name().to_string())
+        .collect();
     for child in parsed.nodes() {
         let Some(name) = child.name() else { continue };
         if name.starts_with('/') {
@@ -46,7 +51,7 @@ async fn walk(
         }
         let mut child_node = ObjectNode {
             path: child_path,
-            interfaces: 0,
+            interfaces: vec![],
             children: vec![],
         };
         // `Box::pin` is required: a recursive `async fn` call would otherwise grow

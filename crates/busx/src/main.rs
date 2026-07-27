@@ -69,7 +69,14 @@ fn main() -> std::process::ExitCode {
         Some(command) => {
             // CLI diagnostics go to stderr; capture with `2> file`.
             log::init_cli(verbose);
-            run_command(user, system, address, json, command)
+            run_command(
+                user,
+                system,
+                address,
+                json,
+                show_standard_interfaces,
+                command,
+            )
         }
     };
     match result {
@@ -95,6 +102,7 @@ fn run_command(
     system: bool,
     address: Option<String>,
     json: bool,
+    show_standard_interfaces: bool,
     command: Command,
 ) -> error::Result<()> {
     match command {
@@ -204,9 +212,14 @@ fn run_command(
             limit_messages,
             timeout.as_deref(),
         ),
-        Command::Tree { service } => {
-            ops::tree::run(user, system, address.as_deref(), json, &service)
-        }
+        Command::Tree { service } => ops::tree::run(
+            user,
+            system,
+            address.as_deref(),
+            json,
+            show_standard_interfaces,
+            &service,
+        ),
         Command::Emit {
             destination,
             object,

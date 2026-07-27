@@ -58,12 +58,9 @@ pub struct Cli {
     )]
     pub log: Option<String>,
     /// Show the standard D-Bus interfaces (Properties, Introspectable, Peer)
-    /// that every object implements. The TUI hides them by default since
-    /// they're rarely useful when browsing; this brings them back.
-    #[arg(
-        long,
-        help = "Show standard D-Bus interfaces in the TUI (hidden by default)"
-    )]
+    /// that every object implements. They are hidden by default since they're
+    /// rarely useful when browsing; this brings them back.
+    #[arg(long, help = "Show standard D-Bus interfaces hidden by default")]
     pub show_standard_interfaces: bool,
     /// Emit machine-readable type-tagged JSON instead of human-friendly text.
     /// Global: applies to every subcommand. For `monitor` the JSON form is NDJSON
