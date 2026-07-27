@@ -105,9 +105,11 @@ busx call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
 busx get org.freedesktop.systemd1 /org/freedesktop/systemd1 \
   org.freedesktop.systemd1.Manager
 
-# Monitor signals; --json emits NDJSON, easy to pipe to jq
+# Monitor signals; --json emits NDJSON, easy to pipe to jq. Once it is live
+# on the bus busx prints a {"event":"ready"} line first — scripts can wait
+# for it (no sleep race) and then generate traffic; jq filters it out here.
 busx --json monitor --type signal --interface org.freedesktop.DBus.Properties \
-  --member PropertiesChanged | jq 'select(.args[1] != {})'
+  --member PropertiesChanged | jq 'select(.type)'
 
 # Enable completion: add this to ~/.bashrc (or ~/.zshrc for zsh) and restart
 # your shell — it live-introspects the bus to complete services/paths/etc.

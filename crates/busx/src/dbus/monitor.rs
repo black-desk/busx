@@ -94,6 +94,42 @@ pub fn is_monitor_ready_signal(m: &zbus::Message, own_name: &str) -> bool {
     name == own_name
 }
 
+/// Is `m` BecomeMonitor transition noise for `own_name` — the `NameAcquired` /
+/// `NameLost` signals the daemon emits about this connection's own unique name
+/// as monitor mode takes effect?
+///
+/// Unlike a "discard everything until ready" gate, this is a content filter:
+/// it suppresses only these specific lifecycle signals, so real traffic that
+/// races the transition is never dropped (the gate could hang or lose messages
+/// when the confirming `NameLost` is delivered late or not at all — which is
+/// daemon- and rule-dependent).
+pub fn is_become_monitor_noise(m: &zbus::Message, own_name: &str) -> bool {
+    use zbus::message::Type;
+    if m.header().message_type() != Type::Signal {
+        return false;
+    }
+    let h = m.header();
+    let is_dbus = h.interface().is_some_and(|i| i == "org.freedesktop.DBus")
+        && h.path()
+            .is_some_and(|p| p.as_str() == "/org/freedesktop/DBus");
+    if !is_dbus {
+        return false;
+    }
+    let Some(member) = h.member() else {
+        return false;
+    };
+    if !matches!(member.as_str(), "NameAcquired" | "NameLost") {
+        return false;
+    }
+    // NameAcquired / NameLost carry the affected name as their sole string arg.
+    // Suppress only the transition noise for our own unique name; real
+    // NameAcquired / NameLost from other services still passes through.
+    let Ok((name,)) = m.body().deserialize::<(String,)>() else {
+        return false;
+    };
+    name == own_name
+}
+
 /// Render a single received message as a `dbus-send`-style human block (
 /// human form). The first line names the type plus sender/destination/path; the
 /// second line carries interface/member/serial (and reply_serial or error when

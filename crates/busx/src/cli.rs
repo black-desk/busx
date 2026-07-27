@@ -148,6 +148,12 @@ pub enum Command {
     /// `--type signal` instead uses a plain signal subscription, which every
     /// bus accepts with no privileges. Any other `--type` (or none at all)
     /// selects BecomeMonitor.
+    ///
+    /// Once the subscription is live on the bus, `monitor` prints a `ready`
+    /// event to stdout before any messages, so scripts can wait for it instead
+    /// of sleeping: with `--json` that's a line `{"event":"ready","mode":...}`;
+    /// in human mode a `busx: monitoring (...)` line. Filter it out to keep
+    /// only messages (`jq 'select(.type)'` / `grep -v '^busx: monitoring'`).
     Monitor {
         #[arg(add = ArgValueCompleter::new(complete::complete_service))]
         services: Vec<String>,

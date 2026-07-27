@@ -29,6 +29,19 @@
 //!   privileged and may be refused by some bus configurations; when it is, the
 //!   command **errors out** rather than silently degrading to signals-only.
 //!   Use `--type signal` for plain signal monitoring.
+//!
+//! ## Ready event
+//!
+//! The moment the subscription is actually live on the bus (the match rule is
+//! registered, or BecomeMonitor is confirmed) `monitor` emits a `ready` event
+//! before processing any traffic, so scripts can wait for it before generating
+//! bus traffic — no `sleep` race. The event always goes to **stdout** so a
+//! single pipe (`busx --json monitor | jq ...`) sees it inline: in `--json`
+//! mode it is one NDJSON line `{"event":"ready","mode":...}` (distinguishable
+//! from message objects, which carry a `"type"` key, not `"event"`); in human
+//! mode a one-line `busx: monitoring (...)` status. Scripts that want only
+//! messages filter it out — `jq 'select(.type)'` (JSON) or
+//! `grep -v '^busx: monitoring'` (human).
 
 use crate::dbus;
 use crate::error::{Error, Result};
@@ -193,11 +206,13 @@ pub fn run(
             msg_type,
         )?;
 
-        let (stream, monitor_own_name) = if rule.msg_type() == Some(Type::Signal) {
-            // Unprivileged signal subscription: every bus accepts it.
+        let (stream, monitor_own_name, mode) = if rule.msg_type() == Some(Type::Signal) {
+            // Unprivileged signal subscription: every bus accepts it. The match
+            // rule is registered once `for_match_rule` resolves.
             (
                 MessageStream::for_match_rule(rule, &conn, None).await?,
                 None,
+                "signal subscription",
             )
         } else {
             // BecomeMonitor: sees method_call / method_return / error (and
@@ -217,12 +232,21 @@ pub fn run(
                          Use --type signal for signal-only monitoring (no privileges needed)."
                     ))
                 })?;
-            // Mirror `busctl monitor`: the daemon emits NameAcquired / NameLost
-            // signals for this connection's own unique name as BecomeMonitor
-            // takes effect. Capture it so stream_msgs can discard that
-            // lifecycle noise until the confirming NameLost(own_name) lands.
+            // BecomeMonitor is confirmed: the bus accepted the transition, so we
+            // are now monitoring. The daemon still emits NameAcquired / NameLost
+            // signals for this connection's own unique name as part of the
+            // transition — capture it so stream_msgs can drop that lifecycle
+            // noise by content (everything else is forwarded immediately).
             let own_name = conn.unique_name().map(|n| n.to_string());
-            (MessageStream::from(&conn), own_name)
+            (
+                MessageStream::from(&conn),
+                own_name,
+                if has_filters {
+                    "BecomeMonitor (filtered)"
+                } else {
+                    "BecomeMonitor"
+                },
+            )
         };
 
         stream_msgs(
@@ -232,9 +256,21 @@ pub fn run(
             timeout,
             json,
             monitor_own_name,
+            mode,
         )
         .await
     })
+}
+
+/// Emit the `ready` event right after the subscription goes live. See the
+/// module docs for the script-synchronization rationale.
+fn emit_ready(out: &mut impl Write, json: bool, mode: &str) -> Result<()> {
+    if json {
+        writeln!(out, "{{\"event\":\"ready\",\"mode\":\"{mode}\"}}")?;
+    } else {
+        writeln!(out, "busx: monitoring ({mode}) — Ctrl-C to stop")?;
+    }
+    Ok(())
 }
 
 /// Drive the stream, printing each message. In JSON mode that's NDJSON (one
@@ -254,11 +290,22 @@ async fn stream_msgs(
     timeout: Option<&str>,
     json: bool,
     monitor_own_name: Option<String>,
+    mode: &'static str,
 ) -> Result<()> {
     let deadline = timeout.map(parse_duration).transpose()?;
 
     let stdout = std::io::stdout();
     let mut out = BufWriter::new(stdout.lock());
+
+    // Ready event: emitted once the subscription is actually live on the bus
+    // (this point is reached only after `for_match_rule` / `become_monitor`
+    // resolved), so external scripts and tests can synchronize before
+    // generating bus traffic — no `sleep` race. Always on stdout: in JSON mode
+    // it joins the NDJSON stream ({"event":"ready",...}); in human mode a
+    // `busx: monitoring` status line. Scripts wanting only messages filter it
+    // (jq 'select(.type)' / grep -v '^busx: monitoring').
+    emit_ready(&mut out, json, mode)?;
+    out.flush()?;
 
     // `OptionFuture` wraps `Option<Future>`: `Some(timer)` resolves when the
     // timeout elapses and breaks the loop; `None` (no `--timeout`) is pending
@@ -268,14 +315,12 @@ async fn stream_msgs(
     let mut timer = OptionFuture::from(deadline.map(async_io::Timer::after)).fuse();
     let mut stream = stream.fuse();
 
-    // In BecomeMonitor mode (`monitor_own_name` set), mirror `busctl monitor`:
-    // the daemon emits NameAcquired / NameLost signals for this connection's
-    // own unique name as BecomeMonitor takes effect — bus plumbing the user
-    // didn't ask for. Discard everything until the confirming
-    // `NameLost(own_name)` lands, then forward normally. In signal-subscription
-    // mode (`None`) there's no such noise, so we start already "ready".
-    let mut monitor_ready = monitor_own_name.is_none();
-
+    // In BecomeMonitor mode (`monitor_own_name` set) the daemon emits
+    // NameAcquired / NameLost signals for this connection's own unique name as
+    // monitor mode takes effect — bus plumbing the user didn't ask for. Rather
+    // than gating ("discard everything until ready", which can hang or drop
+    // real traffic when the confirming signal is late/absent), suppress just
+    // that noise by content; everything else is forwarded immediately.
     let mut count: u64 = 0;
     loop {
         futures::select! {
@@ -287,12 +332,9 @@ async fn stream_msgs(
                     continue;
                 }
                 Some(Ok(msg)) => {
-                    if !monitor_ready {
-                        if let Some(name) = &monitor_own_name
-                            && crate::dbus::monitor::is_monitor_ready_signal(&msg, name)
-                        {
-                            monitor_ready = true;
-                        }
+                    if let Some(name) = &monitor_own_name
+                        && crate::dbus::monitor::is_become_monitor_noise(&msg, name)
+                    {
                         continue;
                     }
                     if !matches_service(&msg, services) {
