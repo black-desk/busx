@@ -2,8 +2,9 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Pure rendering. Reads `&State`; draws breadcrumb + top screen
-//! + key-hint. Nothing else.
+//! Pure rendering. Reads `&State`; draws the breadcrumb, the top screen, the
+//! key-hint, plus the filter box, copy-as popup, and help overlays when active.
+//! Below a minimum terminal size it draws only a "terminal too small" message.
 
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
@@ -16,6 +17,12 @@ use crate::tui::state::{
     ActionKind, ActionResult, ClickTarget, CopyAsPopup, DetailFocus, DetailScreen, InterfaceFocus,
     ListenTarget, NavContext, ResultScreen, Screen, ServiceScreen, State,
 };
+
+/// Smallest terminal the TUI will render normally. Below this the three-row
+/// layout (breadcrumb + body + footer) collapses and the body list has no
+/// room; instead of a garbled screen we show a "terminal too small" message.
+const MIN_WIDTH: u16 = 12;
+const MIN_HEIGHT: u16 = 3;
 
 /// `scroll` carries the persisted list-scroll offsets for the *top* screen's
 /// list(s), threaded in/out across frames. Slot 0 is the single list on the
@@ -37,6 +44,23 @@ pub fn render(
     scroll: &mut [usize; 3],
 ) {
     let area = frame.area();
+    // Guard: below this size the layout (breadcrumb + body + footer, each ≥1
+    // row, and a list that needs a few columns) breaks down. Rather than
+    // render a garbled screen, show a single centered message.
+    if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
+        frame.render_widget(Clear, area);
+        let msg = format!(
+            "terminal too small (need ≥{}×{}, have {}×{})",
+            MIN_WIDTH, MIN_HEIGHT, area.width, area.height
+        );
+        frame.render_widget(
+            Paragraph::new(msg)
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(Color::Yellow)),
+            area,
+        );
+        return;
+    }
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -545,8 +569,6 @@ fn render_interface(
     );
 }
 
-/// Push one click target per row of a bordered list rendered into `area`. The
-/// list renders inside its block's inner area (inside the border); row `i` is at
 /// Record one click target per VISIBLE list row, accounting for the scroll
 /// `offset`: row `i` renders at `inner.y + (i - offset)`. Only the visible
 /// window `[offset, offset+height)` gets targets. Without the offset a scrolled
@@ -716,10 +738,11 @@ fn render_detail(
     targets.push((trigger_area, ClickTarget::DetailTrigger));
 }
 
-/// The outcome of a one-shot action. Loading → "…" (the title carries the
-/// context); error → the message; `Call(lines)` → one reply value per line
-/// (offset by `scroll` — clamped). `Get`/`Set` render their payload
-/// too.
+/// The outcome of an action. For a streaming listen, message blocks are drawn
+/// from `r.messages`; otherwise it's a one-shot result: Loading → "…" (the
+/// title carries the context); error → the message; `Call(lines)` → one reply
+/// value per line (offset by `scroll` — clamped); `Get`/`Set` render their
+/// payload too.
 fn render_result(frame: &mut Frame, area: Rect, r: &ResultScreen) {
     // Result screens are read-only (scroll-only) — no click targets.
     let title = if r.loading {
@@ -977,18 +1000,18 @@ const HELP_TEXT: &str = "\
 busx — keybindings
 
 global:
-  ↑↓ / jk     move selection (or scroll on the Result screen)
-  ←→ / hl     (Result) scroll a long line sideways; `<`/`>` mark hidden text
+  ↑↓ / jk     move / scroll (Result)
+  ←→ / hl     (Result) scroll sideways; `<`/`>` marks hidden text
   Enter       open / activate / drill in / fire the focused button
-  Esc         back (or stop a listen); at the root Service screen, quit
+  Esc         back (or stop a listen); at root Service screen, quit
   q           quit
-  /           (list screen) filter — type to narrow, ↑↓ pick, Enter open, Esc clear
-  Tab         (Interface) cycle the methods/properties/signals columns
-  r           refresh the current view (service list / objects / interfaces / property values)
-  c           copy-as — generate dbus-send/busctl/qdbus/gdbus for the current op
+  /           (list) filter — type, ↑↓ pick, Enter open, Esc clear
+  Tab         (Interface) cycle methods/properties/signals
+  r           refresh the current view
+  c           copy-as — dbus-send/busctl/qdbus/gdbus for the current op
   y           (Result) copy the result text
   ?           toggle this help
-  mouse       click to select / click a button to activate / wheel to scroll
+  mouse       click to select / click a button / wheel to scroll
 
 navigation: Service → Objects → Interfaces → Interface → Detail → Result
   (single-item levels auto-skip; Esc unwinds the stack)
@@ -998,11 +1021,17 @@ navigation: Service → Objects → Interfaces → Interface → Detail → Resu
 /// close hint) wrapping the `HELP_TEXT`. `Clear` wipes the underlying screen so
 /// the text reads cleanly on top. Not clickable — records no click targets.
 fn render_help(frame: &mut Frame, area: Rect) {
-    // Size the box to fit the full keybinding list: wider (88%) so most
-    // entries don't wrap, and tall (96%) so the whole reference stays
-    // visible. The fixed 70%×70% box the help used to silently clipped
-    // the bottom half (r / c / y / mouse / navigation) at 80x24.
-    let popup_area = centered_rect(88, 96, area);
+    // Size the box to fit the full keybinding list without wrapping. The box
+    // is as large as the content (HELP_TEXT width/height + border), capped at
+    // 96% of the frame so it never bleeds off-screen; when the terminal is
+    // too small the content still wraps/clips rather than overflowing.
+    let content_w = HELP_TEXT.lines().map(str::len).max().unwrap_or(0) as u16;
+    let content_h = HELP_TEXT.lines().count() as u16;
+    let max_w = area.width.saturating_mul(96) / 100;
+    let max_h = area.height.saturating_mul(96) / 100;
+    let w = content_w.saturating_add(2).min(max_w); // +2 for borders
+    let h = content_h.saturating_add(2).min(max_h); // +2 for borders
+    let popup_area = centered_rect_abs(w, h, area);
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -1029,6 +1058,22 @@ fn centered_rect(pct_x: u16, pct_y: u16, r: Rect) -> Rect {
     Rect {
         x: r.x + mx,
         y: r.y + my,
+        width: w,
+        height: h,
+    }
+}
+
+/// Center a rect of absolute size `w`×`h` within `r`, clamped to `r`'s bounds
+/// (so it never overflows the frame). Used by the help overlay, whose size is
+/// driven by `HELP_TEXT` content rather than a percentage.
+fn centered_rect_abs(w: u16, h: u16, r: Rect) -> Rect {
+    let w = w.min(r.width);
+    let h = h.min(r.height);
+    let x = r.x + r.width.saturating_sub(w) / 2;
+    let y = r.y + r.height.saturating_sub(h) / 2;
+    Rect {
+        x,
+        y,
         width: w,
         height: h,
     }

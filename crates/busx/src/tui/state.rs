@@ -28,8 +28,8 @@ pub struct State {
     /// The accumulated service/object/interface of the current drill path.
     pub nav: NavContext,
     /// Navigation stack; the last element is the currently-shown screen.
-    /// **Never empty** — the invariant is upheld by [`State::with_screens`]
-    /// (which rejects an empty stack) plus [`State::pop_screen`] (which refuses
+    /// **Never empty** — the invariant is upheld by [`State::loading_service`]
+    /// (the only constructor, a one-element stack) plus [`State::pop_screen`]
     /// at the root). Private so external code can't break it; the field is
     /// reached via [`State::top`] / [`State::top_mut`] / [`State::screens`].
     screens: Vec<Screen>,
@@ -177,7 +177,8 @@ pub enum InterfaceFocus {
     Signals,
 }
 
-/// An action form. Call = one input per IN-arg; Set = one input; Get = no inputs.
+/// An action form. Call = one input per IN-arg; Set = one input; Get = no
+/// inputs; Listen = a match-rule preview as a single label (no inputs).
 /// The service/object/interface live in [`State::nav`].
 pub struct DetailScreen {
     pub kind: ActionKind,
@@ -266,7 +267,7 @@ impl State {
     }
 
     /// The currently-shown screen. The stack is never empty (private field,
-    /// `with_screens` rejects empty, `pop_screen` refuses at the root), so
+    /// `loading_service` starts non-empty, `pop_screen` refuses at the root), so
     /// `len() - 1` is a valid index — no `expect`/`unwrap` needed.
     pub fn top(&self) -> &Screen {
         &self.screens[self.screens.len() - 1]

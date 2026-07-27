@@ -72,8 +72,11 @@ pub async fn become_monitor(conn: &zbus::Connection, rule: Option<&MatchRule<'_>
 /// BecomeMonitor lifecycle noise (NameAcquired, the implicit name release the
 /// daemon does as part of the transition, etc.).
 ///
-/// Best-effort: on parse failure, return `false` (don't suppress on
-/// uncertainty — the worst case is the user sees one extra message).
+/// Best-effort: on parse failure, return `false`. Note this is a *gate* (the
+/// caller suppresses everything until it returns `true` once), so the real
+/// risk is the opposite of a content filter — if the confirming `NameLost`
+/// ever fails to parse, the gate never opens and no messages are shown. The
+/// content filter `is_become_monitor_noise` is the safer path for real traffic.
 pub fn is_monitor_ready_signal(m: &zbus::Message, own_name: &str) -> bool {
     use zbus::message::Type;
     if m.header().message_type() != Type::Signal {

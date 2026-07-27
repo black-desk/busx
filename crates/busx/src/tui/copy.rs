@@ -17,13 +17,13 @@
 //! - **gdbus** — every type → GVariant text (`[…]`, `{k:v}`, `(…)`, `<…>`),
 //!   complete; no notes.
 //! - **dbus-send** — `array:`/`dict:`/`variant:` for basic-element
-//!   containers per `man dbus-send`; structs/nested containers get an honest
-//!   `# note` (dbus-send forbids nested containers and has no struct syntax).
+//!   containers per `man dbus-send`; structs/nested containers are unsupported
+//!   — greyed out (dbus-send forbids nested containers and has no struct syntax).
 //! - **qdbus** — basic values and simple arrays positionally; dicts/structs
-//!   get an honest `# note` (qdbus has no positional container CLI syntax).
+//!   are unsupported (qdbus has no positional container CLI syntax).
 //!
-//! Where a tool genuinely can't express a type, copy-as emits an honest
-//! `# note` rather than a command the tool would reject (no broken values).
+//! Where a tool genuinely can't express a type, copy-as greys out that tool
+//! (returns `None`) rather than emit a command it would reject (no broken values).
 //!
 //! Bus selection: each tool defaults to a *different* bus (busctl → system;
 //! dbus-send/qdbus → session; gdbus needs an explicit flag; busx → session),
@@ -107,11 +107,10 @@ impl Tool {
 
 /// Render `op` as `tool`'s command line, targeting `bus`.
 ///
-/// Returns `None` only where the tool genuinely cannot express the operation
-/// (qdbus has no monitor). Best-effort outputs carry a trailing `# …` note
-/// where a tool can't fully express a signature. The bus is always expressible
-/// (every tool has session/system/address flags), so it never produces a note
-/// on its own.
+/// Returns `None` where the tool genuinely cannot express the operation (qdbus
+/// has no monitor), or where one of its values uses a type the tool can't
+/// express (then the whole option is greyed out — no partial command). The bus
+/// is always expressible (every tool has session/system/address flags).
 pub fn generate(op: &CopyOp, bus: &Bus, tool: Tool) -> Option<String> {
     match op {
         CopyOp::Call {
@@ -537,7 +536,8 @@ impl<'a> Tok<'a> {
 
 /// The result of rendering one value for a tool. `unsupported` carries the
 /// signature substring the tool cannot express (if any), so the caller can
-/// attach an honest `# note` instead of emitting a malformed command.
+/// grey the tool out (the caller returns `None`) instead of emitting a
+/// malformed command.
 struct Rendered {
     /// The rendered value text.
     text: String,
@@ -603,7 +603,7 @@ fn render_args(signature: &str, args: &[String], tool: Tool) -> (Vec<Rendered>, 
 // "dbus-send does not permit empty containers or nested containers (e.g. arrays
 // of variants)." Structs are not in the BNF at all. So dbus-send can express
 // exactly: basic values, variants whose inner type is basic, arrays of basic
-// elements, and dicts of basic→basic. Anything else → unsupported (honest note).
+// elements, and dicts of basic→basic. Anything else → unsupported (greyed out).
 
 fn dbus_send_value(ty: &str, tok: &mut Tok<'_>) -> Rendered {
     // Basic type → `type:value`.
@@ -622,7 +622,7 @@ fn dbus_send_value(ty: &str, tok: &mut Tok<'_>) -> Rendered {
                 None => {
                     // dbus-send can't nest a complex-typed variant. Drain the
                     // inner value's tokens so subsequent args stay aligned; the
-                    // rendered arg is dropped in favor of a `# note`.
+                    // rendered arg becomes `unsupported` (greyed out).
                     drain_value(tok, inner);
                     Rendered::unsupported(format!("v<{inner}>"))
                 }
@@ -759,7 +759,8 @@ fn drain_struct(tok: &mut Tok<'_>, ty: &str) {
 
 /// Advance `tok` past all tokens belonging to one value of type `ty`, mirroring
 /// the encoder's token layout. Used only when *discarding* an inexpressible
-/// value (to keep subsequent args aligned); the rendered output is a `# note`.
+/// value (to keep subsequent args aligned); the discarded value renders as
+/// `unsupported` (greyed out).
 fn drain_value(tok: &mut Tok<'_>, ty: &str) {
     if dbus_send_basic_tag(ty).is_some() || ty == "g" {
         tok.next();
@@ -803,7 +804,7 @@ fn drain_value(tok: &mut Tok<'_>, ty: &str) {
 // values reliably; arrays of strings can be approximated by passing each
 // element as a separate positional arg (qdbus fills them into the array). For
 // dicts/structs/variants qdbus cannot reliably express the value positionally —
-// render an honest note. (This is a CLI limitation; programmatic QDBus handles
+// mark unsupported (greyed out). (This is a CLI limitation; programmatic QDBus handles
 // all types, but copy-as is about the command line.)
 
 fn qdbus_value(ty: &str, tok: &mut Tok<'_>) -> Rendered {
@@ -840,7 +841,7 @@ fn qdbus_value(ty: &str, tok: &mut Tok<'_>) -> Rendered {
                 Rendered::unsupported(t.to_string())
             }
         }
-        // dict / struct → qdbus can't express positionally; honest note.
+        // dict / struct → qdbus can't express positionally; mark unsupported.
         t if t.starts_with("a{") || t.starts_with('(') => {
             if t.starts_with("a{") {
                 let inner = &t["a{".len()..t.len() - 1];

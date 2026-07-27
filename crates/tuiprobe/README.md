@@ -79,11 +79,10 @@ full terminal emulator so you get clean text back.
 
 ### Output
 
-| Method              | Description                                                   |
-| ------------------- | ------------------------------------------------------------- |
-| `screen_contents()` | Full visible screen as a trimmed string                       |
-| `contains("text")`  | Quick check for text presence                                 |
-| `cell(row, col)`    | Access the `alacritty_terminal::Cell` (char + colors + flags) |
+| Method              | Description                             |
+| ------------------- | --------------------------------------- |
+| `screen_contents()` | Full visible screen as a trimmed string |
+| `contains("text")`  | Quick check for text presence           |
 
 ### Process control
 

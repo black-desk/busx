@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Chen Linxian <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -61,7 +61,12 @@ fn main() -> std::process::ExitCode {
             // never the TTY. If the file can't be opened, warn once (stderr is
             // still safe here, before raw mode) and run with logging disabled
             // rather than refusing to start.
-            if let Err(e) = log::init_tui(verbose, log.as_deref()) {
+            //
+            // Keep `init_tui`'s WorkerGuard alive for the whole `tui::run`:
+            // dropping it flushes and joins the non-blocking writer thread, so
+            // if it were dropped here the log file would stay empty.
+            let _guard = log::init_tui(verbose, log.as_deref());
+            if let Err(e) = &_guard {
                 eprintln!("busx: warning: could not open TUI log file ({e}); logging disabled");
             }
             tui::run(user, system, address.as_deref(), show_standard_interfaces)
@@ -75,6 +80,7 @@ fn main() -> std::process::ExitCode {
                 address,
                 json,
                 show_standard_interfaces,
+                log.is_some(),
                 command,
             )
         }
@@ -83,8 +89,9 @@ fn main() -> std::process::ExitCode {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("busx: {e}");
-            // `-v`+ prints the full cause chain (walk .source()). Only the CLI
-            // reaches here; the TUI surfaces errors inside its popup instead.
+            // `-v`+ prints the full cause chain (walk .source()). Both the CLI
+            // and the TUI reach here — fatal TUI errors propagate up after the
+            // terminal is restored; non-fatal TUI errors stay in their popup.
             if verbose > 0 {
                 let mut source = std::error::Error::source(&e);
                 while let Some(s) = source {
@@ -103,8 +110,10 @@ fn run_command(
     address: Option<String>,
     json: bool,
     show_standard_interfaces: bool,
+    log: bool,
     command: Command,
 ) -> error::Result<()> {
+    warn_ignored_globals(&command, json, show_standard_interfaces, log);
     match command {
         Command::List {
             no_unique,
@@ -169,19 +178,9 @@ fn run_command(
             &signature,
             &value,
         ),
-        Command::Introspect {
-            service,
-            object,
-            interface,
-        } => ops::introspect::run(
-            user,
-            system,
-            address.as_deref(),
-            json,
-            &service,
-            &object,
-            interface.as_deref(),
-        ),
+        Command::Introspect { service, object } => {
+            ops::introspect::run(user, system, address.as_deref(), &service, &object)
+        }
         Command::Monitor {
             services,
             interface,
@@ -242,5 +241,34 @@ fn run_command(
             complete::emit_script(shell);
             Ok(())
         }
+    }
+}
+
+/// Warn on stderr about every global flag the user passed but this subcommand
+/// ignores. `--json`, `--show-standard-interfaces`, and `--log` are global, but
+/// only some subcommands honour each; silently dropping a flag the user
+/// explicitly passed is usually a buggy script, so surface it. Only warns when
+/// the flag was actually passed (non-default).
+fn warn_ignored_globals(command: &Command, json: bool, show_standard_interfaces: bool, log: bool) {
+    let honors_json = matches!(
+        command,
+        Command::List { .. }
+            | Command::Call { .. }
+            | Command::Get { .. }
+            | Command::Monitor { .. }
+            | Command::Tree { .. }
+    );
+    let honors_show_standard_interfaces = matches!(command, Command::Tree { .. });
+
+    if json && !honors_json {
+        eprintln!("busx: warning: --json is ignored by this subcommand");
+    }
+    if show_standard_interfaces && !honors_show_standard_interfaces {
+        eprintln!("busx: warning: --show-standard-interfaces is ignored by this subcommand");
+    }
+    if log {
+        eprintln!(
+            "busx: warning: --log is ignored by CLI subcommands (only the TUI writes a log file)"
+        );
     }
 }

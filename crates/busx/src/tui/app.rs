@@ -2,9 +2,9 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Event loop. `run_loop` is backend- and event-source-agnostic so it
-//! is exercised end-to-end with TestBackend + a scripted event iterator; the
-//! real crossterm + flume wiring lives in `run`.
+//! Event loop. `run_loop` is backend- and event-source-agnostic; the real
+//! crossterm + flume wiring lives in `run`. It is exercised end-to-end via
+//! tuiprobe PTY tests (in `tests/tui_pty.rs`).
 
 use std::io::{self, Stdout};
 use std::time::Duration;
@@ -40,7 +40,7 @@ pub struct App {
 
 impl App {
     /// Render, then consume one event, repeating until `state.quit` or the event
-    /// source is exhausted. Generic over the backend so tests pass a TestBackend.
+    /// source is exhausted. Generic over the backend.
     ///
     /// Draws at the top of each iteration, so a non-quit mutation IS rendered on
     /// the next pass; a quit mutation exits without a final redraw (the screen is

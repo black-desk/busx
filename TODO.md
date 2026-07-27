@@ -1,5 +1,5 @@
 <!--
-SPDX-FileCopyrightText: 2026 Chen Linxian <me@black-desk.cn>
+SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 
 SPDX-License-Identifier: MIT
 -->
@@ -24,10 +24,25 @@ placeholder, so the screen reads as frozen / unresponsive.
 
 - Reproduced by: `tui_pty__result_listen_method_80x20.snap` and
   `tui_pty__result_listen_property_80x20.snap`.
-- Contrast: the CLI `monitor` command prints a `busx: monitoring (...)` line the
+- Contrast: the CLI `monitor` command prints a `busx: monitoring` line the
   moment it goes live; the TUI has no equivalent affordance.
 - Suspected location: `crates/busx/src/tui/render.rs` (`render_result`, the
   `r.messages.is_empty()` / `r.loading` branches).
+
+### Method-listen ready-gate has no timeout / fallback
+
+When a listen uses BecomeMonitor, `app.rs` waits for the daemon's
+`NameLost(own_name)` signal (the one that confirms monitor mode is live) and
+discards every message via `continue` until it arrives (`monitor_ready`). If
+that confirming signal is delivered late or never (daemon- and rule-dependent),
+the gate stays shut: the listen appears armed but no message is ever shown, with
+no timeout, error, or fallback. The content filter `is_become_monitor_noise`
+(used on the CLI side) is the safer path — real traffic that races the
+transition is never dropped — but the TUI path does not use it.
+
+- Suspected location: `crates/busx/src/tui/app.rs` (the `monitor_ready` loop),
+  `crates/busx/src/dbus/monitor.rs` (`is_monitor_ready_signal` /
+  `is_become_monitor_noise` — the latter's doc already warns about the gate).
 
 ## CLI
 
@@ -43,3 +58,31 @@ argument order or meaning from the help.
 - Reproduced by: `busx <subcommand> --help` for every subcommand.
 - Suspected location: `crates/busx/src/cli.rs` (missing `help = "..."` /
   `long_help = "..."` on the `#[arg(...)]` fields).
+
+## Testing
+
+### `enter_sends_carriage_return` does not actually assert the CR byte
+
+The tuiprobe smoke test is named as if it verifies Enter is encoded as `\r`, but
+its only assertion is `wait_for(|s| s.contains("abc"))` — that matches `cat`'s
+echo of the typed text and would pass whether Enter sent `\r`, `\n`, or nothing
+at all. The CR encoding is correct (the code does send `\r`), so the test name
+is misleading rather than the code; but a regression to the encoding would not
+be caught.
+
+- Reproduced by: `crates/tuiprobe/tests/smoke.rs`
+  (`enter_sends_carriage_return`).
+- Fix direction: assert the actual emitted bytes (e.g. drive a probe that echoes
+  raw bytes, or assert the screen reflects a CR-only line break), not just the
+  echoed text.
+
+### tuiprobe README API table is incomplete
+
+The API table in `crates/tuiprobe/README.md` lists `screen_contents()` /
+`contains()` but omits several public methods that exist and are used by the
+busx test suite: `wait_for_rect`, `wait_for_rect_with_timeout`,
+`screen_contents_crop`, and the `TuiProbeBuilder` (`probe.builder().cols()…`). A
+test author reading only the README would miss them.
+
+- Suspected location: `crates/tuiprobe/README.md` (the "Output" / builder
+  tables), vs. the actual surface in `crates/tuiprobe/src/harness.rs`.

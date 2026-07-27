@@ -62,13 +62,21 @@ pub struct Cli {
     /// rarely useful when browsing; this brings them back.
     #[arg(long, help = "Show standard D-Bus interfaces hidden by default")]
     pub show_standard_interfaces: bool,
-    /// Emit machine-readable type-tagged JSON instead of human-friendly text.
-    /// Global: applies to every subcommand. For `monitor` the JSON form is NDJSON
-    /// (one object per message).
+    /// Emit JSON instead of human-friendly text. Global, but only the
+    /// value-producing subcommands honour it: for `call` / `get` each D-Bus
+    /// value is type-tagged as `{"type":..,"data":..}`; `list` / `tree` emit
+    /// plain JSON; `monitor` is NDJSON. Ignored (with a warning) by `set` /
+    /// `introspect` / `emit`, which produce no JSON output.
     #[arg(
         long,
         global = true,
-        help = "Emit type-tagged JSON (default: human text)"
+        help = "Emit JSON (default: human text)",
+        long_help = "Emit JSON instead of human-friendly text.\n\
+            Only the value-producing subcommands honour it: for `call` / `get` \
+            each D-Bus value is type-tagged as `{\"type\":..,\"data\":..}`; \
+            `list` / `tree` emit plain JSON; `monitor` is NDJSON. \
+            Ignored (with a warning) by `set` / `introspect` / `emit`, which \
+            produce no JSON output."
     )]
     pub json: bool,
     #[command(subcommand)]
@@ -87,14 +95,12 @@ pub enum Command {
         )]
         activatable: bool,
     },
-    /// Show interfaces/methods/signals/properties of an object.
+    /// Dump the raw Introspect() XML for an object, verbatim.
     Introspect {
         #[arg(add = ArgValueCompleter::new(complete::complete_service))]
         service: String,
         #[arg(add = ArgValueCompleter::new(complete::complete_path))]
         object: String,
-        #[arg(add = ArgValueCompleter::new(complete::complete_interface))]
-        interface: Option<String>,
     },
     /// Call a method.
     Call {
@@ -148,8 +154,8 @@ pub enum Command {
     ///
     /// Once the subscription is live on the bus, `monitor` prints a `ready`
     /// event to stdout before any messages, so scripts can wait for it instead
-    /// of sleeping: with `--json` that's a line `{"event":"ready","mode":...}`;
-    /// in human mode a `busx: monitoring (...)` line. Filter it out to keep
+    /// of sleeping: with `--json` that's a line `{"event":"ready"}`;
+    /// in human mode a `busx: monitoring` line. Filter it out to keep
     /// only messages (`jq 'select(.type)'` / `grep -v '^busx: monitoring'`).
     Monitor {
         #[arg(add = ArgValueCompleter::new(complete::complete_service))]

@@ -1,5 +1,5 @@
 <!--
-SPDX-FileCopyrightText: 2026 Chen Linxian <me@black-desk.cn>
+SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 
 SPDX-License-Identifier: MIT
 -->
@@ -226,7 +226,7 @@ job）。要记住的硬性规则：**正文每行硬换行在 100 列**（`body
 
 - Rust / Shell / TOML / YAML 文件用注释头：
   ```rust
-  // SPDX-FileCopyrightText: 2026 Chen Linxian <me@black-desk.cn>
+  // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
   //
   // SPDX-License-Identifier: GPL-3.0-or-later
   ```

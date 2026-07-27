@@ -37,9 +37,9 @@
 //! before processing any traffic, so scripts can wait for it before generating
 //! bus traffic — no `sleep` race. The event always goes to **stdout** so a
 //! single pipe (`busx --json monitor | jq ...`) sees it inline: in `--json`
-//! mode it is one NDJSON line `{"event":"ready","mode":...}` (distinguishable
+//! mode it is one NDJSON line `{"event":"ready"}` (distinguishable
 //! from message objects, which carry a `"type"` key, not `"event"`); in human
-//! mode a one-line `busx: monitoring (...)` status. Scripts that want only
+//! mode a one-line `busx: monitoring` status. Scripts that want only
 //! messages filter it out — `jq 'select(.type)'` (JSON) or
 //! `grep -v '^busx: monitoring'` (human).
 
@@ -206,13 +206,12 @@ pub fn run(
             msg_type,
         )?;
 
-        let (stream, monitor_own_name, mode) = if rule.msg_type() == Some(Type::Signal) {
+        let (stream, monitor_own_name) = if rule.msg_type() == Some(Type::Signal) {
             // Unprivileged signal subscription: every bus accepts it. The match
             // rule is registered once `for_match_rule` resolves.
             (
                 MessageStream::for_match_rule(rule, &conn, None).await?,
                 None,
-                "signal subscription",
             )
         } else {
             // BecomeMonitor: sees method_call / method_return / error (and
@@ -238,15 +237,7 @@ pub fn run(
             // transition — capture it so stream_msgs can drop that lifecycle
             // noise by content (everything else is forwarded immediately).
             let own_name = conn.unique_name().map(|n| n.to_string());
-            (
-                MessageStream::from(&conn),
-                own_name,
-                if has_filters {
-                    "BecomeMonitor (filtered)"
-                } else {
-                    "BecomeMonitor"
-                },
-            )
+            (MessageStream::from(&conn), own_name)
         };
 
         stream_msgs(
@@ -256,7 +247,6 @@ pub fn run(
             timeout,
             json,
             monitor_own_name,
-            mode,
         )
         .await
     })
@@ -264,11 +254,11 @@ pub fn run(
 
 /// Emit the `ready` event right after the subscription goes live. See the
 /// module docs for the script-synchronization rationale.
-fn emit_ready(out: &mut impl Write, json: bool, mode: &str) -> Result<()> {
+fn emit_ready(out: &mut impl Write, json: bool) -> Result<()> {
     if json {
-        writeln!(out, "{{\"event\":\"ready\",\"mode\":\"{mode}\"}}")?;
+        writeln!(out, "{{\"event\":\"ready\"}}")?;
     } else {
-        writeln!(out, "busx: monitoring ({mode}) — Ctrl-C to stop")?;
+        writeln!(out, "busx: monitoring — Ctrl-C to stop")?;
     }
     Ok(())
 }
@@ -290,7 +280,6 @@ async fn stream_msgs(
     timeout: Option<&str>,
     json: bool,
     monitor_own_name: Option<String>,
-    mode: &'static str,
 ) -> Result<()> {
     let deadline = timeout.map(parse_duration).transpose()?;
 
@@ -301,10 +290,10 @@ async fn stream_msgs(
     // (this point is reached only after `for_match_rule` / `become_monitor`
     // resolved), so external scripts and tests can synchronize before
     // generating bus traffic — no `sleep` race. Always on stdout: in JSON mode
-    // it joins the NDJSON stream ({"event":"ready",...}); in human mode a
+    // it joins the NDJSON stream ({"event":"ready"}); in human mode a
     // `busx: monitoring` status line. Scripts wanting only messages filter it
     // (jq 'select(.type)' / grep -v '^busx: monitoring').
-    emit_ready(&mut out, json, mode)?;
+    emit_ready(&mut out, json)?;
     out.flush()?;
 
     // `OptionFuture` wraps `Option<Future>`: `Some(timer)` resolves when the

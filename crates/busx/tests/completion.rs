@@ -176,7 +176,7 @@ fn complete_path_position_lists_child_paths() {
     );
 }
 
-/// Interface position: completing the interface of `introspect` lists the
+/// Interface position: completing the interface of `call` lists the
 /// object's interfaces, including the fixture's own and the standard ones.
 #[test]
 fn complete_interface_position_lists_interfaces() {
@@ -187,7 +187,7 @@ fn complete_interface_position_lists_interfaces() {
             "busx",
             "--address",
             &addr,
-            "introspect",
+            "call",
             "org.busx.Test",
             "/org/busx/Test",
             "",

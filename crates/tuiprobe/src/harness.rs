@@ -221,7 +221,8 @@ impl TuiProbe {
         self.pty.as_mut().ok_or(Error::ProcessExited)?.wait_exit()
     }
 
-    /// Resize the PTY window.
+    /// Resize the PTY window. NOTE: this also recreates the screen emulator at
+    /// the new size, discarding all currently-rendered state (no reflow).
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
         if let Some(pty) = &mut self.pty {
             pty.resize(cols, rows)?;

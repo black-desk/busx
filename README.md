@@ -66,11 +66,13 @@ Usage: busx [OPTIONS] [COMMAND]
 
 Commands:
   list        List service names on the bus
-  introspect  Show interfaces/methods/signals/properties of an object
+  introspect  Dump the raw Introspect() XML for an object, verbatim
   call        Call a method
   get         Get properties (no property names => GetAll)
   set         Set a property
   monitor     Monitor bus messages
+  tree        Recursively list an object-path tree of a service
+  emit        Emit a D-Bus signal (for testing listeners on a private bus)
   help        Print this message or the help of the given subcommand(s)
 
 Options:
@@ -79,9 +81,9 @@ Options:
       --address <ADDRESS>         Connect to the bus at ADDRESS (e.g. unix:path=...)
   -v...                           Increase log verbosity (-v / -vv / -vvv)
       --log <PATH>                TUI log file (default: $XDG_CACHE_HOME/busx/busx.log)
-      --show-standard-interfaces  Show standard D-Bus interfaces in the TUI (hidden by default)
-      --json                      Emit type-tagged JSON (default: human text)
-  -h, --help                      Print help
+      --show-standard-interfaces  Show standard D-Bus interfaces hidden by default
+      --json                      Emit JSON (default: human text)
+  -h, --help                      Print help (see more with '--help')
   -V, --version                   Print version
 ```
 
@@ -95,7 +97,7 @@ busx
 busx list
 
 # Introspect an object
-busx introspect org.freedesktop.systemd1 /org/freedesktop/systemd1
+busx introspect org.freedesktop.systemd1 /org/freedesktop/systemd1   # raw Introspect() XML
 
 # Call a method (SIG is a distinct required arg; ListUnits takes none, so SIG is "")
 busx call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
@@ -117,7 +119,7 @@ eval "$(busx completion bash)"
 ```
 
 By default the output is human-friendly text; `--json` switches to **type-tagged
-JSON** (`monitor` is NDJSON) — every value is `{"type":..,"data":..}`,
+JSON** (`monitor` is NDJSON) — every D-Bus value is `{"type":..,"data":..}`,
 preserving full D-Bus type information for piping to external `jq` / python. All
 diagnostics (errors, warnings) go to stderr with the `busx:` prefix; exit code
 is `0` on success, `1` on failure; piping into `less`/`head` does not panic

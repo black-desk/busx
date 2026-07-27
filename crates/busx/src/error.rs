@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use std::convert::Infallible;
 use std::process::ExitCode;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -31,14 +30,6 @@ pub enum Error {
     },
     #[error("{0}")]
     Msg(String),
-}
-
-// `TestBackend`'s draw is infallible; this lets the generic `App::run_loop` lift
-// `<B as Backend>::Error` into `Error` without a dead enum variant.
-impl From<Infallible> for Error {
-    fn from(i: Infallible) -> Self {
-        match i {}
-    }
 }
 
 impl Error {

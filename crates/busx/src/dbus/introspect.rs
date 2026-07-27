@@ -30,19 +30,34 @@ pub fn is_standard_interface(name: &str) -> bool {
 ///
 /// `zbus_xml::Signature` derefs to `zvariant::Signature` (which implements
 /// `Display`) but does not itself implement `Display`, so go through the inner
-/// value to format it. Shared by the CLI introspection renderer and the TUI.
+/// value to format it. Used by the TUI.
 pub fn sig_str(sig: &Signature) -> String {
     sig.inner().to_string()
 }
 
 /// Lowercased spec name for a property's access mode (`read`/`write`/`readwrite`).
-/// Shared by the CLI introspection renderer and the TUI.
+/// Used by the TUI.
 pub fn access_str(a: PropertyAccess) -> &'static str {
     match a {
         PropertyAccess::Read => "read",
         PropertyAccess::Write => "write",
         PropertyAccess::ReadWrite => "readwrite",
     }
+}
+
+/// Call `org.freedesktop.DBus.Introspectable.Introspect` on `service`/`object`
+/// and return the raw XML document, unparsed.
+pub async fn introspect_xml(
+    conn: &zbus::Connection,
+    service: &str,
+    object: &str,
+) -> Result<String> {
+    let proxy = zbus::Proxy::new(conn, service, object, INTROSPECTABLE).await?;
+    Ok(proxy
+        .call_method("Introspect", &())
+        .await?
+        .body()
+        .deserialize()?)
 }
 
 /// Call `org.freedesktop.DBus.Introspectable.Introspect` on `service`/`object`
@@ -55,12 +70,7 @@ pub async fn introspect(
     service: &str,
     object: &str,
 ) -> Result<Node<'static>> {
-    let proxy = zbus::Proxy::new(conn, service, object, INTROSPECTABLE).await?;
-    let xml: String = proxy
-        .call_method("Introspect", &())
-        .await?
-        .body()
-        .deserialize()?;
+    let xml = introspect_xml(conn, service, object).await?;
     // The parse error (`zbus_xml::Error`) converts via `#[from]` so the typed
     // cause survives for `-v` to walk; the tree itself is owned/static.
     Ok(Node::from_reader(xml.as_bytes())?)

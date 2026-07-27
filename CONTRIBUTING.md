@@ -1,5 +1,5 @@
 <!--
-SPDX-FileCopyrightText: 2026 Chen Linxian <me@black-desk.cn>
+SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 
 SPDX-License-Identifier: MIT
 -->
@@ -260,7 +260,7 @@ and `LICENSES/`). The repository follows the [REUSE specification][reuse], and
 
 - Rust / Shell / TOML / YAML files use a comment header:
   ```rust
-  // SPDX-FileCopyrightText: 2026 Chen Linxian <me@black-desk.cn>
+  // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
   //
   // SPDX-License-Identifier: GPL-3.0-or-later
   ```

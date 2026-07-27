@@ -44,8 +44,9 @@ pub fn to_tagged(v: &Value) -> Json {
         Value::Dict(d) => crate::value::dict::to_tagged(d),
 
         // Real fd (duplicated into this process). Emit a structured object so
-        // consumers get kind/target/mode instead of a meaningless process-local
-        // integer. Resolved synchronously; the fd is not held (see `fdinfo`).
+        // consumers get kind/target/mode/size/note instead of a meaningless
+        // process-local integer. Resolved synchronously; the fd is not held
+        // (see `fdinfo`).
         Value::Fd(fd) => {
             let info = crate::value::fdinfo::gather(fd.as_raw_fd());
             let mut obj = serde_json::Map::new();

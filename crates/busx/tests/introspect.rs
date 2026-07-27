@@ -2,141 +2,128 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-use assert_cmd::Command;
-use serde_json::Value;
+//! `busx introspect` dumps the raw `Introspect()` XML verbatim — no parsing,
+//! no filtering, no human/JSON rendering. These tests assert properties of
+//! that raw XML (not a structured JSON shape), and that the
+//! ignored-global-flag warnings fire.
 
-#[test]
-fn introspect_lists_test_interface() {
-    let bus = testbus::bus_owned();
-    let addr = bus.address.clone();
+use assert_cmd::Command;
+
+/// A busx will never reach — used to exercise the warning path without needing
+/// a live `dbus-daemon` (the warning is emitted before any connection attempt).
+const NOPATH: &str = "unix:path=/nonexistent/busx-introspect-test";
+
+fn introspect_xml(addr: &str) -> String {
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
-            "--json",
             "--address",
-            &addr,
+            addr,
             "introspect",
             "org.busx.Test",
             "/org/busx/Test",
         ])
         .ok()
         .unwrap();
-    let v: Value = serde_json::from_slice(&out.stdout).expect("valid json");
-    let arr = v.as_array().expect("array of interfaces");
+    String::from_utf8(out.stdout).expect("utf8")
+}
 
-    // The fixture's own interface is present alongside the standard ones.
+#[test]
+fn introspect_dumps_raw_xml() {
+    let bus = testbus::bus_owned();
+    let xml = introspect_xml(&bus.address);
+
+    // It is well-formed XML wrapping a <node>.
     assert!(
-        arr.iter().any(|i| i["name"] == "org.busx.Test"),
-        "missing test iface: {v}"
+        xml.contains("<node"),
+        "raw introspect output should be XML starting with <node>:\n{xml}"
     );
-
-    let iface = arr.iter().find(|i| i["name"] == "org.busx.Test").unwrap();
+    // The fixture's own interface is exposed verbatim.
+    assert!(
+        xml.contains("org.busx.Test"),
+        "missing test interface in XML:\n{xml}"
+    );
     // zbus exposes Rust snake_case methods as PascalCase.
     assert!(
-        iface["methods"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|m| m["name"] == "BumpVolume"),
-        "missing BumpVolume method: {iface}"
+        xml.contains("BumpVolume"),
+        "missing BumpVolume method in XML:\n{xml}"
     );
     assert!(
-        iface["properties"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|p| p["name"] == "volume"),
-        "missing volume property: {iface}"
+        xml.contains("volume"),
+        "missing volume property in XML:\n{xml}"
+    );
+    // Standard interfaces are NOT filtered out — the XML is dumped as-is.
+    assert!(
+        xml.contains("org.freedesktop.DBus.Properties"),
+        "raw dump must include standard interfaces:\n{xml}"
     );
 }
 
+/// `--json` is meaningless for a raw-XML dump; the CLI warns and ignores it
+/// (it never produces JSON).
 #[test]
-fn introspect_interface_filter_returns_single_match() {
-    let bus = testbus::bus_owned();
-    let addr = bus.address.clone();
+fn introspect_warns_on_ignored_json() {
+    // The connection fails (bogus address), so the command exits non-zero;
+    // `.assert()` accepts any exit. The warning is emitted before any
+    // connection attempt, so it is already on stderr.
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
             "--json",
             "--address",
-            &addr,
+            NOPATH,
             "introspect",
             "org.busx.Test",
             "/org/busx/Test",
-            "org.busx.Test",
         ])
-        .ok()
-        .unwrap();
-    let v: Value = serde_json::from_slice(&out.stdout).expect("valid json");
-    let arr = v.as_array().expect("still an array when filtered");
-    assert_eq!(
-        arr.len(),
-        1,
-        "filter keeps exactly the requested iface: {v}"
-    );
-    assert_eq!(arr[0]["name"], "org.busx.Test");
-}
-
-/// Filtering by a nonexistent interface errors with a "not found" message on
-/// stderr and a non-zero exit (regression for the old silent-empty behavior).
-#[test]
-fn introspect_interface_filter_unknown_errors() {
-    let bus = testbus::bus_owned();
-    let addr = bus.address.clone();
-    let out = Command::cargo_bin("busx")
-        .unwrap()
-        .args([
-            "--json",
-            "--address",
-            &addr,
-            "introspect",
-            "org.busx.Test",
-            "/org/busx/Test",
-            "org.does.Not.Exist",
-        ])
-        .assert()
-        .failure();
+        .assert();
     let stderr = String::from_utf8_lossy(&out.get_output().stderr);
     assert!(
-        stderr.contains("not found"),
-        "should say not found: {stderr}"
+        stderr.contains("warning: --json is ignored"),
+        "should warn --json is ignored:\n{stderr}"
     );
 }
 
-/// Human introspect output groups members under their interface name, listing
-/// methods/properties (and signals) with their signatures.
+/// `--show-standard-interfaces` is meaningless for a raw-XML dump; the CLI
+/// warns and ignores it (standard interfaces stay in the output).
 #[test]
-fn introspect_human_lists_interface_members() {
-    let bus = testbus::bus_owned();
-    let addr = bus.address.clone();
+fn introspect_warns_on_ignored_show_standard_interfaces() {
     let out = Command::cargo_bin("busx")
         .unwrap()
         .args([
+            "--show-standard-interfaces",
             "--address",
-            &addr,
+            NOPATH,
             "introspect",
             "org.busx.Test",
             "/org/busx/Test",
         ])
-        .ok()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
+        .assert();
+    let stderr = String::from_utf8_lossy(&out.get_output().stderr);
     assert!(
-        stdout.contains("org.busx.Test"),
-        "missing iface header:\n{stdout}"
+        stderr.contains("warning: --show-standard-interfaces is ignored"),
+        "should warn --show-standard-interfaces is ignored:\n{stderr}"
     );
-    // zbus exposes Rust snake_case methods as PascalCase.
+}
+
+/// `--log` is ignored by every CLI subcommand (only the TUI writes a log file).
+#[test]
+fn introspect_warns_on_ignored_log() {
+    let out = Command::cargo_bin("busx")
+        .unwrap()
+        .args([
+            "--log",
+            "/tmp/x.log",
+            "--address",
+            NOPATH,
+            "introspect",
+            "org.busx.Test",
+            "/org/busx/Test",
+        ])
+        .assert();
+    let stderr = String::from_utf8_lossy(&out.get_output().stderr);
     assert!(
-        stdout.contains("BumpVolume"),
-        "missing BumpVolume method:\n{stdout}"
+        stderr.contains("warning: --log is ignored"),
+        "should warn --log is ignored:\n{stderr}"
     );
-    assert!(
-        stdout.contains("volume"),
-        "missing volume property:\n{stdout}"
-    );
-    assert!(
-        stdout.contains("method"),
-        "missing 'method' kind:\n{stdout}"
-    );
-    assert!(stdout.contains("prop"), "missing 'prop' kind:\n{stdout}");
 }

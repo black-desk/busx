@@ -2,26 +2,25 @@
 source: crates/busx/tests/tui_pty.rs
 expression: screen.as_str()
 ---
-     ┌help — Esc or ? to close────────────────────────────────────────────┐
-     │busx — keybindings                                                  │
-     │                                                                    │
-     │global:                                                             │
-     │  ↑↓ / jk     move selection (or scroll on the Result screen)       │
-     │  ←→ / hl     (Result) scroll a long line sideways; `<`/`>` mark    │
-     │hidden text                                                         │
-     │  Enter       open / activate / drill in / fire the focused button  │
-     │  Esc         back (or stop a listen); at the root Service screen,  │
-     │quit                                                                │
-     │  q           quit                                                  │
-     │  /           (list screen) filter — type to narrow, ↑↓ pick, Enter │
-     │open, Esc clear                                                     │
-     │  Tab         (Interface) cycle the methods/properties/signals      │
-     │columns                                                             │
-     │  r           refresh the current view (service list / objects /    │
-     │interfaces / property values)                                       │
-     │  c           copy-as — generate dbus-send/busctl/qdbus/gdbus for   │
-     │the current op                                                      │
-     │  y           (Result) copy the result text                         │
-     │  ?           toggle this help                                      │
-     │  mouse       click to select / click a button to activate / wheel  │
-     └────────────────────────────────────────────────────────────────────┘
+
+
+  ┌help — Esc or ? to close──────────────────────────────────────────────────┐
+  │busx — keybindings                                                        │
+  │                                                                          │
+  │global:                                                                   │
+  │  ↑↓ / jk     move / scroll (Result)                                      │
+  │  ←→ / hl     (Result) scroll sideways; `<`/`>` marks hidden text         │
+  │  Enter       open / activate / drill in / fire the focused button        │
+  │  Esc         back (or stop a listen); at root Service screen, quit       │
+  │  q           quit                                                        │
+  │  /           (list) filter — type, ↑↓ pick, Enter open, Esc clear        │
+  │  Tab         (Interface) cycle methods/properties/signals                │
+  │  r           refresh the current view                                    │
+  │  c           copy-as — dbus-send/busctl/qdbus/gdbus for the current op   │
+  │  y           (Result) copy the result text                               │
+  │  ?           toggle this help                                            │
+  │  mouse       click to select / click a button / wheel to scroll          │
+  │                                                                          │
+  │navigation: Service → Objects → Interfaces → Interface → Detail → Result  │
+  │  (single-item levels auto-skip; Esc unwinds the stack)                   │
+  └──────────────────────────────────────────────────────────────────────────┘

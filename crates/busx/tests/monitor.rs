@@ -10,7 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 /// First stdout line that is an actual captured message, skipping the
-/// `{"event":"ready",...}` (JSON mode) or `busx: monitoring ...` (human mode)
+/// `{"event":"ready"}` (JSON mode) or `busx: monitoring ...` (human mode)
 /// line `monitor` emits once it is live on the bus.
 fn first_message_line(stdout: &str) -> &str {
     stdout.lines().find(|l| !is_ready_line(l)).unwrap_or("")
@@ -29,7 +29,7 @@ fn is_ready_line(line: &str) -> bool {
 
 /// Drive a monitor `child` (stdout piped) to completion without a fixed sleep:
 /// read stdout line by line and, the instant monitor reports it is live on the
-/// bus (its `ready` event — `{"event":"ready",...}` in JSON or
+/// bus (its `ready` event — `{"event":"ready"}` in JSON or
 /// `busx: monitoring` in human mode), call `trigger` to generate the bus
 /// traffic under test, then keep draining until the monitor exits. Returns the
 /// full collected stdout.
@@ -122,7 +122,7 @@ fn monitor_emits_propertieschanged() {
     });
 
     // Each line must be a JSON object whose `member` is PropertiesChanged.
-    // (stdout also carries the `{"event":"ready",...}` line emitted once the
+    // (stdout also carries the `{"event":"ready"}` line emitted once the
     // subscription is live; first_message_line skips it.)
     let lines = message_lines(&stdout);
     assert!(!lines.is_empty(), "monitor produced no output:\n{stdout}");

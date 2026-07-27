@@ -9,7 +9,7 @@
 //! accessor patterns stay in lock-step, but renders a compact, shell-friendly
 //! form instead of type-tagged JSON:
 //!
-//! - numbers (U8/I16/U32/U64/I64/F64) → bare number.
+//! - numbers (U8/I16/U32/U64/I64/F64, plus U16/I32) → bare number.
 //! - Bool → `true`/`false`.
 //! - Str / ObjectPath / Signature → a Rust-style quoted literal `"..."` via
 //!   `{:?}`, so control characters are escaped (`\n`, `\t`, `\u{1}`, …) and
@@ -20,7 +20,8 @@
 //! - Dict → `{k0: v0, k1: v1, ...}` (works for every key type — the human form
 //!   has no JSON object-key limit, so even `a{uu}` renders as `{1:10, 2:20}`).
 //! - Structure → `(f0, f1, ...)`.
-//! - anything else (Fd, Maybe under a gated feature) → `<?>`.
+//! - Fd → `<fd TARGET [SIZE] [MODE] [NOTE]>` (resolved via `/proc` + `fstat`).
+//! - anything else (Maybe under a gated feature) → `unsupported value: …`.
 
 use std::os::fd::AsRawFd;
 use zvariant::Value;

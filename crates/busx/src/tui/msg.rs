@@ -20,9 +20,10 @@ pub enum Msg {
     ObjectsLoaded(Result<ObjectNode, String>),
     /// (service, object, the introspection node)
     InterfacesLoaded(String, String, Result<Node<'static>, String>),
-    /// (interface name) PropertiesChanged-style refresh result
+    /// Properties refresh result (fetched via GetAll).
     PropertiesLoaded(Result<Vec<(String, OwnedValue)>, String>),
-    /// A one-shot action (call/get/set) completed.
+    /// An action completed — a one-shot (call/get/set) result, or a
+    /// listen-arming failure (connect error, BecomeMonitor refused, bad match rule).
     ActionResult(Result<ActionResult, String>),
     /// A streaming listen armed its loop; carry the cancel sender so the Result
     /// screen stores it (Esc dropping the screen drops the sender → stop).
@@ -75,9 +76,10 @@ pub enum Effect {
         iface: String,
         target: ListenTarget,
     },
-    /// Copy a generated command line to the system clipboard. NOT a dbus op —
-    /// `run_effect` does not handle it; only the production `on_effect` closure
-    /// in `app::run` does (via `arboard`). The `Effect` seam keeps `arboard`
-    /// (which needs a display) out of `update`/`render`/tests.
+    /// Copy a generated command line to the system clipboard. Not a D-Bus op,
+    /// but dispatched by `run_effect` like the others: it spawns a thread that
+    /// tries `wl-copy`/`xclip`/`xsel`, falling back to `arboard`. The `Effect`
+    /// seam keeps clipboard IO (which needs a display) out of
+    /// `update`/`render`/tests.
     CopyToClipboard(String),
 }

@@ -19,7 +19,7 @@
 //!
 //! Sources (all Linux `/proc` + `fstat`, matching the rest of busx — no new
 //! deps):
-//! - `fstat(2)` → file type (regular/dir/socket/fifo/char/block) + size.
+//! - `fstat(2)` → file type (regular/dir/socket/pipe/symlink/char/block) + size.
 //! - `readlink /proc/self/fd/<n>` → the target (path, `pipe:[ino]`,
 //!   `socket:[ino]`, `anon_inode:[eventfd]`, `/memfd:NAME (deleted)`, …).
 //! - `/proc/self/fdinfo/<n>` → `flags:` (access mode: ro/wo/rw) and, for a few
@@ -31,8 +31,8 @@ use std::fs;
 /// `fstat` but stores no handle, so it outlives the fd itself.
 pub(crate) struct FdInfo {
     /// Short kind label: `regular`, `directory`, `socket`, `pipe`, `char`,
-    /// `block`, the `anon_inode` inner name (`eventfd`, `timerfd`, …), or
-    /// `unknown`.
+    /// `block`, `symlink`, the `anon_inode` inner name (`eventfd`, `timerfd`,
+    /// …), `memfd`, or `unknown`.
     pub kind: String,
     /// The raw `readlink` target, when `/proc/self/fd/<n>` was readable.
     pub target: Option<String>,

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Chen Linxian <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -84,9 +84,13 @@ pub fn init_tui(
 /// when `XDG_CACHE_HOME` is unset. A missing `HOME` degrades to a relative
 /// `busx.log` in the current directory.
 fn default_log_path() -> PathBuf {
-    let base = std::env::var_os("XDG_CACHE_HOME")
+    let Some(base) = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
-        .unwrap_or_else(|| PathBuf::from("."));
+    else {
+        // Neither XDG_CACHE_HOME nor HOME: write `busx.log` directly in the
+        // current directory (no `busx/` nesting — cwd is already specific).
+        return PathBuf::from("busx.log");
+    };
     base.join("busx").join("busx.log")
 }

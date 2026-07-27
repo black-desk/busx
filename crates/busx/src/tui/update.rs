@@ -243,9 +243,10 @@ fn hit_test(state: &State, col: u16, row: u16) -> Option<ClickTarget> {
 }
 
 /// Apply a hit-tested click: a list/row target sets the selection (no side
-/// effects); an action button or the Detail trigger selects AND fires (reusing
+/// effects, and clicking the already-selected row acts as Enter — a side
+/// effect); an action button or the Detail trigger selects AND fires (reusing
 /// `handle_enter`, which already implements the Enter paths for those). A popup
-/// tool is selected for preview (the copy itself happens via Enter).
+/// tool is selected for preview; clicking the already-selected tool copies it.
 fn apply_click(state: &mut State, t: ClickTarget) -> Option<Effect> {
     match t {
         // List rows: first click selects; clicking the already-selected row acts
@@ -1193,8 +1194,8 @@ type Properties = Vec<(String, String, String)>;
 type Signals = Vec<(String, String)>;
 
 /// Extract (methods, properties, signals) for `iface_name` from an introspection
-/// node, mirroring `ops::introspect`'s formatting. Method signature = the
-/// concatenated IN-arg signatures; signal signature = all args; property = (name, type, access).
+/// node. Method signature = the concatenated IN-arg signatures; signal
+/// signature = all args; property = (name, type, access).
 fn members_of(node: &Node, iface_name: &str) -> (Methods, Properties, Signals) {
     let Some(iface) = node
         .interfaces()

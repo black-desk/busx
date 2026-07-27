@@ -10,7 +10,8 @@
 //!   driven off the real `Cli::command()` (no hand-built mirror). The shell
 //!   re-invokes `busx` with the full command line under a special env var
 //!   (`COMPLETE=<shell>`); `try_complete` processes it and exits.
-//! - **Positional values** (service / object-path / interface / method) get
+//! - **Positional values** (service / object-path / interface / method /
+//!   signature / property) get
 //!   live bus introspection via `ArgValueCompleter` closures attached to each
 //!   positional in `cli.rs` with `#[arg(add = ...)]`. The closures (exported
 //!   below as `pub fn`) read the bus flags and the already-typed positionals
@@ -78,9 +79,10 @@ fn shell_name(shell: Shell) -> Option<&'static str> {
     }
 }
 
-/// The "kind" of bus value a positional holds. `None` ⇒ no dynamic completion
-/// (e.g. method args, property values — out of scope for v1). Used by
-/// `complete_positional` to dispatch to the matching introspection helper.
+/// The "kind" of bus value a positional holds. Used by `complete_positional`
+/// to dispatch to the matching introspection helper. Positionals with no
+/// completion (e.g. method args, property values) simply have no
+/// `ArgValueCompleter` attached in `cli.rs`.
 #[derive(Clone, Copy)]
 enum Kind {
     Service,
@@ -129,10 +131,7 @@ pub fn complete_property(current: &OsStr) -> Vec<CompletionCandidate> {
 /// connects to the resulting bus, and dispatches to the matching introspection
 /// helper. `current` is the partial token the user is typing.
 fn complete_positional(kind: Kind, current: &OsStr) -> Vec<CompletionCandidate> {
-    let parsed = match parse_args() {
-        Some(p) => p,
-        None => return Vec::new(),
-    };
+    let parsed = parse_args();
     let Some(sub) = parsed.subcommand else {
         return Vec::new();
     };
@@ -173,8 +172,7 @@ struct ParsedArgs {
 /// Walk `std::env::args_os()` skipping the binary name, separating global flags
 /// from the subcommand + its positionals. Flags after the subcommand (e.g.
 /// `monitor --interface X`) are skipped so they don't masquerade as positionals.
-/// Returns `None` only if argv can't be read at all.
-fn parse_args() -> Option<ParsedArgs> {
+fn parse_args() -> ParsedArgs {
     let mut user = false;
     let mut system = false;
     let mut address: Option<String> = None;
@@ -262,13 +260,13 @@ fn parse_args() -> Option<ParsedArgs> {
         positionals.pop();
     }
 
-    Some(ParsedArgs {
+    ParsedArgs {
         user,
         system,
         address,
         subcommand,
         positionals,
-    })
+    }
 }
 
 /// Whether a long flag (without the `--`) consumes a separate value token.

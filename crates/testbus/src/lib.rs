@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Chen Linxian <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -74,7 +74,9 @@ impl TestIface {
         parts.join("-")
     }
 
-    /// Bumps volume to trigger PropertiesChanged — monitor target.
+    /// Bumps volume — a monitor `method_call` target (it is a plain method, not
+    /// a property, so it emits no PropertiesChanged; the `volume` setter is what
+    /// triggers that).
     fn bump_volume(&mut self) -> f64 {
         self.volume += 1.0;
         self.volume
@@ -152,8 +154,8 @@ impl Drop for TestBus {
 ///
 /// Use this from tests that need a deterministic `:1.x` naming table —
 /// e.g. e2e TUI tests that list_names and snapshot the result, where a
-/// deterministic `:1.0` (daemon) + `:1.1` (fixture) + `:1.2` (self)
-/// naming matters regardless of concurrent tests.
+/// deterministic daemon (`org.freedesktop.DBus`) + `:1.0` (fixture) +
+/// `:1.1` (self) naming matters regardless of concurrent tests.
 pub fn bus_owned() -> TestBus {
     start_bus_with_fixture()
 }

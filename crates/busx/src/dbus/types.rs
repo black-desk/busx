@@ -2,8 +2,10 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Owned data types returned by the async core. Introspection reuses
-//! `zbus_xml` types directly; only these non-introspection results are ours.
+//! Owned data types returned by the async core. Most introspection results
+//! reuse `zbus_xml` types directly; the busx-owned types here are the
+//! exceptions: `ServiceInfo` (name + enrichment from `list`) and `ObjectNode`
+//! (the recursive-introspection tree `busx tree` / the TUI build).
 
 /// One bus name with best-effort PID + process enrichment.
 pub struct ServiceInfo {

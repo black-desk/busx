@@ -83,7 +83,7 @@ pub enum ScrollDirection {
 /// from its stdin (the PTY *slave*). crossterm / termion / termwiz running
 /// inside the child will decode them back into key events.
 pub fn encode_key(key: KeyCode, mods: KeyModifiers) -> Vec<u8> {
-    // Ctrl + Char → ASCII control character (0x00–0x1F).
+    // Ctrl + Char → ASCII control character (0x00–0x1F), except Ctrl+? → 0x7f (DEL).
     if mods.ctrl
         && let KeyCode::Char(c) = key
     {
