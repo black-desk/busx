@@ -181,7 +181,7 @@ fn run_command(
             path,
             sender,
             r#match,
-            all,
+            r#type,
             limit_messages,
             timeout,
         } => ops::monitor::run(
@@ -195,7 +195,12 @@ fn run_command(
             path,
             sender,
             r#match,
-            all,
+            r#type.map(|t| match t {
+                cli::MonitorType::Signal => zbus::message::Type::Signal,
+                cli::MonitorType::MethodCall => zbus::message::Type::MethodCall,
+                cli::MonitorType::MethodReturn => zbus::message::Type::MethodReturn,
+                cli::MonitorType::Error => zbus::message::Type::Error,
+            }),
             limit_messages,
             timeout.as_deref(),
         ),

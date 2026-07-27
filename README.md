@@ -106,7 +106,7 @@ busx get org.freedesktop.systemd1 /org/freedesktop/systemd1 \
   org.freedesktop.systemd1.Manager
 
 # Monitor signals; --json emits NDJSON, easy to pipe to jq
-busx --json monitor --signals --interface org.freedesktop.DBus.Properties \
+busx --json monitor --type signal --interface org.freedesktop.DBus.Properties \
   --member PropertiesChanged | jq 'select(.args[1] != {})'
 
 # Enable completion: add this to ~/.bashrc (or ~/.zshrc for zsh) and restart

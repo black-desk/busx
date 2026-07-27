@@ -30,6 +30,8 @@ fn monitor_emits_propertieschanged() {
             "--address",
             &addr,
             "monitor",
+            "--type",
+            "signal",
             "--interface",
             "org.freedesktop.DBus.Properties",
             "--member",
@@ -110,6 +112,8 @@ fn monitor_human_emits_block() {
             "--address",
             &addr,
             "monitor",
+            "--type",
+            "signal",
             "--interface",
             "org.freedesktop.DBus.Properties",
             "--member",
@@ -220,37 +224,149 @@ fn monitor_timeout_fires_on_idle_bus() {
     );
 }
 
-/// Default `monitor` subscribes to signals only (no BecomeMonitor): a
-/// PropertiesChanged from a property set is captured, no `--signals` flag
-/// needed. Documents the new default.
+/// Default `monitor` (no `--type`) becomes a bus monitor and sees method calls
+/// too — not just signals. A `busx call` is a `method_call`; the unprivileged
+/// signal-subscription path could never capture it, so finding it proves
+/// BecomeMonitor was used. With no filters BecomeMonitor sees every message
+/// (including bus lifecycle noise), so the window is bounded by `--timeout` and
+/// we scan all captured lines for the one we triggered.
 #[test]
-fn monitor_default_captures_signal() {
+fn monitor_default_captures_method_call() {
     let bus = testbus::bus_owned();
     let addr = bus.address.clone();
 
-    // Start monitor as a subprocess; it exits after 1 matching message
-    // (`--limit-messages`). No `--signals`/`--all`: the default is the
-    // signal subscription under test.
     let child = Command::new(cargo_bin!("busx"))
+        .args(["--json", "--address", &addr, "monitor", "--timeout", "3s"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn monitor");
+
+    // Give BecomeMonitor time to register before we generate traffic.
+    thread::sleep(Duration::from_millis(800));
+
+    let trigger = Command::new(cargo_bin!("busx"))
         .args([
             "--address",
             &addr,
+            "call",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "BumpVolume",
+            "",
+        ])
+        .status()
+        .expect("trigger call");
+    assert!(trigger.success(), "BumpVolume call failed");
+
+    let out = child.wait_with_output().expect("monitor exit");
+    assert!(out.status.success(), "monitor failed: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    let found = stdout.lines().any(|line| {
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            return false;
+        };
+        v["type"] == "method_call" && v["member"] == "BumpVolume"
+    });
+    assert!(
+        found,
+        "default monitor did not capture the BumpVolume method_call          (BecomeMonitor not used?):
+{stdout}"
+    );
+}
+
+/// `--type method_call` selects BecomeMonitor (only BecomeMonitor can see method
+/// calls) and filters to method calls at the bus. A `busx call` to the fixture's
+/// `BumpVolume` is captured as the single matching message.
+#[test]
+fn monitor_type_method_call_captures_call() {
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
+
+    let child = Command::new(cargo_bin!("busx"))
+        .args([
+            "--json",
+            "--address",
+            &addr,
             "monitor",
+            "--type",
+            "method_call",
             "--interface",
-            "org.freedesktop.DBus.Properties",
+            "org.busx.Test",
+            "--member",
+            "BumpVolume",
             "--limit-messages",
             "1",
             "--timeout",
-            "5s",
+            "10s",
         ])
         .stdout(Stdio::piped())
         .spawn()
         .expect("spawn monitor");
 
-    // Give the monitor time to register its match rule on the bus.
-    thread::sleep(Duration::from_millis(300));
+    thread::sleep(Duration::from_millis(800));
 
-    // Trigger a PropertiesChanged by setting the fixture's `volume`.
+    let trigger = Command::new(cargo_bin!("busx"))
+        .args([
+            "--address",
+            &addr,
+            "call",
+            "org.busx.Test",
+            "/org/busx/Test",
+            "org.busx.Test",
+            "BumpVolume",
+            "",
+        ])
+        .status()
+        .expect("trigger call");
+    assert!(trigger.success(), "BumpVolume call failed");
+
+    let out = child.wait_with_output().expect("monitor exit");
+    assert!(out.status.success(), "monitor failed: {:?}", out.status);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let first: Value =
+        serde_json::from_str(stdout.lines().next().unwrap_or("")).expect("first line must be JSON");
+    assert_eq!(
+        first["type"], "method_call",
+        "expected a method_call:
+{stdout}"
+    );
+    assert_eq!(
+        first["member"], "BumpVolume",
+        "expected BumpVolume:
+{stdout}"
+    );
+}
+/// `--match` takes a raw D-Bus match rule, parsed directly — a separate branch
+/// from the convenience-flag builder. A raw rule pinning `type='signal'` must
+/// route through the unprivileged signal subscription (not BecomeMonitor): it
+/// captures the PropertiesChanged signal exactly like the convenience-flag
+/// path, proving the raw rule's message type is read and routed correctly.
+#[test]
+fn monitor_match_signal_rule_captures_signal() {
+    let bus = testbus::bus_owned();
+    let addr = bus.address.clone();
+
+    let child = Command::new(cargo_bin!("busx"))
+        .args([
+            "--json",
+            "--address",
+            &addr,
+            "monitor",
+            "--match",
+            "type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged'",
+            "--limit-messages",
+            "1",
+            "--timeout",
+            "10s",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn monitor");
+
+    thread::sleep(Duration::from_millis(800));
+
     let trigger = Command::new(cargo_bin!("busx"))
         .args([
             "--address",
@@ -261,17 +377,27 @@ fn monitor_default_captures_signal() {
             "org.busx.Test",
             "volume",
             "d",
-            "0.5",
+            "0.25",
         ])
         .status()
         .expect("trigger set");
     assert!(trigger.success(), "set volume call failed");
 
     let out = child.wait_with_output().expect("monitor exit");
-    assert!(out.status.success(), "monitor should exit 0: {out:?}");
+    assert!(out.status.success(), "monitor failed: {:?}", out.status);
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("PropertiesChanged") || stdout.contains("Properties"),
-        "should capture the signal: {stdout}"
+    let first: Value =
+        serde_json::from_str(stdout.lines().next().unwrap_or("")).expect("first line must be JSON");
+    assert_eq!(
+        first["type"], "signal",
+        "--match with type='signal' should capture a signal:\n{stdout}"
+    );
+    assert_eq!(
+        first["member"], "PropertiesChanged",
+        "expected PropertiesChanged:\n{stdout}"
+    );
+    assert_eq!(
+        first["interface"], "org.freedesktop.DBus.Properties",
+        "expected the Properties interface:\n{stdout}"
     );
 }
