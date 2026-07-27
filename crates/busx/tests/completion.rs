@@ -41,6 +41,8 @@ fn complete_subcommand_position_lists_subcommands() {
         "list",
         "introspect",
         "monitor",
+        "tree",
+        "emit",
         // "completion" is `#[command(hide = true)]` so it's deliberately not
         // offered — now that completion uses the real Cli (not the old mirror,
         // which forgot to replicate `hide`).
@@ -129,13 +131,24 @@ fn complete_service_dead_address_yields_no_services() {
 fn complete_service_system_flag_runs() {
     let out = complete_bash(&["busx", "--system", "call", ""], 3);
     // `call` must have been consumed as the subcommand: completing the service
-    // slot must NOT echo `call` back as a candidate (which would happen only if
+    // slot must NOT echo any subcommand name back (which would happen only if
     // `--system` were mistaken for the subcommand and `call` left as a fresh
     // subcommand-position token).
-    assert!(
-        !out.lines().any(|l| l == "call"),
-        "`call` re-listed as a candidate — `--system` was mis-parsed:\n{out}"
-    );
+    for sub in [
+        "list",
+        "get",
+        "set",
+        "introspect",
+        "monitor",
+        "tree",
+        "emit",
+        "call",
+    ] {
+        assert!(
+            !out.lines().any(|l| l == sub),
+            "subcommand `{sub}` leaked at the service position — `--system` mis-parsed:\n{out}"
+        );
+    }
 }
 
 // === Positional live introspection (service/path/interface/method) =========
@@ -396,30 +409,6 @@ fn complete_set_property_position_lists_properties() {
     }
 }
 
-// === Robustness ============================================================
-
-/// Completion never fails the command even when the bus is unreachable: an
-/// invalid `--address` yields exit 0 and (for the positional) no bus names.
-#[test]
-fn complete_silently_yields_nothing_on_bus_error() {
-    let out = complete_bash(
-        &[
-            "busx",
-            "--address",
-            "unix:path=/nonexistent/busx.sock",
-            "call",
-            "",
-        ],
-        4,
-    );
-    // Global flags may still appear (they're valid at this position), but no
-    // real service names should leak from the session bus.
-    assert!(
-        !out.lines().any(|l| l == "org.freedesktop.DBus"),
-        "session-bus name leaked on a bus error: {out}"
-    );
-}
-
 /// The `completion` subcommand still emits the registration script that
 /// `clap_complete::dynamic` expects for bash (i.e. our `busx completion bash`
 /// now mirrors `source <(COMPLETE=bash busx)`).
@@ -432,7 +421,7 @@ fn completion_subcommand_emits_bash_registration() {
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("complete ") || stdout.contains("compdef") || stdout.contains("busx"),
-        "registration script should reference the binary:\n{stdout}"
+        stdout.contains("complete ") && stdout.contains("busx"),
+        "bash registration should wire the `complete` builtin to `busx`:\n{stdout}"
     );
 }

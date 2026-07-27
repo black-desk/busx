@@ -27,6 +27,41 @@ fn is_ready_line(line: &str) -> bool {
     line.contains("\"event\":\"ready\"") || line.starts_with("busx: monitoring")
 }
 
+/// Drive a monitor `child` (stdout piped) to completion without a fixed sleep:
+/// read stdout line by line and, the instant monitor reports it is live on the
+/// bus (its `ready` event — `{"event":"ready",...}` in JSON or
+/// `busx: monitoring` in human mode), call `trigger` to generate the bus
+/// traffic under test, then keep draining until the monitor exits. Returns the
+/// full collected stdout.
+///
+/// `trigger` runs on the calling thread *after* the ready line is read, so a
+/// panic in it fails the test (no detached-thread asserts that silently
+/// vanish). The monitor's own `--limit-messages` / `--timeout` make it exit.
+fn drive_monitor<F: FnOnce()>(mut child: std::process::Child, trigger: F) -> String {
+    let stdout = child.stdout.take().expect("piped stdout");
+    let reader = BufReader::new(stdout);
+    let mut ready = false;
+    let mut trigger = Some(trigger);
+    let mut collected = String::new();
+    for line in reader.lines() {
+        let line = line.expect("read monitor line");
+        if !ready && is_ready_line(&line) {
+            ready = true;
+            // Fire now that the subscription is live. Synchronous so a failure
+            // here propagates instead of being swallowed by a spawned thread.
+            if let Some(fire) = trigger.take() {
+                fire();
+            }
+        }
+        collected.push_str(&line);
+        collected.push('\n');
+    }
+    assert!(ready, "monitor never went live (no ready event seen)");
+    let status = child.wait().expect("monitor exit");
+    assert!(status.success(), "monitor failed: {status}");
+    collected
+}
+
 /// `busx monitor --type signal ... --limit-messages 1` must
 /// emit one NDJSON line for the `PropertiesChanged` signal triggered by a
 /// property set.
@@ -64,32 +99,27 @@ fn monitor_emits_propertieschanged() {
         .spawn()
         .expect("spawn monitor");
 
-    // Give the monitor time to register its match rule on the bus.
-    thread::sleep(Duration::from_millis(800));
-
-    // Trigger a property change: `busx set` calls `Properties.Set`, which
-    // routes through the fixture's generated `set_volume` setter. zbus
-    // auto-emits `PropertiesChanged` for properties with the default
-    // `emits_changed_signal` (the fixture's `volume` qualifies).
-    let trigger = Command::new(cargo_bin!("busx"))
-        .args([
-            "--address",
-            &addr,
-            "set",
-            "org.busx.Test",
-            "/org/busx/Test",
-            "org.busx.Test",
-            "volume",
-            "d",
-            "0.75",
-        ])
-        .status()
-        .expect("trigger set");
-    assert!(trigger.success(), "set volume call failed");
-
-    let out = child.wait_with_output().expect("monitor exit");
-    assert!(out.status.success(), "monitor failed: {:?}", out.status);
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    // Wait for monitor's `ready` event (no sleep race), then trigger a
+    // property change: `busx set` → Properties.Set → the fixture's
+    // `set_volume` setter; zbus auto-emits PropertiesChanged for `volume`.
+    let addr2 = addr.clone();
+    let stdout = drive_monitor(child, || {
+        let status = Command::new(cargo_bin!("busx"))
+            .args([
+                "--address",
+                &addr2,
+                "set",
+                "org.busx.Test",
+                "/org/busx/Test",
+                "org.busx.Test",
+                "volume",
+                "d",
+                "0.75",
+            ])
+            .status()
+            .expect("trigger set");
+        assert!(status.success(), "set volume call failed");
+    });
 
     // Each line must be a JSON object whose `member` is PropertiesChanged.
     // (stdout also carries the `{"event":"ready",...}` line emitted once the
@@ -148,27 +178,26 @@ fn monitor_human_emits_block() {
         .spawn()
         .expect("spawn monitor");
 
-    thread::sleep(Duration::from_millis(800));
-
-    let trigger = Command::new(cargo_bin!("busx"))
-        .args([
-            "--address",
-            &addr,
-            "set",
-            "org.busx.Test",
-            "/org/busx/Test",
-            "org.busx.Test",
-            "volume",
-            "d",
-            "0.5",
-        ])
-        .status()
-        .expect("trigger set");
-    assert!(trigger.success(), "set volume call failed");
-
-    let out = child.wait_with_output().expect("monitor exit");
-    assert!(out.status.success(), "monitor failed: {:?}", out.status);
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    // Wait for the human `busx: monitoring` ready line, then trigger a
+    // property change to emit PropertiesChanged.
+    let addr2 = addr.clone();
+    let stdout = drive_monitor(child, || {
+        let status = Command::new(cargo_bin!("busx"))
+            .args([
+                "--address",
+                &addr2,
+                "set",
+                "org.busx.Test",
+                "/org/busx/Test",
+                "org.busx.Test",
+                "volume",
+                "d",
+                "0.5",
+            ])
+            .status()
+            .expect("trigger set");
+        assert!(status.success(), "set volume call failed");
+    });
 
     // The block must NOT be JSON (no leading `{`) and must carry the signal's
     // identity fields. stdout also carries the `busx: monitoring ...` ready
@@ -445,27 +474,25 @@ fn monitor_match_signal_rule_captures_signal() {
         .spawn()
         .expect("spawn monitor");
 
-    thread::sleep(Duration::from_millis(800));
-
-    let trigger = Command::new(cargo_bin!("busx"))
-        .args([
-            "--address",
-            &addr,
-            "set",
-            "org.busx.Test",
-            "/org/busx/Test",
-            "org.busx.Test",
-            "volume",
-            "d",
-            "0.25",
-        ])
-        .status()
-        .expect("trigger set");
-    assert!(trigger.success(), "set volume call failed");
-
-    let out = child.wait_with_output().expect("monitor exit");
-    assert!(out.status.success(), "monitor failed: {:?}", out.status);
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    // Wait for monitor's ready event, then trigger the signal.
+    let addr2 = addr.clone();
+    let stdout = drive_monitor(child, || {
+        let status = Command::new(cargo_bin!("busx"))
+            .args([
+                "--address",
+                &addr2,
+                "set",
+                "org.busx.Test",
+                "/org/busx/Test",
+                "org.busx.Test",
+                "volume",
+                "d",
+                "0.25",
+            ])
+            .status()
+            .expect("trigger set");
+        assert!(status.success(), "set volume call failed");
+    });
     let first: Value =
         serde_json::from_str(first_message_line(&stdout)).expect("first line must be JSON");
     assert_eq!(

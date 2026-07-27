@@ -103,31 +103,6 @@ fn introspect_interface_filter_unknown_errors() {
     );
 }
 
-/// Filtering by a nonexistent interface must error (exit non-zero) with a clear
-/// "not found" message, not silently emit empty output.
-#[test]
-fn introspect_unknown_interface_errors() {
-    let bus = testbus::bus_owned();
-    let addr = bus.address.clone();
-    let out = Command::cargo_bin("busx")
-        .unwrap()
-        .args([
-            "--address",
-            &addr,
-            "introspect",
-            "org.busx.Test",
-            "/org/busx/Test",
-            "org.busx.DoesNotExist",
-        ])
-        .assert()
-        .failure(); // exit non-zero is expected
-    let stderr = String::from_utf8_lossy(&out.get_output().stderr);
-    assert!(
-        stderr.contains("not found"),
-        "should say not found: {stderr}"
-    );
-}
-
 /// Human introspect output groups members under their interface name, listing
 /// methods/properties (and signals) with their signatures.
 #[test]
