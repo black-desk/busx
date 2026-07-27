@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// `busx monitor ... --limit-messages 1` (default = signal subscription) must
+/// `busx monitor --type signal ... --limit-messages 1` must
 /// emit one NDJSON line for the `PropertiesChanged` signal triggered by a
 /// property set.
 ///
