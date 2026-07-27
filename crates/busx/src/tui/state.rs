@@ -313,7 +313,7 @@ impl State {
 /// container paths (no interfaces ⇒ no object of their own) are skipped.
 pub fn flatten_paths(root: &ObjectNode) -> Vec<String> {
     let mut out = Vec::new();
-    if root.interfaces > 0 {
+    if !root.interfaces.is_empty() {
         out.push(root.path.clone());
     }
     for child in &root.children {
