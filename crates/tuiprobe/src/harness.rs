@@ -148,12 +148,60 @@ impl TuiProbe {
         }
     }
 
+    /// Like [`wait_for`](Self::wait_for) but each frame reads only a cropped
+    /// sub-rectangle `(x, y, w, h)` of the screen (0-based top-left). Handy for
+    /// waiting on an overlay (e.g. a centered popup) by its content while
+    /// ignoring the surrounding background and borders.
+    pub fn wait_for_rect<F: Fn(&str) -> bool>(
+        &mut self,
+        x: usize,
+        y: usize,
+        w: usize,
+        h: usize,
+        condition: F,
+    ) -> Result<()> {
+        self.wait_for_rect_with_timeout(x, y, w, h, condition, self.timeout)
+    }
+
+    /// Like [`wait_for_rect`](Self::wait_for_rect) but with a custom timeout.
+    pub fn wait_for_rect_with_timeout<F: Fn(&str) -> bool>(
+        &mut self,
+        x: usize,
+        y: usize,
+        w: usize,
+        h: usize,
+        condition: F,
+        timeout: Duration,
+    ) -> Result<()> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            self.drain_into_emulator();
+            let contents = self.screen.crop(x, y, w, h);
+            if condition(&contents) {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(Error::Timeout {
+                    what: "condition".to_string(),
+                    screen: contents,
+                });
+            }
+            std::thread::sleep(self.poll_interval);
+        }
+    }
+
     // ── Output ─────────────────────────────────────────────────────────
 
     /// Return the full visible screen as a trimmed string (rows joined by
     /// `\n`, trailing spaces removed per line).
     pub fn screen_contents(&self) -> String {
         self.screen.contents()
+    }
+
+    /// Return the text within a rectangular region, like
+    /// [`screen_contents`](Self::screen_contents) but cropped to `(x, y, w, h)`.
+    pub fn screen_contents_crop(&self, x: usize, y: usize, w: usize, h: usize) -> String {
+        self.screen.crop(x, y, w, h)
     }
 
     /// Check whether the screen currently contains `text`.
