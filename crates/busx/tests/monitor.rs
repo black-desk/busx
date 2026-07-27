@@ -326,23 +326,18 @@ fn monitor_default_captures_method_call() {
     let status = child.wait().expect("monitor exit");
     assert!(status.success(), "monitor failed: {status}");
 
-    // The ready event is line 1; the captured method_call is the remaining
-    // line (--limit-messages 1 guarantees exactly one message).
-    let msg = collected
-        .lines()
-        .find(|l| !l.contains("\"event\":\"ready\""))
-        .unwrap_or("");
-    let v: Value = serde_json::from_str(msg)
-        .unwrap_or_else(|_| panic!("captured line is not JSON:\n{collected}"));
-    assert_eq!(
-        v["type"], "method_call",
-        "default monitor should capture a method_call:
-{collected}"
-    );
-    assert_eq!(
-        v["member"], "BumpVolume",
-        "expected BumpVolume:
-{collected}"
+    // Scan every message line for the one we triggered. BecomeMonitor with no
+    // filter also forwards bus lifecycle traffic, so other messages may appear
+    // around ours — only ours is a method_call to BumpVolume.
+    let found = message_lines(&collected).iter().any(|line| {
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            return false;
+        };
+        v["type"] == "method_call" && v["member"] == "BumpVolume"
+    });
+    assert!(
+        found,
+        "default monitor did not capture the BumpVolume method_call:\n{collected}"
     );
 }
 
