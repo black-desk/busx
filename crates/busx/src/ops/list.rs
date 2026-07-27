@@ -24,8 +24,9 @@ fn cap_cell(s: &str, cap: usize) -> String {
 /// columns. PROCESS (the trailing column, from `/proc/<pid>/comm`, ≤ 15 bytes)
 /// gets a fixed slot, PID its natural width, and NAME the remainder (truncated
 /// to it). PROCESS is never padded (trailing column), so the total width is
-/// always ≤ `term_w` — a long name or a CJK process name (3 bytes/char) never
-/// wraps. Pure so the truncation/fit can be unit-tested without a real TTY.
+/// always ≤ `term_w` — a long name never wraps. The truncation/fit is verified
+/// end-to-end by running the real binary inside a PTY (see `tests/list.rs`),
+/// not by a unit test.
 fn render_table(rows: &[[String; 3]], term_w: usize) -> String {
     const PROC_W: usize = 15;
     let pid_w = rows
@@ -105,48 +106,4 @@ pub fn run(
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::render_table;
-
-    /// An overlong NAME is truncated with `…` and the row stays within the
-    /// terminal width (here 80 cols). PID is 3 (header), PROCESS 15 → NAME gets
-    /// 80 − 3 − 15 − 4 = 58 cols.
-    #[test]
-    fn render_table_truncates_name_to_fit() {
-        let rows = [[
-            "org.busx.TestServiceNameThatIsIntentionallyVeryLongSoItExceedsTheColumn".to_string(),
-            "42".to_string(),
-            "a-process".to_string(),
-        ]];
-        let out = render_table(&rows, 80);
-        let data_line = out.lines().nth(1).unwrap(); // skip header
-        assert!(data_line.contains('…'), "expected truncation: {data_line}");
-        assert!(
-            data_line.chars().count() <= 80,
-            "row {} cols wide (> 80): {data_line}",
-            data_line.chars().count()
-        );
-    }
-
-    /// A CJK PROCESS name (3 bytes/char) is truncated to the fixed 15-col slot
-    /// and never pushes the row past the terminal width.
-    #[test]
-    fn render_table_wide_process_stays_within_width() {
-        let rows = [[
-            ":1.5".to_string(),
-            "999".to_string(),
-            "中文进程名占位".to_string(), // 7 chars, 21 bytes
-        ]];
-        let out = render_table(&rows, 60);
-        for line in out.lines() {
-            assert!(
-                line.chars().count() <= 60,
-                "line {} cols (> 60): {line}",
-                line.chars().count()
-            );
-        }
-    }
 }
