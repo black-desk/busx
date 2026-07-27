@@ -1,25 +1,17 @@
 ---
 source: crates/busx/tests/tui_pty.rs
-expression: screen.as_str()
+expression: cropped.as_str()
 ---
+copy as — ↑↓ choose · Enter copy · Esc────────────────────────────────────────
+dbus-send: dbus-monitor --address <SOCKET>
+busctl: busctl --address=<SOCKET>
+qdbus: (unsupported)
+gdbus: gdbus monitor --address=<SOCKET>
+busx: busx --address=<SOCKET>
+busctl --address=<SOCKET>
 
 
 
 
 
-
-
-          ┌copy as — ↑↓ choose · Enter copy · Esc────────────────────────────────────────┐
-          │dbus-send: dbus-monitor --address <SOCKET>
-          │busctl: busctl --address=<SOCKET>
-          │qdbus: (unsupported)                                                          │
-          │gdbus: gdbus monitor --address=<SOCKET>
-          │busx: busx --address=<SOCKET>
-          │busctl --address=<SOCKET>
-          │                                                                              │
-          │                                                                              │
-          │                                                                              │
-          │                                                                              │
-          │                                                                              │
-          │copied                                                                        │
-          └──────────────────────────────────────────────────────────────────────────────┘
+copied

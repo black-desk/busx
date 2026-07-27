@@ -8,20 +8,11 @@ SPDX-License-Identifier: MIT
 
 Known issues found during a snapshot / CLI-output review that may surprise or
 confuse users. These were observed via the existing end-to-end tests and manual
-`--help` output; none are fixed yet.
+`--help` output; none are fixed yet. (The copy-as popup right-border issue
+originally listed here turned out to be a snapshot-filter regex bug, not a real
+rendering defect, and has been fixed.)
 
 ## TUI
-
-### Copy-as popup loses its right border
-
-In the copy-as popup, every row that carries command text (the per-tool rows,
-the preview line, and the `copied` status line) renders without a closing `│` on
-the right edge. Only the empty rows keep the border, so the box looks broken.
-
-- Reproduced by: `tui_pty__copied_status_get_dbus_send.snap` and the other
-  `copied_status_*` / `copy_as_popup_*` snapshots in
-  `crates/busx/tests/snapshots/`.
-- Suspected location: `crates/busx/src/tui/render.rs` (`render_popup`).
 
 ### Listen leaves the Result screen empty while armed
 

@@ -23,6 +23,41 @@ use tuiprobe::{KeyCode, MouseButton, ScrollDirection, TuiProbe, wait_for_snapsho
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
+/// Content rect of the copy-as popup. The popup is `centered_rect(80, 50)`
+/// over the 100×28 terminal these tests use, so the bordered box lands at
+/// col 10 / row 7, size 80×14. This rect keeps the top border (it carries the
+/// "copy as — ↑↓ choose · Enter copy · Esc" title) and the inner body — the
+/// tool list + preview + status — but strips the left/right/bottom borders so
+/// the box-drawing `│` (whose column after `<SOCKET>` redaction would never
+/// line up with the real, variable-length address) is simply not in the
+/// snapshot. The plain insta `<SOCKET>` filter (see `pty_filter`) is then
+/// enough; no space-padding is needed.
+///
+/// The rect starts at the top-border row (y = 7) and the title column (x = 11),
+/// so the left corner `┌` (col 10) is cropped out; the title text and the `─`
+/// fill up to the right edge (col 88) are kept.
+const COPY_AS_RECT: (usize, usize, usize, usize) = (11, 7, 78, 13);
+
+/// Like `wait_for_snapshot!` but snapshots only a cropped sub-rectangle of the
+/// screen. Used for the copy-as popup (see [`COPY_AS_RECT`]).
+macro_rules! wait_for_snapshot_crop {
+    ($probe:expr, $name:expr, $rect:expr $(,)?) => {{
+        let name_owned: String = ::std::format!("{}", $name);
+        let name = name_owned.as_str();
+        let (x, y, w, h) = $rect;
+        match $probe.wait_for_rect(x, y, w, h, |screen| {
+            ::insta::matches_snapshot!(name, screen).unwrap_or(false)
+        }) {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                let cropped = $probe.screen_contents_crop(x, y, w, h);
+                ::insta::assert_snapshot!(name, cropped.as_str());
+                Err(err)
+            }
+        }
+    }};
+}
+
 /// Spawn busx (TUI mode) connected to a private testbus.
 fn spawn_busx(addr: &str, w: u16, h: u16) -> TuiProbe {
     let mut probe = TuiProbe::builder()
@@ -147,9 +182,15 @@ fn pty_filter() -> insta::Settings {
     // that row by anchoring on the already-masked PROC column that follows.
     // Runs after the PROC filters above.
     s.add_filter(r" {1,7}\d{1,7}(  <PROC>)", "  <PID>${1}");
-    // testbus socket path + GUID.
-    s.add_filter(r#"unix:path=[^,\s"]+,guid=[^,\s"]+"#, "<SOCKET>");
-    s.add_filter(r#"unix:abstract=[^,\s"]+,guid=[^,\s"]+"#, "<SOCKET>");
+    // testbus socket path + GUID. The GUID is the trailing address field, so
+    // it must be pinned to its actual charset (lower/upper hex) rather than the
+    // catch-all `[^,\s"]+` — otherwise it greedily eats whatever follows the
+    // address, e.g. the right border `│` of a TUI box drawn right after a
+    // `--bus=<addr>` value, and the box loses its border in the snapshot. The
+    // path/abstract fields always end at the following `,guid=`, so the
+    // catch-all is fine for them.
+    s.add_filter(r#"unix:path=[^,\s"]+,guid=[0-9a-fA-F]+"#, "<SOCKET>");
+    s.add_filter(r#"unix:abstract=[^,\s"]+,guid=[0-9a-fA-F]+"#, "<SOCKET>");
     s
 }
 
@@ -634,12 +675,22 @@ fn listen_property_armed_then_esc() {
 /// different content), so each caller passes a unique tag.
 fn copy_tool(probe: &mut TuiProbe, tool_row: usize, snap_suffix: &str) {
     probe.send_key(KeyCode::Char('c')).unwrap();
-    wait_for_snapshot!(probe, format!("copy_as_popup_{}", snap_suffix)).unwrap();
+    wait_for_snapshot_crop!(
+        probe,
+        format!("copy_as_popup_{}", snap_suffix),
+        COPY_AS_RECT
+    )
+    .unwrap();
     for _ in 0..tool_row {
         probe.send_key(KeyCode::Down).unwrap();
     }
     probe.send_key(KeyCode::Enter).unwrap();
-    wait_for_snapshot!(probe, format!("copied_status_{}", snap_suffix)).unwrap();
+    wait_for_snapshot_crop!(
+        probe,
+        format!("copied_status_{}", snap_suffix),
+        COPY_AS_RECT
+    )
+    .unwrap();
 }
 
 #[test]

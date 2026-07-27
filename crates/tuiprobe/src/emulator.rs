@@ -103,6 +103,50 @@ impl Screen {
         self.contents().contains(needle)
     }
 
+    /// Return the text within a rectangular region of the screen.
+    ///
+    /// `(x, y)` is the 0-based top-left cell; `w` / `h` are the region size.
+    /// Coordinates are clamped to the screen, so an out-of-bounds rect returns
+    /// as much as overlaps the visible grid. Trailing spaces are trimmed per
+    /// row (like [`contents`](Self::contents)), and rows are joined by `\n`
+    /// with no trailing newline.
+    ///
+    /// Use this to snapshot just an overlay's content (e.g. a centered popup)
+    /// without its box-drawing borders or the background it sits on, which
+    /// keeps snapshots focused and avoids border-alignment artifacts from
+    /// redaction.
+    pub fn crop(&self, x: usize, y: usize, w: usize, h: usize) -> String {
+        let lines = self.term.screen_lines();
+        let cols = self.term.columns();
+        let mut out = String::with_capacity(w * h);
+        for ri in 0..h {
+            let row = y + ri;
+            if row >= lines {
+                break;
+            }
+            // Track the last non-space column within the region, so trailing
+            // spaces (and all-space rows) are trimmed — same as `contents`.
+            let mut line_end = x;
+            for ci in 0..w {
+                let col = x + ci;
+                if col >= cols {
+                    break;
+                }
+                if self.cell(row, col).c != ' ' {
+                    line_end = col + 1;
+                }
+            }
+            for col in x..line_end {
+                out.push(self.cell(row, col).c);
+            }
+            let next_row = y + ri + 1;
+            if ri + 1 < h && next_row < lines {
+                out.push('\n');
+            }
+        }
+        out
+    }
+
     /// Access the cell at `(row, col)` — 0-based.
     pub fn cell(&self, row: usize, col: usize) -> &Cell {
         let grid: &Grid<Cell> = self.term.grid();
