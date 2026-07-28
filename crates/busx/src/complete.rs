@@ -32,7 +32,7 @@
 //! local `dbus-daemon`, so the round-trip is cheap. Simpler + correct to
 //! introspect every time.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 
 use clap::CommandFactory;
 use clap_complete::{CompleteEnv, CompletionCandidate, Shell};
@@ -41,9 +41,6 @@ use zbus::blocking::fdo::DBusProxy;
 use zbus_xml::{ArgDirection, Node};
 
 use crate::error::Result;
-
-/// Names of subcommands that take a service as their first positional.
-const SERVICE_SUBS: &[&str] = &["call", "get", "set", "introspect", "monitor", "tree"];
 
 /// Entry point invoked very early in `main`. If `COMPLETE=<shell>` is set the
 /// shell is asking us to produce candidates (or the registration script); we do
@@ -164,114 +161,108 @@ fn complete_positional(kind: Kind, current: &OsStr) -> Vec<CompletionCandidate> 
         Err(_) => return Vec::new(),
     };
     let cands =
-        positional_candidates(&conn, sub, &parsed.positionals, kind, current).unwrap_or_default();
+        positional_candidates(&conn, &sub, &parsed.positionals, kind, current).unwrap_or_default();
     cands.into_iter().map(CompletionCandidate::new).collect()
 }
 
 /// Decoded view of the raw argv relevant to completion: the bus flags, the
 /// subcommand, and the already-filled positional values (the partial being typed
 /// is excluded — it arrives separately as `current`).
+///
+/// This is parsed by the **real** [`crate::cli::Cli::command()`] with
+/// [`ignore_errors(true)`][clap::Command::ignore_errors]: clap is the single
+/// source of truth for the flag/positional layout, so there is no hand-written
+/// argv walker to keep in sync when the CLI changes. `ignore_errors` lets clap
+/// accept the half-typed command line completion always sees (the final token
+/// may be a partial value); clap still correctly separates options from
+/// positionals — exactly what the old walker hand-coded and what a plain
+/// `get_matches` would reject mid-word.
 struct ParsedArgs {
     user: bool,
     system: bool,
     address: Option<String>,
-    subcommand: Option<&'static str>,
+    subcommand: Option<String>,
     positionals: Vec<String>,
 }
 
-/// Walk `std::env::args_os()` skipping the binary name, separating global flags
-/// from the subcommand + its positionals. Flags after the subcommand (e.g.
-/// `monitor --interface X`) are skipped so they don't masquerade as positionals.
+/// Parse the real CLI definition, tolerating the incomplete tail that
+/// completion always produces. clap separates options from positionals and
+/// resolves the active subcommand — no hand-maintained flag list, no hand-coded
+/// subcommand-name table. The subcommand's filled positionals are collected in
+/// index order, then the last is dropped because clap parsed the partial being
+/// typed as a positional and it arrives separately as `current`.
 fn parse_args() -> ParsedArgs {
-    // Built once from the real Cli; a flag whose action takes a value eats the
-    // following token so it isn't mis-collected as a positional.
-    let value_flags = value_taking_flags();
-    let mut user = false;
-    let mut system = false;
-    let mut address: Option<String> = None;
-    let mut subcommand: Option<&'static str> = None;
-    let mut positionals: Vec<String> = Vec::new();
+    // The completion protocol re-invokes us as `busx -- <words...>`. That
+    // leading `--` ends option parsing, so it must be dropped before the
+    // argv is handed to clap — otherwise clap reads every word as a
+    // positional literal of the top-level command and never resolves the
+    // subcommand. This mirrors what `CompleteEnv::try_complete_` drains
+    // before calling the engine; the per-positional closures read
+    // `args_os()` directly, so they repeat the same trim. `<words>` still
+    // starts with the program name, which clap consumes as the binary name.
+    let args: Vec<OsString> = std::env::args_os().collect();
+    let escape = args
+        .iter()
+        .position(|a| a.as_os_str() == OsStr::new("--"))
+        .map(|i| i + 1)
+        .unwrap_or(1);
 
-    let mut iter = std::env::args_os().skip(1);
-    while let Some(raw) = iter.next() {
-        let token = match raw.to_str() {
-            Some(s) => s,
-            None => continue,
+    // Tolerate the incomplete tail completion always feeds us.
+    let matches = crate::cli::Cli::command()
+        .ignore_errors(true)
+        .try_get_matches_from(args.into_iter().skip(escape));
+    let Ok(matches) = matches else {
+        return ParsedArgs {
+            user: false,
+            system: false,
+            address: None,
+            subcommand: None,
+            positionals: Vec::new(),
         };
-        if subcommand.is_none() {
-            // Top-level: only globals + the subcommand name are expected here.
-            match token {
-                "--user" => user = true,
-                "--system" => system = true,
-                "--address" => address = iter.next().and_then(|v| v.into_string().ok()),
-                "--" => {}
-                t if t.starts_with("--address=") => {
-                    address = Some(t["--address=".len()..].to_string());
-                }
-                t if SERVICE_SUBS.contains(&t)
-                    || t == "list"
-                    || t == "completion"
-                    || t == "emit" =>
-                {
-                    // Record the subcommand name as a `&'static str`. The match
-                    // arms below pin each branch to a literal, so the returned
-                    // lifetime is `'static`.
-                    subcommand = Some(match t {
-                        "list" => "list",
-                        "completion" => "completion",
-                        "call" => "call",
-                        "get" => "get",
-                        "set" => "set",
-                        "introspect" => "introspect",
-                        "monitor" => "monitor",
-                        "tree" => "tree",
-                        "emit" => "emit",
-                        _ => "call",
-                    });
-                }
-                _ => {}
-            }
-        } else {
-            // Inside a subcommand: skip flags (and their values for known
-            // value-taking options) so only positionals are collected.
-            if token == "--" {
-                continue;
-            }
-            if let Some(rest) = token.strip_prefix("--") {
-                // Split `--flag=value` into `(flag, Some(value))`; a bare `--flag`
-                // is `(flag, None)` and may consume the *next* token as its value.
-                let (flag, inline_value) = rest
-                    .split_once('=')
-                    .map(|(f, v)| (f, Some(v)))
-                    .unwrap_or((rest, None));
-                let consume_next = inline_value.is_none() && value_flags.contains(flag);
-                match flag {
-                    "address" => {
-                        address = inline_value
-                            .map(str::to_string)
-                            .or_else(|| iter.next().and_then(|v| v.into_string().ok()));
-                    }
-                    _ if consume_next => {
-                        let _ = iter.next();
-                    }
-                    _ => {}
-                }
-                continue;
-            }
-            if token.starts_with('-') && token.len() > 1 {
-                continue;
-            }
-            positionals.push(token.to_string());
-        }
-    }
+    };
 
-    // The last collected positional is the partial currently being typed; the
-    // completer receives it separately as `current`, so drop it here. For a
-    // required-but-empty position (user just typed the subcommand) the shell
-    // appends an empty word, which lands here and is dropped correctly.
-    if !positionals.is_empty() {
-        positionals.pop();
-    }
+    let user = matches.get_flag("user");
+    let system = matches.get_flag("system");
+    let address = matches.get_one::<String>("address").cloned();
+
+    // Collect the active subcommand's positionals in index order, then drop the
+    // last — clap parsed the partial being typed as a positional.
+    let (subcommand, positionals) = match matches.subcommand_name() {
+        Some(name) => {
+            let pos: Vec<String> = match matches.subcommand_matches(name) {
+                Some(sm) => {
+                    // Build a fresh Command purely to reflect the subcommand's
+                    // positional *layout* — the parsed values come from `sm`,
+                    // not from this Command. `Arg::get_index()` returns `None`
+                    // until the Command is built: clap assigns positional
+                    // indices during `build()`, so without it every positional
+                    // is filtered out and we'd collect nothing. The Command is
+                    // held on the stack so the borrowed arg ids outlive the
+                    // `pos_ids` collect below.
+                    let mut cmd = crate::cli::Cli::command();
+                    cmd.build();
+                    let mut pos_ids: Vec<(usize, &str)> = cmd
+                        .find_subcommand(name)
+                        .iter()
+                        .flat_map(|sc| sc.get_arguments())
+                        .filter_map(|a| a.get_index().map(|i| (i, a.get_id().as_str())))
+                        .collect();
+                    pos_ids.sort_by_key(|(i, _)| *i);
+                    let mut v: Vec<String> = pos_ids
+                        .into_iter()
+                        .filter_map(|(_, id)| sm.get_one::<String>(id).cloned())
+                        .collect();
+                    if !v.is_empty() {
+                        v.pop();
+                    }
+                    v
+                }
+                None => Vec::new(),
+            };
+            (Some(name.to_string()), pos)
+        }
+        None => (None, Vec::new()),
+    };
 
     ParsedArgs {
         user,
@@ -280,33 +271,6 @@ fn parse_args() -> ParsedArgs {
         subcommand,
         positionals,
     }
-}
-
-/// The set of long-flag names (without `--`) whose clap action consumes a
-/// separate value, collected by walking the real [`crate::cli::Cli::command`].
-/// This is the single source of truth for "does this flag eat the next token?"
-/// during completion parsing — driven off the same definitions clap parses, so a
-/// newly added value-taking flag is picked up automatically with no hand-kept
-/// list to fall out of sync. Only `Set`/`Append` actions count; `SetTrue`
-/// (bool flags), `Count` (`-v`), `Help`, and `Version` take no value.
-fn value_taking_flags() -> std::collections::HashSet<String> {
-    fn walk(out: &mut std::collections::HashSet<String>, cmd: &clap::Command) {
-        for arg in cmd.get_arguments() {
-            if matches!(
-                arg.get_action(),
-                clap::ArgAction::Set | clap::ArgAction::Append
-            ) && let Some(long) = arg.get_long()
-            {
-                out.insert(long.to_string());
-            }
-        }
-        for sub in cmd.get_subcommands() {
-            walk(out, sub);
-        }
-    }
-    let mut out = std::collections::HashSet::new();
-    walk(&mut out, &crate::cli::Cli::command());
-    out
 }
 
 /// Dispatch to the introspection helper for `kind` using the filled positionals.
