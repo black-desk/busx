@@ -37,6 +37,21 @@ const MIN_HEIGHT: u16 = 3;
 /// last row. Seeding `with_offset` from the persisted value lets ratatui keep
 /// the cursor stable (vim/less-style: the viewport only scrolls once the cursor
 /// reaches an edge).
+/// Format a bus error for display: its top-level message, then each cause on
+/// its own indented line (matching `busx`'s `-v` cause-chain output). Preserving
+/// the typed [`crate::error::Error`] in `State` — instead of flattening it to a
+/// `String` when the async task reports — is what makes the underlying
+/// zbus/fdo detail reachable here; without it only the outer message survives.
+fn error_text(e: &crate::error::Error) -> String {
+    let mut s = format!("{e}");
+    let mut source = std::error::Error::source(e);
+    while let Some(cause) = source {
+        s.push_str(&format!("\n  caused by: {cause}"));
+        source = cause.source();
+    }
+    s
+}
+
 pub fn render(
     frame: &mut Frame,
     state: &State,
@@ -278,7 +293,10 @@ fn render_service(
     let block = Block::default().borders(Borders::ALL).title(title);
 
     if let Some(err) = &s.error {
-        frame.render_widget(Paragraph::new(format!("error: {err}")).block(block), area);
+        frame.render_widget(
+            Paragraph::new(format!("error: {}", error_text(err))).block(block),
+            area,
+        );
         return;
     }
 
@@ -353,7 +371,10 @@ fn render_objects(
     };
     let block = Block::default().borders(Borders::ALL).title(title);
     if let Some(err) = &o.error {
-        frame.render_widget(Paragraph::new(format!("error: {err}")).block(block), area);
+        frame.render_widget(
+            Paragraph::new(format!("error: {}", error_text(err))).block(block),
+            area,
+        );
         return;
     }
     let view = crate::tui::state::filter_view(&o.paths, query, |p| p.as_str());
@@ -389,7 +410,10 @@ fn render_interfaces(
     };
     let block = Block::default().borders(Borders::ALL).title(title);
     if let Some(err) = &i.error {
-        frame.render_widget(Paragraph::new(format!("error: {err}")).block(block), area);
+        frame.render_widget(
+            Paragraph::new(format!("error: {}", error_text(err))).block(block),
+            area,
+        );
         return;
     }
     let view = crate::tui::state::filter_view(&i.names, query, |n| n.as_str());
@@ -466,7 +490,7 @@ fn render_interface(
         let block = Block::default()
             .borders(Borders::ALL)
             .title("properties (unavailable)");
-        frame.render_widget(Paragraph::new(err.clone()).block(block), chunks[1]);
+        frame.render_widget(Paragraph::new(error_text(err)).block(block), chunks[1]);
     } else {
         // Align the name and signature columns so the GetAll values line up.
         let inner = chunks[1].width.saturating_sub(2) as usize;
@@ -625,7 +649,10 @@ fn render_detail(
     let block = Block::default().borders(Borders::ALL).title(title);
 
     if let Some(err) = &d.error {
-        frame.render_widget(Paragraph::new(format!("error: {err}")).block(block), area);
+        frame.render_widget(
+            Paragraph::new(format!("error: {}", error_text(err))).block(block),
+            area,
+        );
         return;
     }
 
@@ -757,7 +784,7 @@ fn render_result(frame: &mut Frame, area: Rect, r: &ResultScreen) {
     // line is clipped with `<`/`>` scroll hints instead of overrunning or
     // wrapping. Vertical scroll (`r.scroll`) skips leading logical lines.
     let mut lines: Vec<String> = if let Some(err) = &r.error {
-        vec![format!("error: {err}")]
+        vec![format!("error: {}", error_text(err))]
     } else if !r.messages.is_empty() {
         // Each listen message block may itself span multiple display lines.
         r.messages

@@ -3,6 +3,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Messages fed to `update`.
+//!
+//! Bus failures travel as the typed [`crate::error::Error`], not a flattened
+//! `String`, so `render` can walk the full cause chain (and future code can
+//! branch on the variant). Only [`Msg::ClipboardResult`] keeps a `String`:
+//! clipboard failures are ad-hoc (no `Error` variant) and the popup status
+//! logic inspects their text.
 
 use crate::dbus::types::{ObjectNode, ServiceInfo};
 use crate::tui::state::{ActionResult, ListenTarget};
@@ -16,15 +22,15 @@ pub enum Msg {
     /// A crossterm mouse event (forwarded raw; hit-testing happens in `update`).
     Mouse(crossterm::event::MouseEvent),
 
-    ServicesLoaded(Result<Vec<ServiceInfo>, String>),
-    ObjectsLoaded(Result<ObjectNode, String>),
+    ServicesLoaded(Result<Vec<ServiceInfo>, crate::error::Error>),
+    ObjectsLoaded(Result<ObjectNode, crate::error::Error>),
     /// (service, object, the introspection node)
-    InterfacesLoaded(String, String, Result<Node<'static>, String>),
+    InterfacesLoaded(String, String, Result<Node<'static>, crate::error::Error>),
     /// Properties refresh result (fetched via GetAll).
-    PropertiesLoaded(Result<Vec<(String, OwnedValue)>, String>),
+    PropertiesLoaded(Result<Vec<(String, OwnedValue)>, crate::error::Error>),
     /// An action completed — a one-shot (call/get/set) result, or a
     /// listen-arming failure (connect error, BecomeMonitor refused, bad match rule).
-    ActionResult(Result<ActionResult, String>),
+    ActionResult(Result<ActionResult, crate::error::Error>),
     /// A streaming listen armed its loop; carry the cancel sender so the Result
     /// screen stores it (Esc dropping the screen drops the sender → stop).
     ListenStarted(futures::channel::oneshot::Sender<()>),

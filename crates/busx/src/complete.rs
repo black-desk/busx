@@ -20,7 +20,17 @@
 //!   (`--user`/`--system`/`--address`).
 //!
 //! Everything here is best-effort: a bus error yields no candidates (and the
-//! command never fails), and introspection is uncached (re-issued each TAB).
+//! command never fails), and introspection is **deliberately uncached**
+//! (re-issued each TAB). The shell invokes each `ArgValueCompleter` closure as
+//! a fresh, stateless subprocess on every TAB, so any cache would live in a
+//! process that exits between keystrokes. To persist it you'd need an external
+//! cache (file/daemon) plus a TTL/invalidation policy — and then the
+//! per-invocation closures, which are intentionally trivial (read args,
+//! introspect, filter), would each have to reason about cache freshness,
+//! keying, and staleness. Stale candidates (a service that just quit, an object
+//! path added since) are worse than a fresh introspect, and the bus is the
+//! local `dbus-daemon`, so the round-trip is cheap. Simpler + correct to
+//! introspect every time.
 
 use std::ffi::OsStr;
 
@@ -173,6 +183,9 @@ struct ParsedArgs {
 /// from the subcommand + its positionals. Flags after the subcommand (e.g.
 /// `monitor --interface X`) are skipped so they don't masquerade as positionals.
 fn parse_args() -> ParsedArgs {
+    // Built once from the real Cli; a flag whose action takes a value eats the
+    // following token so it isn't mis-collected as a positional.
+    let value_flags = value_taking_flags();
     let mut user = false;
     let mut system = false;
     let mut address: Option<String> = None;
@@ -231,7 +244,7 @@ fn parse_args() -> ParsedArgs {
                     .split_once('=')
                     .map(|(f, v)| (f, Some(v)))
                     .unwrap_or((rest, None));
-                let consume_next = inline_value.is_none() && takes_value(flag);
+                let consume_next = inline_value.is_none() && value_flags.contains(flag);
                 match flag {
                     "address" => {
                         address = inline_value
@@ -269,19 +282,31 @@ fn parse_args() -> ParsedArgs {
     }
 }
 
-/// Whether a long flag (without the `--`) consumes a separate value token.
-fn takes_value(name: &str) -> bool {
-    matches!(
-        name,
-        "address"
-            | "interface"
-            | "member"
-            | "path"
-            | "sender"
-            | "match"
-            | "limit-messages"
-            | "timeout"
-    )
+/// The set of long-flag names (without `--`) whose clap action consumes a
+/// separate value, collected by walking the real [`crate::cli::Cli::command`].
+/// This is the single source of truth for "does this flag eat the next token?"
+/// during completion parsing — driven off the same definitions clap parses, so a
+/// newly added value-taking flag is picked up automatically with no hand-kept
+/// list to fall out of sync. Only `Set`/`Append` actions count; `SetTrue`
+/// (bool flags), `Count` (`-v`), `Help`, and `Version` take no value.
+fn value_taking_flags() -> std::collections::HashSet<String> {
+    fn walk(out: &mut std::collections::HashSet<String>, cmd: &clap::Command) {
+        for arg in cmd.get_arguments() {
+            if matches!(
+                arg.get_action(),
+                clap::ArgAction::Set | clap::ArgAction::Append
+            ) && let Some(long) = arg.get_long()
+            {
+                out.insert(long.to_string());
+            }
+        }
+        for sub in cmd.get_subcommands() {
+            walk(out, sub);
+        }
+    }
+    let mut out = std::collections::HashSet::new();
+    walk(&mut out, &crate::cli::Cli::command());
+    out
 }
 
 /// Dispatch to the introspection helper for `kind` using the filled positionals.

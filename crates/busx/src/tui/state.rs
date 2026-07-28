@@ -110,7 +110,7 @@ pub struct ServiceScreen {
     pub services: Vec<ServiceInfo>,
     pub selected: usize,
     pub loading: bool,
-    pub error: Option<String>,
+    pub error: Option<crate::error::Error>,
 }
 
 /// The object paths of one service, shown as a flat list (d-feet style): each
@@ -121,7 +121,7 @@ pub struct ObjectsScreen {
     pub paths: Vec<String>,
     pub selected: usize,
     pub loading: bool,
-    pub error: Option<String>,
+    pub error: Option<crate::error::Error>,
 }
 
 /// The non-standard interfaces of one object. The service/object live in
@@ -133,7 +133,7 @@ pub struct InterfacesScreen {
     pub node: Option<zbus_xml::Node<'static>>,
     pub selected: usize,
     pub loading: bool,
-    pub error: Option<String>,
+    pub error: Option<crate::error::Error>,
 }
 
 /// One method: `name` + concatenated IN-signature (display) + per-IN-arg
@@ -166,7 +166,7 @@ pub struct InterfaceScreen {
     pub button_selected: usize,
     pub selected: [usize; 3],
     pub loading: bool,
-    pub error: Option<String>,
+    pub error: Option<crate::error::Error>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -190,7 +190,7 @@ pub struct DetailScreen {
     pub field_selected: usize,
     pub focus: DetailFocus,
     pub loading: bool,
-    pub error: Option<String>,
+    pub error: Option<crate::error::Error>,
 }
 
 #[derive(Clone, Debug)]
@@ -221,7 +221,7 @@ pub enum DetailFocus {
 pub struct ResultScreen {
     pub title: String,
     pub result: Option<ActionResult>,
-    pub error: Option<String>,
+    pub error: Option<crate::error::Error>,
     pub loading: bool,
     pub scroll: usize,
     /// Horizontal scroll offset (in chars) for a long single line that

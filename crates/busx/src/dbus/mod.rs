@@ -4,7 +4,7 @@
 
 //! Shared async D-Bus core. All concrete D-Bus operations live here as
 //! `async fn`s returning typed data (no printing). Both the CLI (`ops/`) and the
-//! the TUI consume this module.
+//! TUI consume this module.
 
 pub mod call;
 pub mod conn;

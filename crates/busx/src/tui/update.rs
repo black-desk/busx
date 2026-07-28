@@ -1079,7 +1079,7 @@ fn update_detail_key(d: &mut DetailScreen, k: KeyEvent) -> Option<Effect> {
     None
 }
 
-fn load_services(s: &mut ServiceScreen, res: Result<Vec<ServiceInfo>, String>) {
+fn load_services(s: &mut ServiceScreen, res: Result<Vec<ServiceInfo>, crate::error::Error>) {
     s.loading = false;
     match res {
         Ok(services) => {
@@ -1092,7 +1092,7 @@ fn load_services(s: &mut ServiceScreen, res: Result<Vec<ServiceInfo>, String>) {
 
 /// Populate the top Objects screen with the flattened path list; auto-skip if
 /// the service's only object is the root "/" (drill straight into its interfaces).
-fn load_objects(state: &mut State, res: Result<ObjectNode, String>) -> Option<Effect> {
+fn load_objects(state: &mut State, res: Result<ObjectNode, crate::error::Error>) -> Option<Effect> {
     let mut drill = None;
     if let Screen::Objects(o) = state.top_mut() {
         o.loading = false;
@@ -1124,7 +1124,7 @@ fn load_interfaces(
     state: &mut State,
     service: String,
     object: String,
-    res: Result<Node<'static>, String>,
+    res: Result<Node<'static>, crate::error::Error>,
 ) -> Option<Effect> {
     let mut drill = None;
     // Read the config before borrowing `state` mutably for the screen.
@@ -1169,7 +1169,7 @@ fn load_interfaces(
 /// Populate the top Interface screen's property-value snapshot from a GetAll result.
 fn load_properties(
     state: &mut State,
-    res: Result<Vec<(String, OwnedValue)>, String>,
+    res: Result<Vec<(String, OwnedValue)>, crate::error::Error>,
 ) -> Option<Effect> {
     if let Screen::Interface(i) = state.top_mut() {
         i.loading = false;

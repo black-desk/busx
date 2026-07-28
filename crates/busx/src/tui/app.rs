@@ -192,25 +192,21 @@ fn run_effect(
         Effect::FetchServices => {
             async_global_executor::spawn(async move {
                 let res = dbus::list::list_names(&conn, false, false).await;
-                let _ = tx.send(Msg::ServicesLoaded(res.map_err(|e| e.to_string())));
+                let _ = tx.send(Msg::ServicesLoaded(res));
             })
             .detach();
         }
         Effect::FetchObjects(service) => {
             async_global_executor::spawn(async move {
                 let res = dbus::tree::object_tree(&conn, &service).await;
-                let _ = tx.send(Msg::ObjectsLoaded(res.map_err(|e| e.to_string())));
+                let _ = tx.send(Msg::ObjectsLoaded(res));
             })
             .detach();
         }
         Effect::FetchInterfaces(service, object) => {
             async_global_executor::spawn(async move {
                 let res = dbus::introspect::introspect(&conn, &service, &object).await;
-                let _ = tx.send(Msg::InterfacesLoaded(
-                    service,
-                    object,
-                    res.map_err(|e| e.to_string()),
-                ));
+                let _ = tx.send(Msg::InterfacesLoaded(service, object, res));
             })
             .detach();
         }
@@ -226,7 +222,7 @@ fn run_effect(
                         dbus::property::get_all_by_one(&conn, &service, &object, &iface).await
                     }
                 };
-                let _ = tx.send(Msg::PropertiesLoaded(res.map_err(|e| e.to_string())));
+                let _ = tx.send(Msg::PropertiesLoaded(res));
             })
             .detach();
         }
@@ -244,8 +240,7 @@ fn run_effect(
                 )
                 .await;
                 let _ = tx.send(Msg::ActionResult(
-                    res.map(|vs| ActionResult::Call(vs.iter().map(pretty).collect()))
-                        .map_err(|e| e.to_string()),
+                    res.map(|vs| ActionResult::Call(vs.iter().map(pretty).collect())),
                 ));
             })
             .detach();
@@ -260,8 +255,7 @@ fn run_effect(
                 let res =
                     dbus::property::get_one(&conn, &service, &object, &iface, &property).await;
                 let _ = tx.send(Msg::ActionResult(
-                    res.map(|v| ActionResult::Get(pretty(&v)))
-                        .map_err(|e| e.to_string()),
+                    res.map(|v| ActionResult::Get(pretty(&v))),
                 ));
             })
             .detach();
@@ -285,9 +279,7 @@ fn run_effect(
                     &[value],
                 )
                 .await;
-                let _ = tx.send(Msg::ActionResult(
-                    res.map(|_| ActionResult::Set).map_err(|e| e.to_string()),
-                ));
+                let _ = tx.send(Msg::ActionResult(res.map(|_| ActionResult::Set)));
             })
             .detach();
         }
@@ -314,29 +306,29 @@ fn run_effect(
                     let dedicated =
                         match dbus::conn::connect(user, system, address_owned.as_deref()).await {
                             Ok(c) => c,
-                            Err(e) => {
-                                let _ = tx.send(Msg::ActionResult(Err(format!(
-                                    "listen: connect failed: {e}"
-                                ))));
-                                return;
-                            }
-                        };
-                    let rule = match crate::tui::update::listen_rule(&iface, &object, &target) {
-                        Ok(r) => r,
-                        Err(e) => {
-                            let _ = tx.send(Msg::ActionResult(Err(e.to_string())));
-                            return;
-                        }
-                    };
-                    if let Err(e) =
-                        crate::dbus::monitor::become_monitor(&dedicated, Some(&rule)).await
-                    {
-                        // Privileged op — some buses refuse it.
-                        let _ = tx.send(Msg::ActionResult(Err(format!(
-                            "BecomeMonitor refused: {e}"
-                        ))));
-                        return;
-                    }
+                           Err(e) => {
+                                let _ = tx.send(Msg::ActionResult(Err(
+                                    crate::error::Error::context("listen: connect failed", e),
+                                )));
+                               return;
+                           }
+                       };
+                   let rule = match crate::tui::update::listen_rule(&iface, &object, &target) {
+                       Ok(r) => r,
+                       Err(e) => {
+                            let _ = tx.send(Msg::ActionResult(Err(e)));
+                           return;
+                       }
+                   };
+                   if let Err(e) =
+                       crate::dbus::monitor::become_monitor(&dedicated, Some(&rule)).await
+                   {
+                       // Privileged op — some buses refuse it.
+                        let _ = tx.send(Msg::ActionResult(Err(
+                            crate::error::Error::context("BecomeMonitor refused", e),
+                        )));
+                       return;
+                   }
                     // The BecomeMonitor rule filters at the bus, so this stream
                     // yields only matching method_call messages — no client-side
                     // filtering or serial tracking needed.
@@ -379,20 +371,21 @@ fn run_effect(
 
                 // Signal / Property listen: subscribe via the match rule on the
                 // main connection; PropertiesChanged is filtered client-side.
-                let rule = match crate::tui::update::listen_rule(&iface, &object, &target) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        let _ = tx.send(Msg::ActionResult(Err(e.to_string())));
-                        return;
-                    }
-                };
-                let stream = match zbus::MessageStream::for_match_rule(rule, &conn, None).await {
-                    Ok(s) => s.fuse(),
-                    Err(e) => {
-                        let _ = tx.send(Msg::ActionResult(Err(e.to_string())));
-                        return;
-                    }
-                };
+               let rule = match crate::tui::update::listen_rule(&iface, &object, &target) {
+                   Ok(r) => r,
+                   Err(e) => {
+                        let _ = tx.send(Msg::ActionResult(Err(e)));
+                       return;
+                   }
+               };
+               let stream = match zbus::MessageStream::for_match_rule(rule, &conn, None).await {
+                   Ok(s) => s.fuse(),
+                   Err(e) => {
+                        // `for_match_rule` returns zbus::Error; widen to our Error.
+                        let _ = tx.send(Msg::ActionResult(Err(crate::error::Error::from(e))));
+                       return;
+                   }
+               };
                 let mut stream = stream;
                 loop {
                     futures::select! {
