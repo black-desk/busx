@@ -61,21 +61,6 @@ argument order or meaning from the help.
 
 ## Testing
 
-### `enter_sends_carriage_return` does not actually assert the CR byte
-
-The tuiprobe smoke test is named as if it verifies Enter is encoded as `\r`, but
-its only assertion is `wait_for(|s| s.contains("abc"))` — that matches `cat`'s
-echo of the typed text and would pass whether Enter sent `\r`, `\n`, or nothing
-at all. The CR encoding is correct (the code does send `\r`), so the test name
-is misleading rather than the code; but a regression to the encoding would not
-be caught.
-
-- Reproduced by: `crates/tuiprobe/tests/smoke.rs`
-  (`enter_sends_carriage_return`).
-- Fix direction: assert the actual emitted bytes (e.g. drive a probe that echoes
-  raw bytes, or assert the screen reflects a CR-only line break), not just the
-  echoed text.
-
 ### tuiprobe README API table is incomplete
 
 The API table in `crates/tuiprobe/README.md` lists `screen_contents()` /
