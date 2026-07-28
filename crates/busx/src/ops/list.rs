@@ -11,6 +11,14 @@ use crate::error::Result;
 use serde_json::{Value as Json, json};
 
 /// Truncate `s` to `cap` display columns, appending `…` when longer.
+///
+/// Counts characters, not display width. That is correct here because the only
+/// non-trivially wide column is NAME, and D-Bus bus names are pure ASCII by
+/// spec (a name is dot-separated elements of `[A-Za-z0-9_-]`, with unique
+/// names like `:1.0` — see the D-Bus spec "Bus names" section), so one char is
+/// always one column. PROCESS (`/proc/<pid>/comm`) is bounded to 15 bytes and
+/// likewise ASCII in practice; PID is a number. So a `unicode-width`-aware
+/// count would add a dependency for no behavioural difference here.
 fn cap_cell(s: &str, cap: usize) -> String {
     if s.chars().count() <= cap {
         s.to_string()
