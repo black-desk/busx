@@ -44,21 +44,6 @@ transition is never dropped — but the TUI path does not use it.
   `crates/busx/src/dbus/monitor.rs` (`is_monitor_ready_signal` /
   `is_become_monitor_noise` — the latter's doc already warns about the gate).
 
-## CLI
-
-### Subcommand positionals and most `monitor` flags have no help text
-
-Every subcommand's positional arguments (`SERVICE`, `OBJECT`, `INTERFACE`,
-`METHOD`, `SIGNATURE`, `ARGS`, `PROPERTY`, `VALUE`, `MEMBER`) show a blank
-description in `<subcommand> --help`. On `monitor`, `[SERVICES]`, `--interface`,
-`--member`, `--path`, `--sender`, `--match`, `--limit-messages`, and `--timeout`
-are also blank (only `--type` carries a description). A new user cannot infer
-argument order or meaning from the help.
-
-- Reproduced by: `busx <subcommand> --help` for every subcommand.
-- Suspected location: `crates/busx/src/cli.rs` (missing `help = "..."` /
-  `long_help = "..."` on the `#[arg(...)]` fields).
-
 ## Testing
 
 ### `enter_sends_carriage_return` does not actually assert the CR byte
