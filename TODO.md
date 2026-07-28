@@ -12,23 +12,6 @@ confuse users. These were observed via the existing end-to-end tests and manual
 originally listed here turned out to be a snapshot-filter regex bug, not a real
 rendering defect, and has been fixed.)
 
-## TUI
-
-### Listen leaves the Result screen empty while armed
-
-After arming a listen, the Result screen body is completely blank until the
-first matching message arrives. `render_result` builds its body lines from
-`r.messages` (or `r.result`); when the listen is armed but no message has
-streamed yet, both are empty and nothing is drawn. There is no "listening…"
-placeholder, so the screen reads as frozen / unresponsive.
-
-- Reproduced by: `tui_pty__result_listen_method_80x20.snap` and
-  `tui_pty__result_listen_property_80x20.snap`.
-- Contrast: the CLI `monitor` command prints a `busx: monitoring` line the
-  moment it goes live; the TUI has no equivalent affordance.
-- Suspected location: `crates/busx/src/tui/render.rs` (`render_result`, the
-  `r.messages.is_empty()` / `r.loading` branches).
-
 ## Testing
 
 ### tuiprobe README API table is incomplete

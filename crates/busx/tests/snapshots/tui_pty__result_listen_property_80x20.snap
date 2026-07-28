@@ -4,7 +4,7 @@ expression: screen.as_str()
 ---
 org.busx.Test > /org/busx/Test > org.busx.Test > Result
 ┌listen org.busx.Test.volume───────────────────────────────────────────────────┐
-│                                                                              │
+│listening…                                                                    │
 │                                                                              │
 │                                                                              │
 │                                                                              │
