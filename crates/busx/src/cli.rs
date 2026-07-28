@@ -97,47 +97,95 @@ pub enum Command {
     },
     /// Dump the raw Introspect() XML for an object, verbatim.
     Introspect {
-        #[arg(add = ArgValueCompleter::new(complete::complete_service))]
+        #[arg(
+            add = ArgValueCompleter::new(complete::complete_service),
+            help = "Service name (e.g. org.freedesktop.DBus)"
+        )]
         service: String,
-        #[arg(add = ArgValueCompleter::new(complete::complete_path))]
+        #[arg(
+            add = ArgValueCompleter::new(complete::complete_path),
+            help = "Object path (e.g. /org/freedesktop/DBus)"
+        )]
         object: String,
     },
     /// Call a method.
     Call {
-        #[arg(add = ArgValueCompleter::new(complete::complete_service))]
+        #[arg(
+            add = ArgValueCompleter::new(complete::complete_service),
+            help = "Service name (e.g. org.freedesktop.DBus)"
+        )]
         service: String,
-        #[arg(add = ArgValueCompleter::new(complete::complete_path))]
+        #[arg(
+            add = ArgValueCompleter::new(complete::complete_path),
+            help = "Object path (e.g. /org/freedesktop/DBus)"
+        )]
         object: String,
-        #[arg(add = ArgValueCompleter::new(complete::complete_interface))]
+        #[arg(
+            add = ArgValueCompleter::new(complete::complete_interface),
+            help = "Interface name (e.g. org.freedesktop.DBus.Debug)"
+        )]
         interface: String,
-        #[arg(add = ArgValueCompleter::new(complete::complete_method))]
+        #[arg(
+            add = ArgValueCompleter::new(complete::complete_method),
+            help = "Method name"
+        )]
         method: String,
-        #[arg(add = ArgValueCompleter::new(complete::complete_signature))]
+        #[arg(
+            add = ArgValueCompleter::new(complete::complete_signature),
+            help = "busctl-style type signature of the args (e.g. ss, a{sv})"
+        )]
         signature: String,
+        #[arg(help = "Argument values, one per signature type")]
         args: Vec<String>,
     },
     /// Get properties (no property names => GetAll).
     Get {
-        #[arg(add = ArgValueCompleter::new(complete::complete_service))]
+        #[arg(
+            add = ArgValueCompleter::new(complete::complete_service),
+            help = "Service name (e.g. org.freedesktop.DBus)"
+        )]
         service: String,
-        #[arg(add = ArgValueCompleter::new(complete::complete_path))]
+        #[arg(
+            add = ArgValueCompleter::new(complete::complete_path),
+            help = "Object path (e.g. /org/freedesktop/DBus)"
+        )]
         object: String,
-        #[arg(add = ArgValueCompleter::new(complete::complete_interface))]
+        #[arg(
+            add = ArgValueCompleter::new(complete::complete_interface),
+            help = "Interface name (defaults to the object's standard interface)"
+        )]
         interface: Option<String>,
-        #[arg(add = ArgValueCompleter::new(complete::complete_property))]
+        #[arg(
+            add = ArgValueCompleter::new(complete::complete_property),
+            help = "Property name(s) (none => GetAll)"
+        )]
         props: Vec<String>,
     },
     /// Set a property.
     Set {
-        #[arg(add = ArgValueCompleter::new(complete::complete_service))]
+        #[arg(
+            add = ArgValueCompleter::new(complete::complete_service),
+            help = "Service name (e.g. org.freedesktop.DBus)"
+        )]
         service: String,
-        #[arg(add = ArgValueCompleter::new(complete::complete_path))]
+        #[arg(
+            add = ArgValueCompleter::new(complete::complete_path),
+            help = "Object path (e.g. /org/freedesktop/DBus)"
+        )]
         object: String,
-        #[arg(add = ArgValueCompleter::new(complete::complete_interface))]
+        #[arg(
+            add = ArgValueCompleter::new(complete::complete_interface),
+            help = "Interface name (e.g. org.freedesktop.DBus.Debug)"
+        )]
         interface: String,
-        #[arg(add = ArgValueCompleter::new(complete::complete_property))]
+        #[arg(
+            add = ArgValueCompleter::new(complete::complete_property),
+            help = "Property name"
+        )]
         property: String,
+        #[arg(help = "busctl-style type signature of the value (e.g. s, i, a{sv})")]
         signature: String,
+        #[arg(help = "New value(s), one per signature type")]
         value: Vec<String>,
     },
     /// Monitor bus messages.
@@ -158,31 +206,41 @@ pub enum Command {
     /// in human mode a `busx: monitoring` line. Filter it out to keep
     /// only messages (`jq 'select(.type)'` / `grep -v '^busx: monitoring'`).
     Monitor {
-        #[arg(add = ArgValueCompleter::new(complete::complete_service))]
+        #[arg(
+            add = ArgValueCompleter::new(complete::complete_service),
+            help = "Only capture messages from these service(s)"
+        )]
         services: Vec<String>,
-        #[arg(long)]
+        #[arg(long, help = "Only messages whose interface matches")]
         interface: Option<String>,
-        #[arg(long)]
+        #[arg(long, help = "Only messages whose member (method/signal) matches")]
         member: Option<String>,
-        #[arg(long)]
+        #[arg(long, help = "Only messages whose object path matches")]
         path: Option<String>,
-        #[arg(long)]
+        #[arg(long, help = "Only messages from this sender")]
         sender: Option<String>,
-        #[arg(long, value_name = "MATCH")]
+        #[arg(
+            long,
+            value_name = "MATCH",
+            help = "Raw D-Bus match rule (overrides the filters above)"
+        )]
         r#match: Option<String>,
         /// Message type to capture. `signal` uses an unprivileged signal
         /// subscription; any other type (or omitting `--type`) uses
         /// BecomeMonitor so method calls/returns/errors are visible too.
         #[arg(long, value_name = "TYPE")]
         r#type: Option<MonitorType>,
-        #[arg(long, value_name = "N")]
+        #[arg(long, value_name = "N", help = "Exit after capturing N messages")]
         limit_messages: Option<u64>,
-        #[arg(long, value_name = "DUR")]
+        #[arg(long, value_name = "DUR", help = "Exit after DUR has elapsed")]
         timeout: Option<String>,
     },
     /// Recursively list an object-path tree of a service.
     Tree {
-        #[arg(add = ArgValueCompleter::new(complete::complete_service))]
+        #[arg(
+            add = ArgValueCompleter::new(complete::complete_service),
+            help = "Service name (e.g. org.freedesktop.DBus)"
+        )]
         service: String,
     },
     /// Emit a D-Bus signal (for testing listeners on a private bus).
@@ -190,10 +248,15 @@ pub enum Command {
         /// Send to DEST (unicast) instead of broadcasting to all listeners.
         #[arg(long, value_name = "DEST")]
         destination: Option<String>,
+        #[arg(help = "Object path (e.g. /org/freedesktop/DBus)")]
         object: String,
+        #[arg(help = "Interface name (e.g. org.freedesktop.DBus.Debug)")]
         interface: String,
+        #[arg(help = "Signal member name")]
         member: String,
+        #[arg(help = "busctl-style type signature of the args (e.g. ss, a{sv})")]
         signature: String,
+        #[arg(help = "Argument values, one per signature type")]
         args: Vec<String>,
     },
     /// Generate shell completion script.
