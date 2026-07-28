@@ -66,37 +66,6 @@ pub async fn become_monitor(conn: &zbus::Connection, rule: Option<&MatchRule<'_>
     Ok(())
 }
 
-/// Is `m` the `NameLost(own_name)` signal the daemon sends to confirm that
-/// BecomeMonitor has taken effect? `busctl monitor` waits for exactly this
-/// signal before it starts displaying messages — anything earlier is
-/// BecomeMonitor lifecycle noise (NameAcquired, the implicit name release the
-/// daemon does as part of the transition, etc.).
-///
-/// Best-effort: on parse failure, return `false`. Note this is a *gate* (the
-/// caller suppresses everything until it returns `true` once), so the real
-/// risk is the opposite of a content filter — if the confirming `NameLost`
-/// ever fails to parse, the gate never opens and no messages are shown. The
-/// content filter `is_become_monitor_noise` is the safer path for real traffic.
-pub fn is_monitor_ready_signal(m: &zbus::Message, own_name: &str) -> bool {
-    use zbus::message::Type;
-    if m.header().message_type() != Type::Signal {
-        return false;
-    }
-    let h = m.header();
-    let iface_matches = h.interface().is_some_and(|i| i == "org.freedesktop.DBus");
-    let member_matches = h.member().is_some_and(|memb| memb == "NameLost");
-    let path_matches = h
-        .path()
-        .is_some_and(|p| p.as_str() == "/org/freedesktop/DBus");
-    if !iface_matches || !member_matches || !path_matches {
-        return false;
-    }
-    let Ok((name,)) = m.body().deserialize::<(String,)>() else {
-        return false;
-    };
-    name == own_name
-}
-
 /// Is `m` BecomeMonitor transition noise for `own_name`? This covers two kinds
 /// of bus plumbing the user did not ask to see:
 ///
