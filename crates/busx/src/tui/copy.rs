@@ -699,8 +699,13 @@ fn dbus_send_value(ty: &str, tok: &mut Tok<'_>) -> Rendered {
             drain_struct(tok, t);
             Rendered::unsupported(t.to_string())
         }
-        // Unknown type — best-effort, treat as a single token.
-        _ => Rendered::ok(tok.next().into()),
+        // signature (`g`): dbus-send's BNF `<type>` set has no signature, so it
+        // can't express it (rendered greyed out rather than as a bare value
+        // dbus-send would misparse).
+        "g" => Rendered::unsupported("g".to_string()),
+        // Unknown type — can't know its token layout, so never consume a token;
+        // grey it out so the whole command is withheld rather than misaligned.
+        _ => Rendered::unsupported(ty.to_string()),
     }
 }
 
@@ -947,45 +952,51 @@ fn gdbus_value(ty: &str, tok: &mut Tok<'_>) -> Rendered {
 
 // --- helpers ---------------------------------------------------------------
 
-/// Shell-quote a token if it needs it (whitespace or special chars), wrapping
-/// in `"..."` and escaping `\` and `"`. Tokens that need no quoting pass
-/// through unchanged.
+/// Shell-quote `s` so it survives re-parsing by any POSIX shell. Picks the
+/// quoting form that is both safe *and* readable for the value's contents:
+///
+/// 1. **Bare** if every char is in the safe set (letters, digits, `_.:/=+%@,-`).
+/// 2. **Double quotes** if it needs quoting but contains no char that keeps
+///    meaning inside double quotes. That set is `$`, backtick, `\`, `"`, and
+///    `!` (interactive-bash history expansion). Without those a double-quoted
+///    string is clean and correct -- e.g. a match rule full of single quotes
+///    reads far better as `"type='signal',..."` than the single-quote form.
+/// 3. **Single quotes** otherwise: the only quoting form that neutralizes
+///    `$`/backticks/`\`/`!`. The one char banned inside single quotes (`'`) is
+///    escaped by closing the quote, emitting a bare escaped `'`, and reopening.
+///
+/// The earlier implementation used only double quotes and escaped just `"` and
+/// `\`, leaving `$` and backticks live -- so `foo$bar` became `"foo$bar"`,
+/// which a shell still expands. The positive safe-set also can't be blindsided
+/// by a metacharacter nobody remembered to denylist.
 fn quote(s: &str) -> String {
-    let needs = s.is_empty()
-        || s.chars().any(|c| {
-            c.is_whitespace()
-                || matches!(
-                    c,
-                    '"' | '\\'
-                        | '\''
-                        | '$'
-                        | '`'
-                        | '<'
-                        | '>'
-                        | '&'
-                        | ';'
-                        | '|'
-                        | '*'
-                        | '?'
-                        | '('
-                        | ')'
-                )
-        });
-    if !needs {
+    fn is_safe(c: char) -> bool {
+        c.is_ascii_alphanumeric()
+            || matches!(c, '_' | '.' | '/' | ':' | '=' | '+' | '%' | '@' | ',' | '-')
+    }
+    if !s.is_empty() && s.chars().all(is_safe) {
         return s.into();
     }
+    // Prefer double quotes when they are safe: no `$`/backtick/`\`/`"`/`!`.
+    if !s.chars().any(|c| matches!(c, '$' | '`' | '\\' | '"' | '!')) {
+        let mut out = String::with_capacity(s.len() + 2);
+        out.push('"');
+        out.push_str(s);
+        out.push('"');
+        return out;
+    }
     let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
+    out.push('\'');
     for c in s.chars() {
-        match c {
-            '"' | '\\' => {
-                out.push('\\');
-                out.push(c);
-            }
-            _ => out.push(c),
+        // `'` can't appear inside a single-quoted region: close it, emit the
+        // literal escaped as `'\''`, and reopen.
+        if c == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(c);
         }
     }
-    out.push('"');
+    out.push('\'');
     out
 }
 
