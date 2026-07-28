@@ -742,6 +742,61 @@ fn copy_as_get_dbus_send() {
 }
 
 #[test]
+fn copy_as_call_busx_dollar_sign() {
+    // Regression for shell quoting: an arg containing `$` must be single-quoted
+    // — double quotes would let the shell expand `$foo` on paste. Join
+    // (signature `as`) lays out `count elem ...`; typing `1 $foo` yields count=1
+    // with one element `$foo`. We copy the busx command (row 4) and assert the
+    // clipboard text directly — no wait-snapshot needed since we poll the
+    // clipboard mock log.
+    let _g = pty_filter().bind_to_scope();
+    let bus = testbus::bus_owned();
+    let (mut probe, clip) = spawn_busx_with_clip(&bus.address, 100, 28);
+
+    drill_to_interface(&mut probe, "100x28");
+    wait_for_snapshot!(&mut probe, "interface_loaded_100x28").unwrap();
+
+    // Join (method 1), enter button bar, fire Call (as) -> Detail.
+    probe.send_key(KeyCode::Down).unwrap(); // TakeHints -> Join
+    probe.send_key(KeyCode::Enter).unwrap(); // enter button bar
+    probe.send_key(KeyCode::Enter).unwrap(); // fire Call -> Detail
+
+    // Type the array: count=1, one element `$foo`.
+    probe.send_text("1 $foo").unwrap();
+
+    // Open copy-as popup, navigate to busx (row 4), copy.
+    probe.send_key(KeyCode::Char('c')).unwrap();
+    for _ in 0..4 {
+        probe.send_key(KeyCode::Down).unwrap();
+    }
+    probe.send_key(KeyCode::Enter).unwrap();
+
+    // Poll the clipboard mock log until the copy lands, then assert. The
+    // element must read '$foo' (single-quoted); the buggy double-quote form
+    // "$foo" must NOT appear (a shell would expand `$foo` inside it).
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let mut cmd = String::new();
+    while std::time::Instant::now() < deadline {
+        cmd = clip.contents();
+        if !cmd.is_empty() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!cmd.is_empty(), "clipboard copy never landed");
+    assert!(
+        cmd.contains("'$foo'"),
+        "shell metachar `$` must be single-quoted, got: {cmd}"
+    );
+    assert!(
+        !cmd.contains("\"$foo\""),
+        "double-quote form would expand `$foo` in a shell, got: {cmd}"
+    );
+
+    probe.send_key(KeyCode::Char('q')).unwrap();
+}
+
+#[test]
 fn copy_as_set_dbus_send() {
     // Set volume = 1.5 (signature d) — copy from the Detail form (before
     // firing). Tests that copy-as reflects the typed value.
