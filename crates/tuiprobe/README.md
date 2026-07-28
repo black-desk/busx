@@ -60,6 +60,27 @@ full terminal emulator so you get clean text back.
 
 ## API overview
 
+### Construction
+
+| Method                      | Description                                   |
+| --------------------------- | --------------------------------------------- |
+| `TuiProbe::new(cols, rows)` | Fixed size, default timeout and poll interval |
+| `TuiProbe::builder()`       | Configurable size, timeout, and poll interval |
+
+The builder chains `.cols(u16)`, `.rows(u16)`, `.timeout(Duration)`, and
+`.poll_interval(Duration)`, then `.build()`:
+
+```rust
+use std::time::Duration;
+
+let mut probe = TuiProbe::builder()
+    .cols(80)
+    .rows(24)
+    .timeout(Duration::from_secs(5))
+    .poll_interval(Duration::from_millis(20))
+    .build()?;
+```
+
 ### Input
 
 | Method                                    | Description                                  |
@@ -72,17 +93,20 @@ full terminal emulator so you get clean text back.
 
 ### Waiting (Cypress-style)
 
-| Method                                      | Description                                   |
-| ------------------------------------------- | --------------------------------------------- |
-| `wait_for(\|screen\| screen.contains("x"))` | Custom condition, polls until true or timeout |
-| `wait_for_with_timeout(cond, 2s)`           | Same, with a custom timeout                   |
+| Method                                       | Description                                   |
+| -------------------------------------------- | --------------------------------------------- |
+| `wait_for(\|screen\| screen.contains("x"))`  | Custom condition, polls until true or timeout |
+| `wait_for_with_timeout(cond, 2s)`            | Same, with a custom timeout                   |
+| `wait_for_rect(x, y, w, h, cond)`            | Poll a cropped sub-rectangle                  |
+| `wait_for_rect_with_timeout(x,y,w,h,cond,t)` | Cropped-rect wait, with a custom timeout      |
 
 ### Output
 
-| Method              | Description                             |
-| ------------------- | --------------------------------------- |
-| `screen_contents()` | Full visible screen as a trimmed string |
-| `contains("text")`  | Quick check for text presence           |
+| Method                             | Description                             |
+| ---------------------------------- | --------------------------------------- |
+| `screen_contents()`                | Full visible screen as a trimmed string |
+| `screen_contents_crop(x, y, w, h)` | Text within a sub-rectangle             |
+| `contains("text")`                 | Quick check for text presence           |
 
 ### Process control
 
