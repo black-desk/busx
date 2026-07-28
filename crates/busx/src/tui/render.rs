@@ -739,10 +739,11 @@ fn render_detail(
 }
 
 /// The outcome of an action. For a streaming listen, message blocks are drawn
-/// from `r.messages`; otherwise it's a one-shot result: Loading → "…" (the
-/// title carries the context); error → the message; `Call(lines)` → one reply
-/// value per line (offset by `scroll` — clamped); `Get`/`Set` render their
-/// payload too.
+/// from `r.messages`; a listen that is armed but has streamed no message yet
+/// shows "listening…" so the screen isn't blank. Otherwise it's a one-shot
+/// result: Loading → "…" (the title carries the context); error → the message;
+/// `Call(lines)` → one reply value per line (offset by `scroll` — clamped);
+/// `Get`/`Set` render their payload too.
 fn render_result(frame: &mut Frame, area: Rect, r: &ResultScreen) {
     // Result screens are read-only (scroll-only) — no click targets.
     let title = if r.loading {
@@ -764,6 +765,12 @@ fn render_result(frame: &mut Frame, area: Rect, r: &ResultScreen) {
             .skip(r.scroll)
             .flat_map(|m| m.split('\n').map(str::to_string))
             .collect()
+    } else if r.cancel.is_some() {
+        // A listen is armed but no matching message has streamed yet. Without
+        // this the body would be blank and read as frozen. The CLI prints a
+        // `busx: monitoring` line the moment it goes live; this is the TUI's
+        // equivalent affordance.
+        vec!["listening…".to_string()]
     } else if r.loading {
         vec!["…".to_string()]
     } else {
