@@ -342,34 +342,27 @@ fn run_effect(
                     // filtering or serial tracking needed.
                     //
                     // Exception: the daemon emits NameAcquired / NameLost
-                    // signals about this monitor connection's own unique
-                    // name as part of the BecomeMonitor lifecycle (the
-                    // connection's "primary name" changes from normal to
-                    // monitor). These are bus plumbing, not the application-
-                    // level traffic the user asked to listen for, and their
-                    // arrival timing / count is daemon-implementation-
-                    // dependent. `busctl monitor` handles this by waiting
-                    // for `NameLost(own_name)` before it starts displaying
-                    // messages; we do the same — discard everything until
-                    // that confirmation arrives, then forward normally.
+                    // signals for this connection's own unique name as monitor
+                    // mode takes effect — bus plumbing, not the traffic the
+                    // user asked to listen for. `is_become_monitor_noise`
+                    // suppresses just those by content and forwards everything
+                    // else immediately, mirroring the CLI `monitor` op. (An
+                    // earlier "discard everything until NameLost(own_name)"
+                    // gate could hang and drop real traffic when that
+                    // confirmation is late or never arrives.)
                     let own_name = dedicated
                         .unique_name()
                         .map(|n| n.to_string())
                         .unwrap_or_default();
-                    let mut monitor_ready = false;
                     let mut stream = zbus::MessageStream::from(&dedicated).fuse();
                     loop {
                         futures::select! {
                             msg = stream.next() => match msg {
                                 Some(Ok(m)) => {
-                                    if !monitor_ready {
-                                        // Mirror busctl: wait for the daemon's
-                                        // NameLost(own_name) that signals monitor
-                                        // mode is live. Anything before it is
-                                        // BecomeMonitor lifecycle noise.
-                                        if crate::dbus::monitor::is_monitor_ready_signal(&m, &own_name) {
-                                            monitor_ready = true;
-                                        }
+                                    // Suppress BecomeMonitor lifecycle noise for
+                                    // our own unique name; forward all real
+                                    // traffic immediately (see the comment above).
+                                    if crate::dbus::monitor::is_become_monitor_noise(&m, &own_name) {
                                         continue;
                                     }
                                     let _ = tx.send(Msg::ListenMessage(

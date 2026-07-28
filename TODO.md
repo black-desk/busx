@@ -29,21 +29,6 @@ placeholder, so the screen reads as frozen / unresponsive.
 - Suspected location: `crates/busx/src/tui/render.rs` (`render_result`, the
   `r.messages.is_empty()` / `r.loading` branches).
 
-### Method-listen ready-gate has no timeout / fallback
-
-When a listen uses BecomeMonitor, `app.rs` waits for the daemon's
-`NameLost(own_name)` signal (the one that confirms monitor mode is live) and
-discards every message via `continue` until it arrives (`monitor_ready`). If
-that confirming signal is delivered late or never (daemon- and rule-dependent),
-the gate stays shut: the listen appears armed but no message is ever shown, with
-no timeout, error, or fallback. The content filter `is_become_monitor_noise`
-(used on the CLI side) is the safer path — real traffic that races the
-transition is never dropped — but the TUI path does not use it.
-
-- Suspected location: `crates/busx/src/tui/app.rs` (the `monitor_ready` loop),
-  `crates/busx/src/dbus/monitor.rs` (`is_monitor_ready_signal` /
-  `is_become_monitor_noise` — the latter's doc already warns about the gate).
-
 ## Testing
 
 ### tuiprobe README API table is incomplete
