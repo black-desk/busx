@@ -97,40 +97,64 @@ pub fn is_monitor_ready_signal(m: &zbus::Message, own_name: &str) -> bool {
     name == own_name
 }
 
-/// Is `m` BecomeMonitor transition noise for `own_name` — the `NameAcquired` /
-/// `NameLost` signals the daemon emits about this connection's own unique name
-/// as monitor mode takes effect?
+/// Is `m` BecomeMonitor transition noise for `own_name`? This covers two kinds
+/// of bus plumbing the user did not ask to see:
+///
+/// 1. `NameAcquired` / `NameLost` signals the daemon emits about this
+///    connection's own unique name as monitor mode takes effect.
+/// 2. The `BecomeMonitor` method reply itself — a `method_return` / `error`
+///    from `org.freedesktop.DBus` addressed to our own unique name. The reply
+///    bypasses the monitor match rule (it is delivered directly to the
+///    connection, not as a forwarded copy), so without this check it leaks into
+///    the stream and can trip `--limit-messages`.
+///
+/// After BecomeMonitor the connection is recv-only, so the only reply it can
+/// receive is the BecomeMonitor confirmation — real traffic the monitor
+/// observes is addressed to *other* connections.
 ///
 /// Unlike a "discard everything until ready" gate, this is a content filter:
-/// it suppresses only these specific lifecycle signals, so real traffic that
+/// it suppresses only these specific lifecycle messages, so real traffic that
 /// races the transition is never dropped (the gate could hang or lose messages
 /// when the confirming `NameLost` is delivered late or not at all — which is
 /// daemon- and rule-dependent).
 pub fn is_become_monitor_noise(m: &zbus::Message, own_name: &str) -> bool {
     use zbus::message::Type;
-    if m.header().message_type() != Type::Signal {
-        return false;
-    }
     let h = m.header();
-    let is_dbus = h.interface().is_some_and(|i| i == "org.freedesktop.DBus")
-        && h.path()
-            .is_some_and(|p| p.as_str() == "/org/freedesktop/DBus");
-    if !is_dbus {
-        return false;
+    match h.message_type() {
+        // NameAcquired / NameLost lifecycle signals for our own unique name.
+        Type::Signal => {
+            let is_dbus = h.interface().is_some_and(|i| i == "org.freedesktop.DBus")
+                && h.path()
+                    .is_some_and(|p| p.as_str() == "/org/freedesktop/DBus");
+            if !is_dbus {
+                return false;
+            }
+            let Some(member) = h.member() else {
+                return false;
+            };
+            if !matches!(member.as_str(), "NameAcquired" | "NameLost") {
+                return false;
+            }
+            // NameAcquired / NameLost carry the affected name as their sole
+            // string arg. Suppress only the transition noise for our own
+            // unique name; real NameAcquired / NameLost from other services
+            // still passes through.
+            let Ok((name,)) = m.body().deserialize::<(String,)>() else {
+                return false;
+            };
+            name == own_name
+        }
+        // The BecomeMonitor reply: a method_return / error from the bus daemon
+        // addressed to our own unique name. It bypasses the monitor match rule
+        // (delivered directly, not as a forwarded copy) so it must be filtered
+        // here. After BecomeMonitor the connection is recv-only — this is the
+        // only reply it will ever receive.
+        Type::MethodReturn | Type::Error => {
+            h.sender().is_some_and(|s| s == "org.freedesktop.DBus")
+                && h.destination().is_some_and(|d| d == own_name)
+        }
+        _ => false,
     }
-    let Some(member) = h.member() else {
-        return false;
-    };
-    if !matches!(member.as_str(), "NameAcquired" | "NameLost") {
-        return false;
-    }
-    // NameAcquired / NameLost carry the affected name as their sole string arg.
-    // Suppress only the transition noise for our own unique name; real
-    // NameAcquired / NameLost from other services still passes through.
-    let Ok((name,)) = m.body().deserialize::<(String,)>() else {
-        return false;
-    };
-    name == own_name
 }
 
 /// Render a single received message as a `dbus-send`-style human block (
