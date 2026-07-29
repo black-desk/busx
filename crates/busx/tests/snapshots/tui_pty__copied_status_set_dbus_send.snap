@@ -3,11 +3,11 @@ source: crates/busx/tests/tui_pty.rs
 expression: cropped.as_str()
 ---
 copy as — ↑↓ choose · Enter copy · Esc────────────────────────────────────────
-dbus-send: dbus-send --bus=<SOCKET>
-busctl: busctl --address=<SOCKET>
-qdbus: qdbus --bus <SOCKET>
-gdbus: gdbus call --address=<SOCKET>
-busx: busx --address=<SOCKET>
+dbus-send --bus=<SOCKET>
+busctl --address=<SOCKET>
+qdbus --bus <SOCKET>
+gdbus call --address=<SOCKET>
+busx --address=<SOCKET>
 dbus-send --bus=<SOCKET>
 
 

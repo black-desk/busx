@@ -960,8 +960,10 @@ fn render_popup(
         .split(inner);
     let (list_area, preview_area, status_area) = (chunks[0], chunks[1], chunks[2]);
 
-    // One row per tool: "{name}: {command | (unsupported)}". The selected row is
-    // REVERSED; unsupported commands are dimmed grey to signal they can't copy.
+    // One row per tool: the command's first line (which already begins with the
+    // tool's own name, so no separate label is needed), or "{name}:
+    // (unsupported)" when the tool can't express the op (no command to identify
+    // it). The selected row is REVERSED; unsupported commands are dimmed grey.
     for (i, (tool, cmd)) in popup.commands.iter().enumerate() {
         if i as u16 >= list_area.height {
             break;
@@ -973,7 +975,7 @@ fn render_popup(
             height: 1,
         };
         let body = match cmd {
-            Some(c) => format!("{}: {}", tool.name(), first_line(c)),
+            Some(c) => first_line(c).to_string(),
             None => format!("{}: (unsupported)", tool.name()),
         };
         let mut style = Style::default();
