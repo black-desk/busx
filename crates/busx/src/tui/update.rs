@@ -1,944 +1,1356 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Pure state machine. Returns an `Option<Effect>` so it stays
-//! IO-free: pushing/loading a screen requests a fetch the loop performs.
+//! UI transitions. Remote work is returned as an effect, never performed here.
 
 use crossterm::event::{
-    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
-};
-use zbus_xml::{ArgDirection, Node};
-use zvariant::OwnedValue;
-
-use crate::dbus::introspect::{access_str, sig_str};
-use crate::dbus::types::{ObjectNode, ServiceInfo};
-use crate::tui::copy::{CopyOp, Tool, generate};
-use crate::tui::msg::{Effect, Msg};
-use crate::tui::state::{
-    ActionKind, ActionResult, ClickTarget, CopyAsPopup, DetailFocus, DetailScreen, InterfaceFocus,
-    InterfaceScreen, InterfacesScreen, ListenTarget, MethodMember, NavContext, ObjectsScreen,
-    ResultScreen, Screen, ServiceScreen, State, filter_view, flatten_paths,
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use tui_input::backend::crossterm::EventHandler;
+use zbus_xml::{ArgDirection, Node};
 
-/// Split a field value into busctl-style tokens, shell-style: split on
-/// whitespace, respect single/double quotes. So an `as` field with `1 a`
-/// becomes `["1", "a"]` (count=1 + one element), matching `busx call … as 1 a`.
-/// A basic `s` field with `hello world` (no quotes) splits into two tokens
-/// (the user quotes it: `"hello world"`) — same shell semantics as the CLI.
-fn shell_split(s: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut current = String::new();
-    let mut in_quote: Option<char> = None;
-    for ch in s.chars() {
-        match (in_quote, ch) {
-            (Some(q), ch) if ch == q => in_quote = None,
-            (Some(_), ch) => current.push(ch),
-            (None, '"' | '\'') => in_quote = Some(ch),
-            (None, c) if c.is_whitespace() => {
-                if !current.is_empty() {
-                    tokens.push(std::mem::take(&mut current));
-                }
-            }
-            (None, ch) => current.push(ch),
-        }
-    }
-    if !current.is_empty() {
-        tokens.push(current);
-    }
-    tokens
-}
+use crate::dbus::introspect::{access_str, sig_str};
+use crate::error::{Error, Result};
+use crate::tui::copy::{CopyOp, Tool, generate};
+use crate::tui::msg::{Effect, Msg};
+use crate::tui::state::*;
 
 pub fn update(state: &mut State, msg: Msg) -> Option<Effect> {
+    let effect = update_message(state, msg);
+    if state.filter.is_some() {
+        clamp_filter(state);
+    }
+    effect
+}
+
+fn update_message(state: &mut State, msg: Msg) -> Option<Effect> {
     match msg {
-        Msg::Key(k) => update_key(state, k),
+        Msg::Key(key) => key_event(state, key),
+        Msg::Mouse(event) => mouse(state, event),
         Msg::Resize => None,
-        Msg::Mouse(ev) => handle_mouse(state, ev),
-        Msg::ServicesLoaded(res) => {
-            if let Screen::Service(s) = state.top_mut() {
-                load_services(s, res);
-            }
-            None
-        }
-        Msg::ObjectsLoaded(res) => load_objects(state, res),
-        Msg::InterfacesLoaded(svc, obj, res) => load_interfaces(state, svc, obj, res),
-        Msg::PropertiesLoaded(res) => load_properties(state, res),
-        Msg::ActionResult(res) => {
-            if let Screen::Result(r) = state.top_mut() {
-                r.loading = false;
-                match res {
-                    Ok(ar) => r.result = Some(ar),
-                    Err(e) => r.error = Some(e),
+        Msg::Services(id, result) => {
+            if id == state.services_request {
+                state.services_loading = false;
+                match result {
+                    Ok(services) => {
+                        for tab in &mut state.tabs {
+                            tab.service_selected =
+                                tab.service_selected.min(services.len().saturating_sub(1));
+                        }
+                        state.services = services;
+                        state.services_error = None;
+                    }
+                    Err(error) => state.services_error = Some(error),
                 }
             }
             None
         }
-        Msg::ListenStarted(cancel) => {
-            // Fast-Esc edge: the Result may already be gone (popped before this
-            // arrived) → `cancel` drops here, which ends the listen task's
-            // `cancel_rx` → `select!` breaks. No task leak.
-            if let Screen::Result(r) = state.top_mut() {
-                r.cancel = Some(cancel);
-                r.loading = false;
+        Msg::Objects(id, result) => {
+            let show_standard = state.show_standard_interfaces;
+            if let Some(browser) = state
+                .tabs
+                .iter_mut()
+                .filter_map(|tab| tab.browser.as_mut())
+                .find(|browser| browser.tree_request == id)
+            {
+                browser.tree_loading = false;
+                match result {
+                    Ok(root) => {
+                        browser.objects = navigation_objects(root, show_standard);
+                        browser.nav_selected = browser
+                            .nav_selected
+                            .min(browser.navigation("").len().saturating_sub(1));
+                        browser.error = None;
+                    }
+                    Err(error) => browser.error = Some(error),
+                }
             }
             None
         }
-        Msg::ListenMessage(body) => {
-            if let Screen::Result(r) = state.top_mut() {
-                r.messages.push(body);
+        Msg::Interface(id, result) => {
+            let index = state.tabs.iter().position(|tab| {
+                tab.browser
+                    .as_ref()
+                    .is_some_and(|browser| browser.interface_request == id)
+            })?;
+            let browser = state.tabs[index].browser.as_mut()?;
+            browser.interface_loading = false;
+            match result {
+                Ok(node) => {
+                    browser.members = members_of(&node, &browser.context.interface);
+                    browser.category = if !browser.members.properties.is_empty() {
+                        Category::Properties
+                    } else if !browser.members.methods.is_empty() {
+                        Category::Methods
+                    } else {
+                        Category::Signals
+                    };
+                    browser.select_member();
+                    if browser.members.properties.iter().any(Property::readable) {
+                        return fetch_properties_for(state, index);
+                    }
+                }
+                Err(error) => browser.error = Some(error),
             }
             None
         }
-        Msg::ClipboardResult(res) => {
-            // The copy-as popup's status reflects the outcome: "copied" on
-            // success, "error: …" on failure. No popup (e.g. it was dismissed
-            // before the result arrived) → ignore. Never prints to the TTY.
-            if let Some(p) = state.popup.as_mut() {
-                p.status = Some(match res {
-                    Ok(()) => "copied".to_string(),
-                    Err(e) => format!("error: {e}"),
+        Msg::Properties(id, result) => {
+            if let Some(browser) = state
+                .tabs
+                .iter_mut()
+                .filter_map(|tab| tab.browser.as_mut())
+                .find(|browser| browser.properties_request == id)
+            {
+                browser.properties_loading = false;
+                match result {
+                    Ok(values) => {
+                        browser.values = values
+                            .into_iter()
+                            .map(|(name, value)| (name, crate::value::pretty::pretty(&value)))
+                            .collect();
+                        browser.properties_error = None;
+                    }
+                    Err(error) => browser.properties_error = Some(error),
+                }
+            }
+            None
+        }
+        Msg::Action(id, tab_id, context, op, result) => {
+            let index = state.tabs.iter().position(|tab| tab.id == tab_id)?;
+            let browser = state.tabs[index].browser.as_mut()?;
+            if browser.context != context {
+                return None;
+            }
+            let refresh = matches!((&op, &result), (CopyOp::Set { .. }, Ok(_)));
+            if let (CopyOp::Get { property, .. }, Ok(ActionResult::Get(value))) = (&op, &result) {
+                if let Some((_, previous)) =
+                    browser.values.iter_mut().find(|(name, _)| name == property)
+                {
+                    *previous = value.clone();
+                } else {
+                    browser.values.push((property.clone(), value.clone()));
+                }
+            }
+            if browser.editor.pending == Some(id) {
+                browser.editor.pending = None;
+                browser.editor.last_op = Some(op);
+                browser.editor.outcome = Some(match result {
+                    Ok(result) => Outcome {
+                        result: Some(result),
+                        error: None,
+                    },
+                    Err(error) => Outcome {
+                        result: None,
+                        error: Some(error),
+                    },
                 });
+            }
+            if refresh && browser.members.properties.iter().any(Property::readable) {
+                return fetch_properties_for(state, index);
+            }
+            None
+        }
+        Msg::WatchReady(id, cancel) => {
+            if let Some(watch) = state
+                .tabs
+                .iter_mut()
+                .filter_map(|tab| tab.watch.as_mut())
+                .find(|watch| watch.id == id && !watch.stopped)
+            {
+                watch.cancel = Some(cancel);
+            }
+            None
+        }
+        Msg::WatchStarted(id, rule) => {
+            if let Some(watch) = state
+                .tabs
+                .iter_mut()
+                .filter_map(|tab| tab.watch.as_mut())
+                .find(|watch| watch.id == id && !watch.stopped)
+            {
+                watch.starting = false;
+                watch.rule = rule;
+            }
+            None
+        }
+        Msg::WatchMessage(id, body) => {
+            if let Some(watch) = state
+                .tabs
+                .iter_mut()
+                .filter_map(|tab| tab.watch.as_mut())
+                .find(|watch| watch.id == id && !watch.stopped)
+            {
+                watch.total += 1;
+                if watch.events.len() == EVENT_LIMIT {
+                    watch.events.pop_front();
+                }
+                watch.events.push_back(body);
+            }
+            None
+        }
+        Msg::WatchEnded(id, result) => {
+            if let Some(watch) = state
+                .tabs
+                .iter_mut()
+                .filter_map(|tab| tab.watch.as_mut())
+                .find(|watch| watch.id == id)
+            {
+                watch.starting = false;
+                watch.stopped = true;
+                watch.cancel = None;
+                if let Err(error) = result {
+                    watch.error = Some(error);
+                }
+            }
+            None
+        }
+        Msg::Clipboard(id, result) => {
+            if let Some(tab) = state
+                .tabs
+                .iter_mut()
+                .find(|tab| tab.clipboard_request == Some(id))
+            {
+                tab.clipboard_request = None;
+                let status = match result {
+                    Ok(()) => "Copied".into(),
+                    Err(error) => format!("Copy failed: {error}"),
+                };
+                if let Some(popup) = &mut tab.popup {
+                    popup.status = Some(status);
+                } else {
+                    tab.status = Some(status);
+                }
             }
             None
         }
     }
 }
 
-fn update_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
-    if k.kind != KeyEventKind::Press && !matches!(k.code, KeyCode::Char('q') | KeyCode::Esc) {
+fn key_event(state: &mut State, key: KeyEvent) -> Option<Effect> {
+    if key.kind == KeyEventKind::Release {
         return None;
     }
-    if matches!(k.code, KeyCode::Char('q')) {
-        state.quit = true;
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        state.close_tab();
         return None;
     }
-    // The copy-as popup, when open, captures all keys except `q` (handled above):
-    // Esc closes it without popping the screen, ↑↓/jk move the tool selection,
-    // Enter copies the focused tool's command. Route there before the ordinary
-    // Esc/Enter/screen-dispatch so those keys don't leak through to the screen.
     if state.popup.is_some() {
-        return update_popup_key(state, k.code);
+        state.key_prefix = None;
+        return popup_key(state, key.code);
     }
-    // The help overlay, when open, captures all keys except `q` (handled above):
-    // Esc or `?` closes it; everything else is swallowed (no screen dispatch), so
-    // arrow keys / `c` / `y` / etc. don't leak through while help is up.
     if state.help_open {
-        if matches!(k.code, KeyCode::Esc | KeyCode::Char('?')) {
-            state.help_open = false;
+        state.key_prefix = None;
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('?') => state.help_open = false,
+            KeyCode::Down | KeyCode::Char('j') => {
+                state.help_scroll = (state.help_scroll + 1).min(30)
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                state.help_scroll = state.help_scroll.saturating_sub(1)
+            }
+            KeyCode::PageDown => state.help_scroll = (state.help_scroll + 10).min(30),
+            KeyCode::PageUp => state.help_scroll = state.help_scroll.saturating_sub(10),
+            _ => {}
         }
         return None;
     }
-    // The `/` filter, when active on a list screen, captures every key except
-    // `q` (handled above): Esc clears it, Enter drills the filtered selection,
-    // ↑↓ move within the matches, all other keys edit the query (so j/k type
-    // into the box rather than navigate — use ↑↓ while filtering). Route here
-    // before the ordinary Esc/Enter/?/c/y/screen dispatch so none leak through.
     if state.filter.is_some() {
-        return handle_filter_key(state, k);
+        state.key_prefix = None;
+        return filter_key(state, key);
     }
-    // `?` opens the help overlay (only when no popup is up and help is closed).
-    if matches!(k.code, KeyCode::Char('?')) {
-        state.help_open = true;
-        return None;
-    }
-    // `c` opens the copy-as popup on a Detail or Result (the screens that carry
-    // a copyable operation). No popup is open here, so `c` is unambiguous.
-    if matches!(k.code, KeyCode::Char('c')) {
-        if let Some(op) = copy_op_for_screen(state.top(), &state.nav) {
-            open_copy_as_popup(state, op);
-        }
-        return None;
-    }
-    // `y` copies the Result's output as plain text (distinct from `c`, which
-    // copies a CLI *command*). Scoped to the Result screen only — on other
-    // screens `y` falls through to the normal dispatch (a Detail's printable
-    // chars go to its input fields, so `y` must reach that handler, not this one).
-    // No-op (returns None) when the Result has nothing to copy.
-    if matches!(k.code, KeyCode::Char('y'))
-        && let Screen::Result(r) = state.top()
+    // Editing owns printable keys, including q, c, r, ?, j and k. Only terminal
+    // control, focus movement, and Escape bypass tui-input.
+    if state.page == Page::Browser
+        && state.browser.as_ref().is_some_and(|browser| {
+            browser.editor.editing && matches!(browser.focus, Focus::Field(_))
+        })
     {
-        if let Some(text) = copy_result_text(r) {
-            return Some(Effect::CopyToClipboard(text));
+        state.key_prefix = None;
+        let browser = state.browser.as_mut()?;
+        let Focus::Field(index) = browser.focus else {
+            return None;
+        };
+        match key.code {
+            KeyCode::Esc => browser.editor.editing = false,
+            KeyCode::Tab | KeyCode::BackTab => cycle_focus(
+                browser,
+                key.code == KeyCode::BackTab || key.modifiers.contains(KeyModifiers::SHIFT),
+            ),
+            KeyCode::Enter => {
+                browser.editor.editing = false;
+                browser.focus = Focus::Action(0);
+            }
+            _ => {
+                if let Some(field) = browser.editor.fields.get_mut(index) {
+                    field.input.handle_event(&Event::Key(key));
+                }
+            }
         }
         return None;
     }
-    // `r` refreshes the current view: re-fetch the service list / object tree /
-    // introspection / property snapshot for the top screen. No-op on Detail/
-    // Result (no data to refresh). Clears any prior error so the user sees a
-    // clean loading state, not a stale error message.
-    if matches!(k.code, KeyCode::Char('r')) {
-        return refresh_screen(state);
+    state.status = None;
+    if vim_sequence(state, key) {
+        return None;
     }
-    if matches!(k.code, KeyCode::Esc) {
-        // On the Interface screen, Esc first backs out of the action-button bar
-        // (back to the member column); only a second Esc pops the screen.
-        if let Screen::Interface(i) = state.top_mut()
-            && i.in_buttons
-        {
-            i.in_buttons = false;
+    match key.code {
+        KeyCode::Char('q') => {
+            state.close_tab();
             return None;
         }
-        if !state.pop_screen() {
-            state.quit = true;
+        KeyCode::Char('t') => {
+            state.new_tab();
+            return None;
         }
-        return None;
+        KeyCode::Char('?') => {
+            state.help_open = true;
+            state.help_scroll = 0;
+            return None;
+        }
+        KeyCode::Char('/')
+            if state.page == Page::Services
+                || (state.page == Page::Browser
+                    && state.browser.as_ref().is_some_and(|browser| {
+                        matches!(browser.focus, Focus::Navigation | Focus::Members)
+                    })) =>
+        {
+            state.filter = Some(tui_input::Input::default());
+            return None;
+        }
+        KeyCode::Esc => {
+            back(state);
+            return None;
+        }
+        KeyCode::Char('c') => {
+            if let Some(op) = current_op(state) {
+                open_copy(state, op);
+            }
+            return None;
+        }
+        KeyCode::Char('y') => {
+            let text = current_text(state);
+            return text
+                .filter(|text| !text.is_empty())
+                .map(|text| copy_text(state, text));
+        }
+        KeyCode::Char('r') => return refresh(state),
+        _ => {}
     }
-    if k.code == KeyCode::Enter {
-        return handle_enter(state);
-    }
-    // `/` opens the inline filter on a list screen (Service/Objects/Interfaces).
-    // On other screens `/` falls through to the screen's own key handler.
-    if k.code == KeyCode::Char('/') && is_list_screen(state.top()) {
-        state.filter = Some(tui_input::Input::default());
-        return None;
-    }
-    match state.top_mut() {
-        Screen::Service(s) => update_service_key(s, k.code),
-        Screen::Objects(o) => update_objects_key(o, k.code),
-        Screen::Interfaces(i) => update_interfaces_key(i, k.code),
-        Screen::Interface(i) => return update_interface_key(i, k),
-        Screen::Detail(d) => return update_detail_key(d, k),
-        Screen::Result(r) => update_result_key(r, k.code),
+    match state.page {
+        Page::Services => match key.code {
+            KeyCode::Down | KeyCode::Char('j') => {
+                let count = state.services.len();
+                move_index(&mut state.service_selected, count, 1)
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                let count = state.services.len();
+                move_index(&mut state.service_selected, count, -1)
+            }
+            KeyCode::Enter => return open_service(state),
+            _ => {}
+        },
+        Page::Browser => return browser_key(state, key),
+        Page::Watch => return watch_key(state, key.code),
+        Page::Expanded => {
+            if let Some(expanded) = &mut state.expanded {
+                scroll_text(
+                    &expanded.text,
+                    &mut expanded.scroll,
+                    &mut expanded.hscroll,
+                    key.code,
+                );
+            }
+        }
     }
     None
 }
 
-/// Mouse handling: a left-click hit-tests `click_targets` (render populated them
-/// last frame) and applies the matched target; the wheel advances the top
-/// screen's selection/content one row (`↑↓`-style — see [`scroll`]). Other
-/// buttons/gestures are ignored. `click_targets` are populated by the loop after
-/// each render (render writes them to an out-param).
-fn handle_mouse(state: &mut State, ev: MouseEvent) -> Option<Effect> {
-    match ev.kind {
-        MouseEventKind::Down(MouseButton::Left) => {
-            if let Some(t) = hit_test(state, ev.column, ev.row) {
-                apply_click(state, t)
+/// Tab commands preserve each tab's browser, inputs, scroll, and subscription.
+fn vim_sequence(state: &mut State, key: KeyEvent) -> bool {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        state.key_prefix = None;
+        return false;
+    }
+    match (state.key_prefix.take(), key.code) {
+        (Some(KeyPrefix::Count(count)), KeyCode::Char(digit @ '0'..='9')) => {
+            state.key_prefix = Some(KeyPrefix::Count(
+                count
+                    .saturating_mul(10)
+                    .saturating_add(digit.to_digit(10).unwrap_or(0) as usize),
+            ));
+            true
+        }
+        (Some(KeyPrefix::Count(count)), KeyCode::Char('g')) => {
+            state.key_prefix = Some(KeyPrefix::G(Some(count)));
+            true
+        }
+        (Some(KeyPrefix::G(count)), KeyCode::Char(command @ ('t' | 'T'))) => {
+            let length = state.tabs.len();
+            let next = if command == 'T' {
+                (state.active_tab + length - count.unwrap_or(1) % length) % length
+            } else if let Some(count) = count {
+                if count == 0 || count > length {
+                    return true;
+                }
+                count - 1
+            } else {
+                (state.active_tab + 1) % length
+            };
+            state.select_tab(next);
+            true
+        }
+        (Some(KeyPrefix::G(count)), KeyCode::Char('g')) => {
+            jump_selection(state, count.unwrap_or(1).saturating_sub(1));
+            true
+        }
+        (Some(_), KeyCode::Esc) => true,
+        (_, KeyCode::Char('g')) => {
+            state.key_prefix = Some(KeyPrefix::G(None));
+            true
+        }
+        (_, KeyCode::Char(digit @ '1'..='9')) => {
+            state.key_prefix = Some(KeyPrefix::Count(digit.to_digit(10).unwrap_or(1) as usize));
+            true
+        }
+        (_, KeyCode::Char('G')) => {
+            jump_selection(state, usize::MAX);
+            true
+        }
+        _ => false,
+    }
+}
+
+fn jump_selection(state: &mut State, index: usize) {
+    match state.page {
+        Page::Services => {
+            state.service_selected = index.min(state.services.len().saturating_sub(1))
+        }
+        Page::Browser => {
+            if let Some(browser) = &mut state.browser {
+                match browser.focus {
+                    Focus::Navigation => {
+                        browser.nav_selected =
+                            index.min(browser.navigation("").len().saturating_sub(1))
+                    }
+                    Focus::Members => {
+                        let selected = index.min(browser.member_count().saturating_sub(1));
+                        if browser.selected() != selected {
+                            browser.selected[browser.category as usize] = selected;
+                            browser.select_member();
+                        }
+                    }
+                    Focus::Result => {
+                        if let Some(outcome) = &browser.editor.outcome {
+                            browser.editor.scroll =
+                                index.min(outcome.text().lines().count().saturating_sub(1));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Page::Watch => {
+            if let Some(watch) = state.watch_mut() {
+                watch.follow = index == usize::MAX;
+                watch.scroll = index.min(watch.text().lines().count().saturating_sub(1));
+            }
+        }
+        Page::Expanded => {
+            if let Some(expanded) = &mut state.expanded {
+                expanded.scroll = index.min(expanded.text.lines().count().saturating_sub(1));
+            }
+        }
+    }
+}
+
+fn back(state: &mut State) {
+    match state.page {
+        Page::Services => state.close_tab(),
+        Page::Browser => {
+            if let Some(browser) = &mut state.browser {
+                if browser.focus == Focus::Navigation {
+                    state.page = Page::Services;
+                } else {
+                    browser.focus = Focus::Navigation;
+                }
+            }
+        }
+        Page::Watch => {
+            state.stop_watch();
+            state.page = if state.browser.is_some() {
+                Page::Browser
+            } else {
+                Page::Services
+            }
+        }
+        Page::Expanded => {
+            if let Some(expanded) = state.expanded.take() {
+                state.page = expanded.origin;
+            }
+        }
+    }
+}
+
+fn open_service(state: &mut State) -> Option<Effect> {
+    let service = state.services.get(state.service_selected)?.name.clone();
+    if state
+        .browser
+        .as_ref()
+        .is_some_and(|browser| browser.context.service == service)
+    {
+        state.page = Page::Browser;
+        state.filter = None;
+        return None;
+    }
+    let id = state.request_id();
+    state.browser = Some(Browser::new(service.clone(), id));
+    state.page = Page::Browser;
+    state.filter = None;
+    Some(Effect::Objects(id, service))
+}
+
+fn open_navigation(state: &mut State) -> Option<Effect> {
+    let id = state.request_id();
+    let query = state.query().to_string();
+    let browser = state.browser.as_mut()?;
+    let row = *browser.navigation(&query).get(browser.nav_selected)?;
+    let (object, interface) = match row {
+        NavRow::Object(index) => {
+            let object = browser.objects.get_mut(index)?;
+            object.expanded = !object.expanded;
+            browser.reveal_object(index, false);
+            clear_filter(state);
+            return None;
+        }
+        NavRow::Interface(object, interface) => {
+            browser.reveal_object(object, true);
+            (
+                browser.objects[object].path.clone(),
+                browser.objects[object].interfaces[interface].clone(),
+            )
+        }
+    };
+    browser.nav_selected = browser
+        .navigation("")
+        .iter()
+        .position(|candidate| *candidate == row)
+        .unwrap_or(0);
+    browser.context.object = object;
+    browser.context.interface = interface;
+    browser.interface_request = id;
+    browser.properties_request = 0;
+    browser.interface_loading = true;
+    browser.properties_loading = false;
+    browser.error = None;
+    browser.properties_error = None;
+    browser.members = Members::default();
+    browser.values.clear();
+    browser.selected = [0; 3];
+    browser.editor = Editor::default();
+    browser.focus = Focus::Members;
+    let context = browser.context.clone();
+    state.filter = None;
+    Some(Effect::Interface(id, context))
+}
+
+fn fetch_properties(state: &mut State) -> Option<Effect> {
+    fetch_properties_for(state, state.active_tab)
+}
+
+fn fetch_properties_for(state: &mut State, index: usize) -> Option<Effect> {
+    let id = state.request_id();
+    let browser = state.tabs.get_mut(index)?.browser.as_mut()?;
+    browser.properties_request = id;
+    browser.properties_loading = true;
+    browser.properties_error = None;
+    Some(Effect::Properties(id, browser.context.clone()))
+}
+
+fn refresh(state: &mut State) -> Option<Effect> {
+    let id = state.request_id();
+    match state.page {
+        Page::Services => {
+            state.services_request = id;
+            state.services_loading = true;
+            state.services_error = None;
+            Some(Effect::Services(id))
+        }
+        Page::Browser => {
+            let browser = state.browser.as_mut()?;
+            if browser.focus == Focus::Navigation {
+                browser.tree_request = id;
+                browser.tree_loading = true;
+                browser.error = None;
+                Some(Effect::Objects(id, browser.context.service.clone()))
+            } else if browser.error.is_some() && !browser.context.interface.is_empty() {
+                browser.interface_request = id;
+                browser.interface_loading = true;
+                browser.error = None;
+                Some(Effect::Interface(id, browser.context.clone()))
+            } else if !browser.context.interface.is_empty() {
+                fetch_properties(state)
             } else {
                 None
             }
-        }
-        MouseEventKind::ScrollDown => {
-            scroll(state, 1);
-            None
-        }
-        MouseEventKind::ScrollUp => {
-            scroll(state, -1);
-            None
         }
         _ => None,
     }
 }
 
-/// Find the topmost click_target whose Rect contains (col, row). Popup targets
-/// (PopupTool) are recorded last (drawn on top), so iterating in reverse already
-/// prefers them — a click on the popup hits the tool, not the screen beneath.
-fn hit_test(state: &State, col: u16, row: u16) -> Option<ClickTarget> {
-    state
-        .click_targets
-        .iter()
-        .rev()
-        .find(|(r, _)| col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height)
-        .map(|(_, t)| t.clone())
+fn browser_key(state: &mut State, key: KeyEvent) -> Option<Effect> {
+    let browser = state.browser.as_mut()?;
+    match key.code {
+        KeyCode::Tab | KeyCode::BackTab => cycle_focus(
+            browser,
+            key.code == KeyCode::BackTab || key.modifiers.contains(KeyModifiers::SHIFT),
+        ),
+        KeyCode::Char('n') => browser.focus = Focus::Navigation,
+        KeyCode::Char('i') if matches!(browser.focus, Focus::Field(_)) => {
+            browser.editor.editing = true;
+        }
+        KeyCode::Enter => match browser.focus {
+            Focus::Navigation => return open_navigation(state),
+            Focus::Members => {
+                if browser.member_count() > 0 {
+                    browser.focus = if browser.editor.fields.is_empty() {
+                        Focus::Action(0)
+                    } else {
+                        Focus::Field(0)
+                    };
+                }
+            }
+            Focus::Action(index) => return activate(state, index),
+            Focus::Result => return expand(state),
+            Focus::Field(_) => browser.focus = Focus::Action(0),
+        },
+        KeyCode::Left | KeyCode::Right | KeyCode::Char('h' | 'l')
+            if browser.focus == Focus::Members =>
+        {
+            let index = browser.category as usize;
+            let next = if matches!(key.code, KeyCode::Right | KeyCode::Char('l')) {
+                (index + 1) % 3
+            } else {
+                (index + 2) % 3
+            };
+            browser.category = Category::ALL[next];
+            browser.select_member();
+        }
+        KeyCode::Left | KeyCode::Right | KeyCode::Char('h' | 'l')
+            if browser.focus == Focus::Navigation =>
+        {
+            let rows = browser.navigation("");
+            if let Some(row) = rows.get(browser.nav_selected) {
+                match *row {
+                    NavRow::Object(index) => {
+                        browser.objects[index].expanded =
+                            matches!(key.code, KeyCode::Right | KeyCode::Char('l'))
+                    }
+                    NavRow::Interface(index, _)
+                        if matches!(key.code, KeyCode::Left | KeyCode::Char('h')) =>
+                    {
+                        if let Some(parent) =
+                            rows.iter().position(|row| *row == NavRow::Object(index))
+                        {
+                            browser.nav_selected = parent;
+                        }
+                        browser.objects[index].expanded = false;
+                    }
+                    NavRow::Interface(_, _) => return open_navigation(state),
+                }
+            }
+        }
+        KeyCode::Left | KeyCode::Right | KeyCode::Char('h' | 'l')
+            if matches!(browser.focus, Focus::Action(_)) =>
+        {
+            let count = browser.actions().len();
+            let Focus::Action(index) = &mut browser.focus else {
+                return None;
+            };
+            if matches!(key.code, KeyCode::Left | KeyCode::Char('h')) {
+                *index = index.saturating_sub(1);
+            } else {
+                *index = (*index + 1).min(count.saturating_sub(1));
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => move_browser(browser, 1),
+        KeyCode::Up | KeyCode::Char('k') => move_browser(browser, -1),
+        _ if browser.focus == Focus::Result => {
+            if let Some(outcome) = &browser.editor.outcome {
+                scroll_text(
+                    &outcome.text(),
+                    &mut browser.editor.scroll,
+                    &mut browser.editor.hscroll,
+                    key.code,
+                );
+            }
+        }
+        _ => {}
+    }
+    None
 }
 
-/// Apply a hit-tested click: a list/row target sets the selection (no side
-/// effects, and clicking the already-selected row acts as Enter — a side
-/// effect); an action button or the Detail trigger selects AND fires (reusing
-/// `handle_enter`, which already implements the Enter paths for those). A popup
-/// tool is selected for preview; clicking the already-selected tool copies it.
-fn apply_click(state: &mut State, t: ClickTarget) -> Option<Effect> {
-    match t {
-        // List rows: first click selects; clicking the already-selected row acts
-        // as Enter (drill in / activate) — so a mouse user can click to select,
-        // then click again to open.
-        ClickTarget::ServiceRow(i) => {
-            let already = matches!(state.top(), Screen::Service(s) if s.selected == i);
-            if let Screen::Service(s) = state.top_mut() {
-                s.selected = i;
-            }
-            if already { handle_enter(state) } else { None }
+fn move_browser(browser: &mut Browser, delta: i32) {
+    match browser.focus {
+        Focus::Navigation => {
+            let count = browser.navigation("").len();
+            move_index(&mut browser.nav_selected, count, delta);
         }
-        ClickTarget::ObjectsRow(i) => {
-            let already = matches!(state.top(), Screen::Objects(o) if o.selected == i);
-            if let Screen::Objects(o) = state.top_mut() {
-                o.selected = i;
+        Focus::Members => {
+            let count = browser.member_count();
+            let index = browser.category as usize;
+            let previous = browser.selected[index];
+            move_index(&mut browser.selected[index], count, delta);
+            if previous != browser.selected[index] {
+                browser.select_member();
             }
-            if already { handle_enter(state) } else { None }
         }
-        ClickTarget::InterfacesRow(i) => {
-            let already = matches!(state.top(), Screen::Interfaces(it) if it.selected == i);
-            if let Screen::Interfaces(it) = state.top_mut() {
-                it.selected = i;
+        Focus::Action(_) => {
+            if delta < 0 {
+                browser.focus = browser
+                    .editor
+                    .fields
+                    .len()
+                    .checked_sub(1)
+                    .map_or(Focus::Members, Focus::Field);
+            } else if browser.editor.outcome.is_some() {
+                browser.focus = Focus::Result;
             }
-            if already { handle_enter(state) } else { None }
         }
-        ClickTarget::MethodRow(i) => {
-            let already = matches!(state.top(), Screen::Interface(it)
-                if it.focus == InterfaceFocus::Methods && it.selected[0] == i && !it.in_buttons);
-            if let Screen::Interface(it) = state.top_mut() {
-                it.focus = InterfaceFocus::Methods;
-                it.in_buttons = false;
-                it.selected[0] = i;
+        Focus::Result => {
+            if let Some(outcome) = &browser.editor.outcome {
+                scroll_text(
+                    &outcome.text(),
+                    &mut browser.editor.scroll,
+                    &mut browser.editor.hscroll,
+                    if delta > 0 {
+                        KeyCode::Down
+                    } else {
+                        KeyCode::Up
+                    },
+                );
             }
-            if already { handle_enter(state) } else { None }
         }
-        ClickTarget::PropertyRow(i) => {
-            let already = matches!(state.top(), Screen::Interface(it)
-                if it.focus == InterfaceFocus::Properties && it.selected[1] == i && !it.in_buttons);
-            if let Screen::Interface(it) = state.top_mut() {
-                it.focus = InterfaceFocus::Properties;
-                it.in_buttons = false;
-                it.selected[1] = i;
+        Focus::Field(mut index) => {
+            if delta > 0 && index + 1 >= browser.editor.fields.len() {
+                if !browser.actions().is_empty() {
+                    browser.focus = Focus::Action(0);
+                }
+            } else if delta < 0 && index == 0 {
+                browser.focus = Focus::Members;
+            } else {
+                move_index(&mut index, browser.editor.fields.len(), delta);
+                browser.focus = Focus::Field(index);
             }
-            if already { handle_enter(state) } else { None }
         }
-        ClickTarget::SignalRow(i) => {
-            let already = matches!(state.top(), Screen::Interface(it)
-                if it.focus == InterfaceFocus::Signals && it.selected[2] == i && !it.in_buttons);
-            if let Screen::Interface(it) = state.top_mut() {
-                it.focus = InterfaceFocus::Signals;
-                it.in_buttons = false;
-                it.selected[2] = i;
-            }
-            if already { handle_enter(state) } else { None }
-        }
-        // Buttons / trigger fire on the first click (== Enter).
-        ClickTarget::ActionButton(i) => {
-            if let Screen::Interface(it) = state.top_mut() {
-                it.in_buttons = true;
-                it.button_selected = i;
-            }
-            handle_enter(state)
-        }
-        ClickTarget::DetailField(i) => {
-            if let Screen::Detail(d) = state.top_mut() {
-                d.field_selected = i;
-                d.focus = DetailFocus::Field;
+    }
+}
+
+fn cycle_focus(browser: &mut Browser, reverse: bool) {
+    let mut sequence = vec![Focus::Navigation, Focus::Members];
+    sequence.extend((0..browser.editor.fields.len()).map(Focus::Field));
+    sequence.extend((0..browser.actions().len()).map(Focus::Action));
+    if browser.editor.outcome.is_some() {
+        sequence.push(Focus::Result);
+    }
+    let index = sequence
+        .iter()
+        .position(|focus| *focus == browser.focus)
+        .unwrap_or(0);
+    browser.focus =
+        sequence[(index + if reverse { sequence.len() - 1 } else { 1 }) % sequence.len()];
+    browser.editor.editing &= matches!(browser.focus, Focus::Field(_));
+}
+
+fn activate(state: &mut State, index: usize) -> Option<Effect> {
+    let action = *state.browser.as_ref()?.actions().get(index)?;
+    match action {
+        Action::Copy => {
+            match draft_op(state.browser.as_ref()?, None) {
+                Ok(op) => open_copy(state, op),
+                Err(error) => set_editor_error(state, error),
             }
             None
         }
-        ClickTarget::DetailTrigger => {
-            if let Screen::Detail(d) = state.top_mut() {
-                d.focus = DetailFocus::Trigger;
+        Action::Expand => expand(state),
+        Action::Watch => start_watch(state),
+        Action::Call | Action::Read | Action::Write => {
+            let browser = state.browser.as_ref()?;
+            if browser.editor.pending.is_some() {
+                return None;
             }
-            handle_enter(state)
-        }
-        // Popup tools: first click selects (previews); clicking the already-
-        // selected tool copies it (== Enter on the popup).
-        ClickTarget::PopupTool(i) => {
-            let already = matches!(&state.popup, Some(p) if p.selected == i && p.status.is_none());
-            if let Some(p) = state.popup.as_mut() {
-                p.selected = i;
-            }
-            if already {
-                state.popup.as_mut().and_then(copy_selected_tool)
-            } else {
-                None
-            }
-        }
-    }
-}
-
-/// Trigger the copy-as for the popup's selected tool: set the "copying…" status
-/// and return `CopyToClipboard`. No-op if a copy already happened (status set)
-/// or the selected tool can't express the op. Shared by the popup's `Enter` and
-/// the mouse "click the already-selected tool" path.
-fn copy_selected_tool(popup: &mut crate::tui::state::CopyAsPopup) -> Option<Effect> {
-    if popup.status.is_some() {
-        return None;
-    }
-    let cmd = popup
-        .commands
-        .get(popup.selected)
-        .and_then(|(_, c)| c.clone());
-    match cmd {
-        Some(cmd) => {
-            popup.status = Some("copying…".to_string());
-            Some(Effect::CopyToClipboard(cmd))
-        }
-        None => None,
-    }
-}
-
-/// Apply a vertical scroll/selection delta (+1 down, −1 up) to the top screen,
-/// mirroring what `↑↓`/`jk` do there. This is what the mouse wheel invokes, so a
-/// wheel notch moves the cursor one row on the list screens (Service/Objects/
-/// Interfaces, and the Interface screen's focused column or button bar) and
-/// scrolls the content on the Result screen. The viewport already follows the
-/// selection (render persists the list offset), so moving the cursor keeps it
-/// visible — no separate viewport scrolling is needed.
-fn scroll(state: &mut State, delta: i32) {
-    match state.top_mut() {
-        // Result: scroll the content (line count mirrors `update_result_key` —
-        // streaming messages, else one-shot reply lines with a 1-line floor).
-        Screen::Result(r) => {
-            let lines = if !r.messages.is_empty() {
-                r.messages.len()
-            } else {
-                match &r.result {
-                    Some(ActionResult::Call(vs)) => vs.len(),
-                    Some(ActionResult::Get(_)) | None | Some(ActionResult::Set) => 1,
+            let op = match draft_op(browser, Some(action)) {
+                Ok(op) => op,
+                Err(error) => {
+                    set_editor_error(state, error);
+                    return None;
                 }
             };
-            let max = lines.saturating_sub(1) as i32;
-            r.scroll = ((r.scroll as i32) + delta).clamp(0, max) as usize;
+            let id = state.request_id();
+            let tab_id = state.id;
+            let browser = state.browser.as_mut()?;
+            browser.editor.pending = Some(id);
+            browser.editor.outcome = None;
+            browser.editor.scroll = 0;
+            browser.editor.hscroll = 0;
+            browser.editor.last_op = Some(op.clone());
+            Some(Effect::Execute(id, tab_id, browser.context.clone(), op))
         }
-        Screen::Service(s) => move_selected(&mut s.selected, s.services.len(), delta),
-        Screen::Objects(o) => move_selected(&mut o.selected, o.paths.len(), delta),
-        Screen::Interfaces(i) => move_selected(&mut i.selected, i.names.len(), delta),
-        Screen::Interface(i) => {
-            // Mirror ↑↓: in the button bar the wheel moves button_selected;
-            // otherwise it moves the focused column's member selection.
-            if i.in_buttons {
-                let len = buttons_for(i.focus).len();
-                move_selected(&mut i.button_selected, len, delta);
-            } else {
-                let idx = focus_index(i.focus);
-                let len = column_len(i, idx);
-                move_selected(&mut i.selected[idx], len, delta);
+    }
+}
+
+fn set_editor_error(state: &mut State, error: Error) {
+    if let Some(browser) = &mut state.browser {
+        browser.editor.outcome = Some(Outcome {
+            result: None,
+            error: Some(error),
+        });
+    }
+}
+
+/// Basic values occupy one field verbatim (spaces and empty strings included).
+/// Containers use the same count-prefixed tokens as busx's CLI; quoting only
+/// groups container tokens, never invokes a shell.
+fn field_tokens(signature: &str, value: &str) -> Result<Vec<String>> {
+    if signature.len() == 1 && signature != "v" {
+        return Ok(vec![value.to_string()]);
+    }
+    let mut tokens = vec![];
+    let mut token = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    let mut started = false;
+    for ch in value.chars() {
+        if escaped {
+            token.push(ch);
+            escaped = false;
+            started = true;
+            continue;
+        }
+        match (quote, ch) {
+            (Some('\''), '\'') => quote = None,
+            (Some('\''), ch) => token.push(ch),
+            (_, '\\') => {
+                escaped = true;
+                started = true;
+            }
+            (Some('"'), '"') => quote = None,
+            (Some(_), ch) => token.push(ch),
+            (None, '\'' | '"') => {
+                quote = Some(ch);
+                started = true;
+            }
+            (None, ch) if ch.is_whitespace() => {
+                if started {
+                    tokens.push(std::mem::take(&mut token));
+                    started = false;
+                }
+            }
+            (None, ch) => {
+                token.push(ch);
+                started = true;
             }
         }
-        // Detail has no list to scroll.
-        Screen::Detail(_) => {}
+    }
+    if quote.is_some() || escaped {
+        return Err(Error::Msg(
+            "Unclosed quote or trailing escape in value".into(),
+        ));
+    }
+    if started {
+        tokens.push(token);
+    }
+    Ok(tokens)
+}
+
+fn draft_op(browser: &Browser, action: Option<Action>) -> Result<CopyOp> {
+    let context = &browser.context;
+    match browser.category {
+        Category::Methods => {
+            let method = browser
+                .members
+                .methods
+                .get(browser.selected())
+                .ok_or_else(|| Error::Msg("No method selected".into()))?;
+            let mut args = vec![];
+            for ((_, signature), field) in method.args.iter().zip(&browser.editor.fields) {
+                args.extend(field_tokens(signature, field.input.value())?);
+            }
+            Ok(CopyOp::Call {
+                service: context.service.clone(),
+                object: context.object.clone(),
+                iface: context.interface.clone(),
+                method: method.name.clone(),
+                signature: method.signature.clone(),
+                args,
+            })
+        }
+        Category::Properties => {
+            let property = browser
+                .members
+                .properties
+                .get(browser.selected())
+                .ok_or_else(|| Error::Msg("No property selected".into()))?;
+            if action == Some(Action::Write)
+                || (action.is_none()
+                    && property.writable()
+                    && (!property.readable()
+                        || browser
+                            .editor
+                            .fields
+                            .first()
+                            .is_some_and(|field| !field.input.value().is_empty())))
+            {
+                let value = browser
+                    .editor
+                    .fields
+                    .first()
+                    .map(|field| field.input.value())
+                    .unwrap_or_default();
+                Ok(CopyOp::Set {
+                    service: context.service.clone(),
+                    object: context.object.clone(),
+                    iface: context.interface.clone(),
+                    property: property.name.clone(),
+                    signature: property.signature.clone(),
+                    value: field_tokens(&property.signature, value)?,
+                })
+            } else {
+                Ok(CopyOp::Get {
+                    service: context.service.clone(),
+                    object: context.object.clone(),
+                    iface: context.interface.clone(),
+                    property: property.name.clone(),
+                })
+            }
+        }
+        Category::Signals => {
+            let signal = browser
+                .members
+                .signals
+                .get(browser.selected())
+                .ok_or_else(|| Error::Msg("No signal selected".into()))?;
+            let rule =
+                listen_rule(context, &ListenTarget::Signal(signal.name.clone()))?.to_string();
+            Ok(CopyOp::Listen { rule })
+        }
     }
 }
 
-/// Clamp-advance a selection index by `delta` within `[0, len-1]`. A no-op for
-/// an empty list (keeps the index at 0). Shared by the wheel handler for every
-/// list screen, so they clamp identically to the keyboard `↑↓` arms.
-fn move_selected(sel: &mut usize, len: usize, delta: i32) {
-    if len == 0 {
-        return;
-    }
-    let max = (len - 1) as i32;
-    *sel = ((*sel as i32) + delta).clamp(0, max) as usize;
-}
-
-/// Build the `CopyOp` for the top screen: a Detail from its current inputs, or a
-/// Result from its stored `op`. `None` for any other screen (nothing to copy).
-fn copy_op_for_screen(screen: &Screen, nav: &NavContext) -> Option<CopyOp> {
-    match screen {
-        Screen::Detail(d) => Some(copy_op_from_detail(d, nav)),
-        Screen::Result(r) => r.op.clone(),
+fn current_op(state: &State) -> Option<CopyOp> {
+    match state.page {
+        Page::Browser => {
+            let browser = state.browser.as_ref()?;
+            if browser.focus == Focus::Result {
+                browser.editor.last_op.clone()
+            } else {
+                draft_op(browser, None).ok()
+            }
+        }
+        Page::Watch => state.watch().map(|watch| CopyOp::Listen {
+            rule: watch.rule.clone(),
+        }),
+        Page::Expanded => state.expanded.as_ref()?.op.clone(),
         _ => None,
     }
 }
 
-/// The plain-text rendering of a Result's output for `y` (copy-result-text).
-/// Streaming-listen Results (with messages) take precedence: the message blocks
-/// joined by `\n`. One-shot results: `Call(lines)` → lines joined by `\n`,
-/// `Get(v)` → `v`, `Set` → `"ok"`. `None` when there's no result yet (nothing
-/// to copy) or an error is showing (don't copy error text).
-fn copy_result_text(r: &ResultScreen) -> Option<String> {
-    if !r.messages.is_empty() {
-        return Some(r.messages.join("\n"));
-    }
-    if r.error.is_some() {
-        return None;
-    }
-    match &r.result {
-        Some(ActionResult::Call(lines)) => Some(lines.join("\n")),
-        Some(ActionResult::Get(v)) => Some(v.clone()),
-        Some(ActionResult::Set) => Some("ok".to_string()),
-        None => None,
+fn current_text(state: &State) -> Option<String> {
+    match state.page {
+        Page::Browser => state
+            .browser
+            .as_ref()?
+            .editor
+            .outcome
+            .as_ref()
+            .map(Outcome::text),
+        Page::Watch => state.watch().map(Watch::text),
+        Page::Expanded => state
+            .expanded
+            .as_ref()
+            .map(|expanded| expanded.text.clone()),
+        _ => None,
     }
 }
 
-/// Build the `CopyOp` a Detail's current input values would produce — mirrors the
-/// `Effect` the trigger builds, so copy-as reflects what's typed (not just what
-/// was last invoked).
-fn copy_op_from_detail(d: &DetailScreen, nav: &NavContext) -> CopyOp {
-    match &d.kind {
-        ActionKind::Call { method, signature } => CopyOp::Call {
-            service: nav.service.clone(),
-            object: nav.object.clone(),
-            iface: nav.interface.clone(),
-            method: method.clone(),
-            signature: signature.clone(),
-            args: d
-                .inputs
+fn expand(state: &mut State) -> Option<Effect> {
+    let text = current_text(state)?;
+    if text.is_empty() {
+        return None;
+    }
+    let op = match state.page {
+        Page::Browser => state.browser.as_ref()?.editor.last_op.clone(),
+        _ => current_op(state),
+    };
+    let title = match state.page {
+        Page::Browser => {
+            let browser = state.browser.as_ref()?;
+            format!(
+                "{}.{}",
+                browser.context.interface,
+                browser.member_name(browser.selected())
+            )
+        }
+        Page::Watch => state.watch()?.target.name().into(),
+        _ => return None,
+    };
+    state.expanded = Some(Expanded {
+        origin: state.page,
+        title,
+        text,
+        op,
+        scroll: 0,
+        hscroll: 0,
+    });
+    state.page = Page::Expanded;
+    None
+}
+
+fn start_watch(state: &mut State) -> Option<Effect> {
+    let browser = state.browser.as_ref()?;
+    let context = browser.context.clone();
+    let name = browser.member_name(browser.selected()).to_string();
+    if name.is_empty() {
+        return None;
+    }
+    let target = match browser.category {
+        Category::Methods => ListenTarget::Method(name),
+        Category::Properties => ListenTarget::Property(name),
+        Category::Signals => ListenTarget::Signal(name),
+    };
+    let rule = match listen_rule(&context, &target) {
+        Ok(rule) => rule.to_string(),
+        Err(error) => {
+            set_editor_error(state, error);
+            return None;
+        }
+    };
+    let id = state.request_id();
+    state.watch = Some(Watch {
+        id,
+        context: context.clone(),
+        target: target.clone(),
+        rule,
+        cancel: None,
+        starting: true,
+        stopped: false,
+        error: None,
+        events: Default::default(),
+        total: 0,
+        paused: None,
+        scroll: 0,
+        hscroll: 0,
+        follow: true,
+    });
+    state.page = Page::Watch;
+    Some(Effect::Listen(id, context, target))
+}
+
+fn watch_key(state: &mut State, key: KeyCode) -> Option<Effect> {
+    match key {
+        KeyCode::Enter => return expand(state),
+        KeyCode::Char('p') => watch_action(state, 0),
+        KeyCode::Char('s') => watch_action(state, 1),
+        KeyCode::Char('x') => watch_action(state, 2),
+        KeyCode::End => {
+            if let Some(watch) = state.watch_mut() {
+                watch.follow = true;
+            }
+        }
+        _ => {
+            if let Some(watch) = state.watch_mut() {
+                if matches!(
+                    key,
+                    KeyCode::Up
+                        | KeyCode::Down
+                        | KeyCode::PageUp
+                        | KeyCode::PageDown
+                        | KeyCode::Home
+                        | KeyCode::Char('j' | 'k')
+                ) {
+                    watch.follow = false;
+                }
+                scroll_text(&watch.text(), &mut watch.scroll, &mut watch.hscroll, key);
+            }
+        }
+    }
+    None
+}
+
+fn watch_action(state: &mut State, index: usize) {
+    if index == 3 {
+        back(state);
+        return;
+    }
+    let Some(watch) = state.watch_mut() else {
+        return;
+    };
+    match index {
+        0 => {
+            watch.paused = if watch.paused.is_some() {
+                None
+            } else {
+                Some(watch.text())
+            };
+            watch.follow = watch.paused.is_none();
+        }
+        1 => {
+            watch.cancel = None;
+            watch.stopped = true;
+            watch.starting = false;
+        }
+        2 => {
+            watch.events.clear();
+            watch.paused = watch.paused.as_ref().map(|_| String::new());
+            watch.scroll = 0;
+        }
+        _ => {}
+    }
+}
+
+pub fn scroll_text(text: &str, scroll: &mut usize, horizontal: &mut usize, key: KeyCode) {
+    let last = text.lines().count().saturating_sub(1);
+    match key {
+        KeyCode::Up | KeyCode::Char('k') => *scroll = scroll.saturating_sub(1),
+        KeyCode::Down | KeyCode::Char('j') => *scroll = (*scroll + 1).min(last),
+        KeyCode::PageUp => *scroll = scroll.saturating_sub(10),
+        KeyCode::PageDown => *scroll = (*scroll + 10).min(last),
+        KeyCode::Home => {
+            *scroll = 0;
+            *horizontal = 0;
+        }
+        KeyCode::End => *scroll = last,
+        KeyCode::Left | KeyCode::Char('h') => *horizontal = horizontal.saturating_sub(4),
+        KeyCode::Right | KeyCode::Char('l') => {
+            let longest = text
+                .lines()
+                .map(|line| ratatui::text::Line::raw(line).width())
+                .max()
+                .unwrap_or(0);
+            *horizontal = (*horizontal + 4).min(longest.saturating_sub(1));
+        }
+        _ => {}
+    }
+}
+
+fn move_index(index: &mut usize, count: usize, delta: i32) {
+    *index = if delta < 0 {
+        index.saturating_sub(delta.unsigned_abs() as usize)
+    } else {
+        index
+            .saturating_add(delta as usize)
+            .min(count.saturating_sub(1))
+    };
+}
+
+fn clear_filter(state: &mut State) {
+    let query = state.query().to_string();
+    if state.page == Page::Browser
+        && let Some(browser) = &mut state.browser
+        && browser.focus == Focus::Navigation
+        && let Some(row) = browser
+            .navigation(&query)
+            .get(browser.nav_selected)
+            .copied()
+    {
+        browser.nav_selected = browser
+            .navigation("")
+            .iter()
+            .position(|candidate| *candidate == row)
+            .unwrap_or(0);
+    }
+    state.filter = None;
+}
+
+fn filter_key(state: &mut State, key: KeyEvent) -> Option<Effect> {
+    match key.code {
+        KeyCode::Esc => {
+            clear_filter(state);
+            clamp_filter(state);
+        }
+        KeyCode::Enter => {
+            let empty = match state.page {
+                Page::Services => filtered_services(state).is_empty(),
+                Page::Browser => state.browser.as_ref().is_none_or(|browser| {
+                    if browser.focus == Focus::Navigation {
+                        browser.navigation(state.query()).is_empty()
+                    } else {
+                        browser.visible_members(state.query()).is_empty()
+                    }
+                }),
+                _ => false,
+            };
+            if empty {
+                return None;
+            }
+            let effect = match state.page {
+                Page::Services => open_service(state),
+                Page::Browser
+                    if state
+                        .browser
+                        .as_ref()
+                        .is_some_and(|browser| browser.focus == Focus::Navigation) =>
+                {
+                    open_navigation(state)
+                }
+                Page::Browser => {
+                    if let Some(browser) = &mut state.browser {
+                        browser.focus = if browser.editor.fields.is_empty() {
+                            Focus::Action(0)
+                        } else {
+                            Focus::Field(0)
+                        };
+                    }
+                    None
+                }
+                _ => None,
+            };
+            state.filter = None;
+            return effect;
+        }
+        KeyCode::Up | KeyCode::Down => {
+            move_filtered(state, if key.code == KeyCode::Down { 1 } else { -1 })
+        }
+        _ => {
+            if let Some(input) = &mut state.filter {
+                input.handle_event(&Event::Key(key));
+            }
+            clamp_filter(state);
+        }
+    }
+    None
+}
+
+fn filtered_services(state: &State) -> Vec<usize> {
+    let query = state.query().to_ascii_lowercase();
+    state
+        .services
+        .iter()
+        .enumerate()
+        .filter(|(_, service)| service.name.to_ascii_lowercase().contains(&query))
+        .map(|(index, _)| index)
+        .collect()
+}
+
+fn clamp_filter(state: &mut State) {
+    let query = state.query().to_string();
+    match state.page {
+        Page::Services => {
+            let view = filtered_services(state);
+            if !view.contains(&state.service_selected) {
+                state.service_selected = view.first().copied().unwrap_or(0);
+            }
+        }
+        Page::Browser => {
+            if let Some(browser) = &mut state.browser {
+                if browser.focus == Focus::Navigation {
+                    browser.nav_selected = browser
+                        .nav_selected
+                        .min(browser.navigation(&query).len().saturating_sub(1));
+                } else {
+                    let view = browser.visible_members(&query);
+                    if !view.contains(&browser.selected()) {
+                        browser.selected[browser.category as usize] =
+                            view.first().copied().unwrap_or(0);
+                        browser.select_member();
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn move_filtered(state: &mut State, delta: i32) {
+    let query = state.query().to_string();
+    if state.page == Page::Services {
+        let view = filtered_services(state);
+        let mut index = view
+            .iter()
+            .position(|index| *index == state.service_selected)
+            .unwrap_or(0);
+        move_index(&mut index, view.len(), delta);
+        if let Some(selected) = view.get(index) {
+            state.service_selected = *selected;
+        }
+    } else if let Some(browser) = &mut state.browser {
+        if browser.focus == Focus::Navigation {
+            let count = browser.navigation(&query).len();
+            move_index(&mut browser.nav_selected, count, delta);
+        } else {
+            let view = browser.visible_members(&query);
+            let mut index = view
                 .iter()
-                .flat_map(|i| shell_split(i.value()))
-                .collect(),
-        },
-        ActionKind::Get { property } => CopyOp::Get {
-            service: nav.service.clone(),
-            object: nav.object.clone(),
-            iface: nav.interface.clone(),
-            property: property.clone(),
-        },
-        ActionKind::Set {
-            property,
-            signature,
-        } => CopyOp::Set {
-            service: nav.service.clone(),
-            object: nav.object.clone(),
-            iface: nav.interface.clone(),
-            property: property.clone(),
-            signature: signature.clone(),
-            value: vec![
-                d.inputs
-                    .first()
-                    .map(|i| i.value().to_string())
-                    .unwrap_or_default(),
-            ],
-        },
-        ActionKind::Listen { target } => {
-            // Reuse the same match-rule helper the live listen uses; on a rule
-            // that can't be built (rare: malformed name) fall back to an empty
-            // rule — the popup just shows a degenerate command for each tool.
-            let rule = listen_rule(&nav.interface, &nav.object, target)
-                .map(|r| r.to_string())
-                .unwrap_or_default();
-            CopyOp::Listen { rule }
+                .position(|index| *index == browser.selected())
+                .unwrap_or(0);
+            move_index(&mut index, view.len(), delta);
+            if let Some(selected) = view.get(index)
+                && *selected != browser.selected()
+            {
+                browser.selected[browser.category as usize] = *selected;
+                browser.select_member();
+            }
         }
     }
 }
 
-/// Precompute each tool's command for `op` and open the popup focused on row 0.
-fn open_copy_as_popup(state: &mut State, op: CopyOp) {
-    let bus = state.bus.clone();
-    let commands = Tool::ALL.map(|t| (t, generate(&op, &bus, t)));
+fn open_copy(state: &mut State, op: CopyOp) {
+    state.clipboard_request = None;
+    let commands = Tool::ALL
+        .into_iter()
+        .map(|tool| (tool, generate(&op, &state.bus, tool)))
+        .collect();
     state.popup = Some(CopyAsPopup {
-        op,
         commands,
         selected: 0,
         status: None,
+        scroll: 0,
     });
 }
 
-/// Key handling for the open copy-as popup. The flow keeps the popup open so the
-/// copy result can be shown:
-/// - No copy yet (`status.is_none()`): ↑↓/jk move the tool selection (clamped
-///   to the row count); Enter copies the focused tool's command — sets a transient
-///   "copying…" status and emits `Effect::CopyToClipboard` WITHOUT closing. A
-///   no-op if the tool can't express the op.
-/// - After a copy (`status.is_some()`): navigation is locked; Enter dismisses
-///   the popup.
-/// - Esc always closes (whether or not a copy happened).
-fn update_popup_key(state: &mut State, code: KeyCode) -> Option<Effect> {
+fn copy_text(state: &mut State, text: String) -> Effect {
+    let id = state.request_id();
+    state.clipboard_request = Some(id);
+    Effect::Clipboard(id, text)
+}
+
+fn popup_key(state: &mut State, key: KeyCode) -> Option<Effect> {
+    if key == KeyCode::Esc {
+        state.popup = None;
+        return None;
+    }
     let popup = state.popup.as_mut()?;
-    let copy_done = popup.status.is_some();
-    match code {
-        KeyCode::Esc => {
-            state.popup = None;
-            None
+    match key {
+        KeyCode::Left | KeyCode::Up | KeyCode::Char('h' | 'k') => {
+            move_index(&mut popup.selected, popup.commands.len(), -1);
+            popup.scroll = 0;
+            popup.status = None;
         }
-        KeyCode::Up | KeyCode::Char('k') if !copy_done => {
-            popup.selected = popup.selected.saturating_sub(1);
-            None
+        KeyCode::Right | KeyCode::Down | KeyCode::Tab | KeyCode::Char('l' | 'j') => {
+            popup.selected = (popup.selected + 1) % popup.commands.len();
+            popup.scroll = 0;
+            popup.status = None;
         }
-        KeyCode::Down | KeyCode::Char('j') if !copy_done => {
-            popup.selected = (popup.selected + 1).min(popup.commands.len() - 1);
-            None
+        KeyCode::PageUp => popup.scroll = popup.scroll.saturating_sub(10),
+        KeyCode::PageDown => {
+            let length = popup
+                .commands
+                .get(popup.selected)
+                .and_then(|(_, cmd)| cmd.as_ref())
+                .map_or(0, String::len);
+            popup.scroll = (popup.scroll + 10).min(length);
         }
-        KeyCode::Enter if copy_done => {
-            // A copy already happened (its result is showing) → Enter dismisses.
-            state.popup = None;
-            None
-        }
-        KeyCode::Enter => copy_selected_tool(popup),
-        _ => None,
-    }
-}
-
-/// `Enter` on the Interface screen's action button bar: first press drills INTO
-/// the button bar; once in it, Enter fires the selected action. A 0-input
-/// action (Get / Listen / no-arg Call) skips the Detail form and fires straight
-/// to the Result — like the single-interface auto-skip; Call/Set push the form.
-///
-/// Lifted out of `handle_enter`'s `match state.top()` so it can mutate `state`
-/// (push the Result/Detail) without fighting the match's immutable borrow.
-fn enter_interface_action(state: &mut State) -> Option<Effect> {
-    // If focus is still on a member column, Enter drills INTO the action button
-    // bar (does not fire anything yet). Once `in_buttons`, Enter fires.
-    if let Screen::Interface(i) = state.top_mut()
-        && !i.in_buttons
-    {
-        i.in_buttons = true;
-        i.button_selected = 0;
-        return None;
-    }
-    // Gather all owned data from the Interface screen in a tight scope so the
-    // immutable `state.top()` borrow ends before we mutate `state` (push the
-    // Detail / fire the Result).
-    let (kind, inputs, field_labels) = {
-        let i = match state.top() {
-            Screen::Interface(i) => i,
-            _ => return None,
-        };
-        let buttons = buttons_for(i.focus);
-        let action = *buttons.get(i.button_selected)?;
-        let kind = match i.focus {
-            InterfaceFocus::Methods => {
-                let m = i.methods.get(i.selected[0])?;
-                match action {
-                    "Call" => ActionKind::Call {
-                        method: m.name.clone(),
-                        signature: m.signature.clone(),
-                    },
-                    "Listen" => ActionKind::Listen {
-                        target: ListenTarget::Method {
-                            member: m.name.clone(),
-                        },
-                    },
-                    _ => return None,
-                }
-            }
-            InterfaceFocus::Properties => {
-                let (name, sig, _access) = i.properties.get(i.selected[1])?;
-                match action {
-                    "Get" => ActionKind::Get {
-                        property: name.clone(),
-                    },
-                    "Set" => ActionKind::Set {
-                        property: name.clone(),
-                        signature: sig.clone(),
-                    },
-                    "Listen" => ActionKind::Listen {
-                        target: ListenTarget::Property {
-                            property: name.clone(),
-                        },
-                    },
-                    _ => return None,
-                }
-            }
-            InterfaceFocus::Signals => {
-                let (name, _sig) = i.signals.get(i.selected[2])?;
-                match action {
-                    "Listen" => ActionKind::Listen {
-                        target: ListenTarget::Signal {
-                            member: name.clone(),
-                        },
-                    },
-                    _ => return None,
-                }
-            }
-        };
-        // Build the form fields: Call → one input per IN-arg; Set → one input
-        // (the new value), labeled with the property's signature; Get/Listen →
-        // no inputs. A Listen carries its match-rule preview as a single label.
-        let (inputs, field_labels) = match &kind {
-            ActionKind::Call { .. } => {
-                let m = i.methods.get(i.selected[0]);
-                match m {
-                    Some(m) => call_fields(&m.args),
-                    None => (vec![], vec![]),
-                }
-            }
-            ActionKind::Set { signature, .. } => {
-                (vec![tui_input::Input::default()], vec![signature.clone()])
-            }
-            ActionKind::Get { .. } => (vec![], vec![]),
-            ActionKind::Listen { target } => {
-                let rule = listen_rule(&state.nav.interface, &state.nav.object, target)
-                    .map(|r| r.to_string());
-                (
-                    vec![],
-                    vec![rule.unwrap_or_else(|e| format!("invalid match rule: {e}"))],
-                )
-            }
-        };
-        (kind, inputs, field_labels)
-    };
-    // A 0-input action (Get / Listen / no-arg Call) needs no form, so skip the
-    // Detail screen and fire straight to the Result — like the single-interface
-    // auto-skip.
-    if inputs.is_empty() {
-        let d = DetailScreen {
-            kind,
-            inputs: vec![],
-            field_labels: vec![],
-            field_selected: 0,
-            focus: DetailFocus::Trigger,
-            loading: false,
-            error: None,
-        };
-        let (rs, effect) = build_detail_result(&d, &state.nav);
-        state.push_screen(Screen::Result(rs));
-        return Some(effect);
-    }
-    push_detail(state, kind, inputs, field_labels);
-    None
-}
-
-/// `Enter` on the Detail screen's `[Trigger]`: fire the action to the Result.
-/// Only fires when the trigger button is focused. Lifted out of `handle_enter`'s
-/// `match state.top()` (which binds the screen) so it can mutate `state` — the
-/// `&State` borrow is contained in a block that hands back an owned clone.
-fn enter_detail_trigger(state: &mut State) -> Option<Effect> {
-    let d = match state.top() {
-        Screen::Detail(d) => d,
-        _ => return None,
-    };
-    if d.focus != DetailFocus::Trigger {
-        return None;
-    }
-    // Build the owned Result + Effect while borrowing `d`, then release before
-    // pushing (which needs `&mut State`).
-    let (rs, effect) = build_detail_result(d, &state.nav);
-    state.push_screen(Screen::Result(rs));
-    Some(effect)
-}
-
-/// `Enter` drills one level deeper, pushing the next screen + requesting its fetch.
-fn handle_enter(state: &mut State) -> Option<Effect> {
-    match state.top() {
-        Screen::Service(s) => {
-            let svc = s.services.get(s.selected).map(|sv| sv.name.clone())?;
-            state.nav.service = svc.clone();
-            state.push_screen(Screen::Objects(ObjectsScreen {
-                paths: vec![],
-                selected: 0,
-                loading: true,
-                error: None,
-            }));
-            Some(Effect::FetchObjects(svc))
-        }
-        Screen::Objects(o) => {
-            let path = o.paths.get(o.selected).cloned()?;
-            state.nav.object = path.clone();
-            push_interfaces(state);
-            Some(Effect::FetchInterfaces(state.nav.service.clone(), path))
-        }
-        Screen::Interfaces(i) => {
-            state.nav.interface = i.names.get(i.selected).cloned()?;
-            push_interface(state)
-        }
-        Screen::Interface(_) => enter_interface_action(state),
-        Screen::Detail(_) => enter_detail_trigger(state),
-        Screen::Result(_) => None,
-    }
-}
-
-/// Whether a screen hosts a filterable list (Service/Objects/Interfaces). The
-/// Detail screen's `tui_input` fields are a different interaction, not the `/`
-/// filter.
-fn is_list_screen(s: &Screen) -> bool {
-    matches!(
-        s,
-        Screen::Service(_) | Screen::Objects(_) | Screen::Interfaces(_)
-    )
-}
-
-/// Key handling while the `/` filter is active on a list screen. See the call
-/// site for the routing rationale.
-fn handle_filter_key(state: &mut State, k: KeyEvent) -> Option<Effect> {
-    match k.code {
-        // Esc: drop the filter, restore the full list (do NOT pop the screen).
-        KeyCode::Esc => {
-            state.filter = None;
-            None
-        }
-        // Enter: drill into the filtered selection (kept inside the view by
-        // `clamp_filter_selection`), then `push_screen` clears the filter. With
-        // no matches there's nothing to drill — just drop the filter.
         KeyCode::Enter => {
-            if filter_view_of(state).is_empty() {
-                state.filter = None;
-                return None;
-            }
-            handle_enter(state)
-        }
-        // ↑↓ move `selected` among the matches. j/k are NOT navigation here —
-        // they fall through to the edit arm and type into the query.
-        KeyCode::Down => {
-            move_filter_selection(state, 1);
-            None
-        }
-        KeyCode::Up => {
-            move_filter_selection(state, -1);
-            None
-        }
-        // Anything else (printable chars, backspace, ←→, Home/End) edits the
-        // query, then we keep `selected` on a still-visible row.
-        _ => {
-            if let Some(input) = state.filter.as_mut() {
-                input.handle_event(&crossterm::event::Event::Key(k));
-            }
-            clamp_filter_selection(state);
-            None
-        }
-    }
-}
-
-/// The filtered raw-index view for the current list screen + active query.
-fn filter_view_of(state: &State) -> Vec<usize> {
-    let q = state.filter.as_ref().map(|f| f.value()).unwrap_or("");
-    match state.top() {
-        Screen::Service(s) => filter_view(&s.services, q, |sv| sv.name.as_str()),
-        Screen::Objects(o) => filter_view(&o.paths, q, |p| p.as_str()),
-        Screen::Interfaces(i) => filter_view(&i.names, q, |n| n.as_str()),
-        _ => Vec::new(),
-    }
-}
-
-/// Read the selected raw index of the current list screen.
-fn current_selected(state: &State) -> usize {
-    match state.top() {
-        Screen::Service(s) => s.selected,
-        Screen::Objects(o) => o.selected,
-        Screen::Interfaces(i) => i.selected,
-        _ => 0,
-    }
-}
-
-/// Set the selected raw index of the current list screen.
-fn set_selected(state: &mut State, idx: usize) {
-    match state.top_mut() {
-        Screen::Service(s) => s.selected = idx,
-        Screen::Objects(o) => o.selected = idx,
-        Screen::Interfaces(i) => i.selected = idx,
-        _ => {}
-    }
-}
-
-/// Move `selected` one step (`delta` = ±1) within the filtered view, snapping at
-/// the ends. No-op when the view is empty.
-fn move_filter_selection(state: &mut State, delta: i32) {
-    let view = filter_view_of(state);
-    if view.is_empty() {
-        return;
-    }
-    let pos = view
-        .iter()
-        .position(|&i| i == current_selected(state))
-        .map(|p| p as i32)
-        .unwrap_or(0);
-    let new_pos = (pos + delta).clamp(0, view.len() as i32 - 1) as usize;
-    set_selected(state, view[new_pos]);
-}
-
-/// After a query edit, keep `selected` on a row still in the view; if the
-/// row it pointed at was filtered out, snap to the first match. No-op when the
-/// view is empty (nothing to snap to).
-fn clamp_filter_selection(state: &mut State) {
-    let view = filter_view_of(state);
-    if view.is_empty() {
-        return;
-    }
-    let cur = current_selected(state);
-    if !view.contains(&cur) {
-        set_selected(state, view[0]);
-    }
-}
-
-/// `↑↓`/`jk` scroll the result. Clamp coarsely: never below 0, never past the
-/// last content line. `update` has no frame area, so visible-row-precise
-/// clamping can't be done here — render applies the offset (and single-line
-/// results simply don't scroll). Real precise scrolling matters most for
-/// streaming monitor results.
-fn update_result_key(r: &mut ResultScreen, code: KeyCode) {
-    // Streaming-listen mode counts received message blocks; one-shot mode counts
-    // reply lines (1 for Get/Set/empty). Clamp coarsely: render applies the offset.
-    let lines = if !r.messages.is_empty() {
-        r.messages.len()
-    } else {
-        match &r.result {
-            Some(ActionResult::Call(vs)) => vs.len(),
-            Some(ActionResult::Get(_)) | None | Some(ActionResult::Set) => 1,
-        }
-    };
-    match code {
-        KeyCode::Down | KeyCode::Char('j') => {
-            r.scroll = (r.scroll + 1).min(lines.saturating_sub(1));
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            r.scroll = r.scroll.saturating_sub(1);
-        }
-        KeyCode::Right | KeyCode::Char('l') => {
-            r.hscroll = r.hscroll.saturating_add(1);
-        }
-        KeyCode::Left | KeyCode::Char('h') => {
-            r.hscroll = r.hscroll.saturating_sub(1);
-        }
-        _ => {}
-    }
-}
-
-fn update_service_key(s: &mut ServiceScreen, code: KeyCode) {
-    match code {
-        KeyCode::Down | KeyCode::Char('j') if !s.services.is_empty() => {
-            s.selected = (s.selected + 1).min(s.services.len() - 1);
-        }
-        KeyCode::Up | KeyCode::Char('k') if !s.services.is_empty() => {
-            s.selected = s.selected.saturating_sub(1);
-        }
-        _ => {}
-    }
-}
-
-fn update_objects_key(o: &mut ObjectsScreen, code: KeyCode) {
-    // `Enter` is handled in `handle_enter` (drill into the selected path).
-    match code {
-        KeyCode::Down | KeyCode::Char('j') if !o.paths.is_empty() => {
-            o.selected = (o.selected + 1).min(o.paths.len() - 1);
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            o.selected = o.selected.saturating_sub(1);
-        }
-        _ => {}
-    }
-}
-
-fn update_interfaces_key(i: &mut InterfacesScreen, code: KeyCode) {
-    match code {
-        KeyCode::Down | KeyCode::Char('j') if !i.names.is_empty() => {
-            i.selected = (i.selected + 1).min(i.names.len() - 1);
-        }
-        KeyCode::Up | KeyCode::Char('k') if !i.names.is_empty() => {
-            i.selected = i.selected.saturating_sub(1);
-        }
-        _ => {}
-    }
-}
-
-/// Interface focus scheme:
-/// - `Tab` / `Shift+Tab` cycle the three columns (Methods→Properties→Signals→
-///   Methods, reverse for Shift+Tab). The button bar is NOT in this ring; Tab
-///   always leaves the button bar first (`in_buttons = false`) then cycles.
-/// - Column focus (`!in_buttons`): `↑↓`/`jk` move the focused column's member
-///   selection.
-/// - Button-bar focus (`in_buttons`): `↑↓`/`jk` move `button_selected` within the
-///   focused column's action list.
-/// - `Enter` (drill into buttons / fire a button) and `Esc` (back out of buttons
-///   before popping) are handled in `handle_enter` / the global Esc arm — NOT
-///   here, since they need `&mut State`.
-/// - `r` (refresh the property-value snapshot) is handled globally in
-///   `update_key` so the same key refreshes every list/interface screen.
-fn update_interface_key(i: &mut InterfaceScreen, k: KeyEvent) -> Option<Effect> {
-    match (k.code, k.modifiers.contains(KeyModifiers::SHIFT)) {
-        // Tab (no Shift): leave the button bar if in it, then cycle forward.
-        (KeyCode::Tab, false) => {
-            i.in_buttons = false;
-            i.focus = cycle_focus(i.focus, 1);
-        }
-        // Shift+Tab (BackTab or Tab+Shift): leave the button bar, cycle backward.
-        (KeyCode::BackTab, _) | (KeyCode::Tab, true) => {
-            i.in_buttons = false;
-            i.focus = cycle_focus(i.focus, -1);
-        }
-        (KeyCode::Down, _) | (KeyCode::Char('j'), _) => {
-            if i.in_buttons {
-                let len = buttons_for(i.focus).len();
-                if len > 0 {
-                    i.button_selected = (i.button_selected + 1).min(len - 1);
-                }
-            } else {
-                let idx = focus_index(i.focus);
-                let len = column_len(i, idx);
-                if len > 0 {
-                    i.selected[idx] = (i.selected[idx] + 1).min(len - 1);
-                }
-            }
-        }
-        (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {
-            if i.in_buttons {
-                i.button_selected = i.button_selected.saturating_sub(1);
-            } else {
-                let idx = focus_index(i.focus);
-                i.selected[idx] = i.selected[idx].saturating_sub(1);
+            if let Some(command) = popup
+                .commands
+                .get(popup.selected)
+                .and_then(|(_, command)| command.clone())
+            {
+                popup.status = Some("Copying...".into());
+                return Some(copy_text(state, command));
             }
         }
         _ => {}
@@ -946,524 +1358,227 @@ fn update_interface_key(i: &mut InterfaceScreen, k: KeyEvent) -> Option<Effect> 
     None
 }
 
-/// `r` refresh handler: refetch the top screen's data. Sets `loading = true`
-/// and clears any prior error so the user sees a clean loading state, then
-/// returns the matching `Effect` for `run_effect` to perform. No-op (returns
-/// `None`) on Detail/Result, which carry no refreshable data.
-///
-/// On Service/Objects/Interfaces, the existing list/paths/names stay visible
-/// until the new data arrives (selection is re-clamped by `load_*`); on
-/// Interface only the property-value snapshot is re-fetched (methods/signals
-/// come from the parent Interfaces screen's cached introspection node).
-fn refresh_screen(state: &mut State) -> Option<Effect> {
-    let service = state.nav.service.clone();
-    let object = state.nav.object.clone();
-    let interface = state.nav.interface.clone();
-    match state.top_mut() {
-        Screen::Service(s) => {
-            s.loading = true;
-            s.error = None;
-            Some(Effect::FetchServices)
-        }
-        Screen::Objects(o) => {
-            o.loading = true;
-            o.error = None;
-            Some(Effect::FetchObjects(service))
-        }
-        Screen::Interfaces(i) => {
-            i.loading = true;
-            i.error = None;
-            Some(Effect::FetchInterfaces(service, object))
-        }
-        Screen::Interface(i) => {
-            i.loading = true;
-            i.error = None;
-            Some(Effect::FetchProperties(service, object, interface))
-        }
-        _ => None,
+fn mouse(state: &mut State, event: MouseEvent) -> Option<Effect> {
+    state.key_prefix = None;
+    if state.help_open {
+        return None;
     }
-}
-
-/// Cycle `focus` among Methods/Properties/Signals by `dir` (+1 forward, -1 back).
-fn cycle_focus(focus: InterfaceFocus, dir: i32) -> InterfaceFocus {
-    let idx = focus_index(focus) as i32;
-    // Three columns: wrap with Euclidean remainder so -1 from Methods → Signals.
-    let next = ((idx + dir) % 3 + 3) % 3;
-    match next {
-        0 => InterfaceFocus::Methods,
-        1 => InterfaceFocus::Properties,
-        _ => InterfaceFocus::Signals,
-    }
-}
-
-fn focus_index(focus: InterfaceFocus) -> usize {
-    match focus {
-        InterfaceFocus::Methods => 0,
-        InterfaceFocus::Properties => 1,
-        InterfaceFocus::Signals => 2,
-    }
-}
-
-fn column_len(i: &InterfaceScreen, idx: usize) -> usize {
-    match idx {
-        0 => i.methods.len(),
-        1 => i.properties.len(),
-        _ => i.signals.len(),
-    }
-}
-
-/// The action buttons offered for a given column. Each column carries a
-/// `Listen` (listen) button; methods also `Call`, properties `Get`/`Set`.
-fn buttons_for(column: InterfaceFocus) -> &'static [&'static str] {
-    match column {
-        InterfaceFocus::Methods => &["Call", "Listen"],
-        InterfaceFocus::Properties => &["Get", "Set", "Listen"],
-        InterfaceFocus::Signals => &["Listen"],
-    }
-}
-
-/// Detail key handling: `Tab` cycles Field0→Field1→…→Trigger→Field0, `↑↓`/`jk`
-/// move the focused field, and any other key edits the focused input via tui-input.
-/// `Esc` (pop) and `Enter` (trigger) are handled globally / in `handle_enter`.
-fn update_detail_key(d: &mut DetailScreen, k: KeyEvent) -> Option<Effect> {
-    let n = d.inputs.len();
-    let shift = k.modifiers.contains(KeyModifiers::SHIFT);
-    match k.code {
-        // Forward cycle: Field0→Field1→…→Trigger→Field0.
-        KeyCode::Tab if !shift => {
-            // Cycle the focus. With 0 inputs the field row is empty, so a single
-            // Tab lands on the trigger; otherwise Field0→Field1→…→last→Trigger→Field0.
-            match d.focus {
-                DetailFocus::Field => {
-                    if n == 0 {
-                        d.focus = DetailFocus::Trigger;
-                    } else if d.field_selected + 1 < n {
-                        d.field_selected += 1;
-                    } else {
-                        d.focus = DetailFocus::Trigger;
-                    }
-                }
-                DetailFocus::Trigger => {
-                    d.focus = DetailFocus::Field;
-                    d.field_selected = 0;
-                }
-            }
-        }
-        // Reverse cycle (Shift+Tab): Field0→Trigger→last→…→Field1→Field0.
-        KeyCode::BackTab | KeyCode::Tab => match d.focus {
-            DetailFocus::Field => {
-                if d.field_selected > 0 {
-                    d.field_selected -= 1;
-                } else {
-                    d.focus = DetailFocus::Trigger;
-                }
-            }
-            DetailFocus::Trigger => {
-                d.focus = DetailFocus::Field;
-                d.field_selected = n.saturating_sub(1);
-            }
-        },
-        KeyCode::Down | KeyCode::Char('j') if d.focus == DetailFocus::Field && n > 0 => {
-            d.field_selected = (d.field_selected + 1).min(n - 1);
-        }
-        KeyCode::Up | KeyCode::Char('k') if d.focus == DetailFocus::Field && n > 0 => {
-            d.field_selected = d.field_selected.saturating_sub(1);
-        }
-        _ if d.focus == DetailFocus::Field && n > 0 => {
-            // Any other key edits the focused input (tui-input mutates in place;
-            // ignore its changed-state return value).
-            d.inputs[d.field_selected].handle_event(&crossterm::event::Event::Key(k));
-        }
-        _ => {}
-    }
-    None
-}
-
-fn load_services(s: &mut ServiceScreen, res: Result<Vec<ServiceInfo>, crate::error::Error>) {
-    s.loading = false;
-    match res {
-        Ok(services) => {
-            s.selected = s.selected.min(services.len().saturating_sub(1));
-            s.services = services;
-        }
-        Err(e) => s.error = Some(e),
-    }
-}
-
-/// Populate the top Objects screen with the flattened path list; auto-skip if
-/// the service's only object is the root "/" (drill straight into its interfaces).
-fn load_objects(state: &mut State, res: Result<ObjectNode, crate::error::Error>) -> Option<Effect> {
-    let mut drill = None;
-    if let Screen::Objects(o) = state.top_mut() {
-        o.loading = false;
-        match res {
-            Ok(root) => {
-                let paths = flatten_paths(&root);
-                if paths.len() == 1 {
-                    drill = Some(paths[0].clone());
-                }
-                o.selected = 0;
-                o.paths = paths;
-            }
-            Err(e) => o.error = Some(e),
-        }
-    }
-    // Single-object auto-skip: drill straight into Interfaces. The service is
-    // already in `nav` (set when the Objects screen was pushed).
-    if let Some(path) = drill {
-        state.nav.object = path.clone();
-        push_interfaces(state);
-        return Some(Effect::FetchInterfaces(state.nav.service.clone(), path));
-    }
-    None
-}
-
-/// Populate the top Interfaces screen from the introspection node; auto-skip if
-/// the object exposes exactly one interface.
-fn load_interfaces(
-    state: &mut State,
-    service: String,
-    object: String,
-    res: Result<Node<'static>, crate::error::Error>,
-) -> Option<Effect> {
-    let mut drill = None;
-    // Read the config before borrowing `state` mutably for the screen.
-    let show_standard = state.show_standard_interfaces;
-    // Staleness guard: a fetch can complete after the user navigated away.
-    // Compare the loaded (service, object) against the current nav.
-    let (cur_service, cur_object) = (state.nav.service.clone(), state.nav.object.clone());
-    if let Screen::Interfaces(i) = state.top_mut() {
-        if cur_service != service || cur_object != object {
+    if matches!(
+        event.kind,
+        MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+    ) {
+        if state.popup.is_some() {
             return None;
         }
-        i.loading = false;
-        match res {
-            Ok(node) => {
-                // Drop the standard D-Bus interfaces (Properties/Introspectable/
-                // Peer) unless `--show-standard-interfaces` asked for them.
-                // `node` keeps everything so drilling into a shown interface
-                // still finds its members.
-                let names: Vec<String> = node
-                    .interfaces()
-                    .iter()
-                    .map(|iface| iface.name().to_string())
-                    .filter(|n| show_standard || !crate::dbus::introspect::is_standard_interface(n))
-                    .collect();
-                if names.len() == 1 {
-                    drill = Some(names[0].clone());
+        let key = if event.kind == MouseEventKind::ScrollDown {
+            KeyCode::Down
+        } else {
+            KeyCode::Up
+        };
+        return if state.filter.is_some() {
+            move_filtered(state, if key == KeyCode::Down { 1 } else { -1 });
+            None
+        } else {
+            key_event(state, KeyEvent::new(key, KeyModifiers::NONE))
+        };
+    }
+    if event.kind != MouseEventKind::Down(MouseButton::Left) {
+        return None;
+    }
+    let target = state
+        .click_targets
+        .iter()
+        .rev()
+        .find(|(area, _)| area.contains((event.column, event.row).into()))
+        .map(|(_, target)| target.clone())?;
+    if state.popup.is_some() && !matches!(target, ClickTarget::PopupTool(_)) {
+        return None;
+    }
+    if !matches!(
+        target,
+        ClickTarget::Tab(_) | ClickTarget::CloseTab(_) | ClickTarget::NewTab
+    ) && let Some(browser) = state.browser.as_mut()
+    {
+        browser.editor.editing = false;
+    }
+    match target {
+        ClickTarget::Service(index) => {
+            let already = state.service_selected == index;
+            state.service_selected = index;
+            if already {
+                return open_service(state);
+            }
+        }
+        ClickTarget::Navigation(index) => {
+            if state
+                .browser
+                .as_ref()
+                .is_some_and(|browser| browser.focus != Focus::Navigation)
+            {
+                clear_filter(state);
+            }
+            let browser = state.browser.as_mut()?;
+            let already = browser.focus == Focus::Navigation && browser.nav_selected == index;
+            browser.focus = Focus::Navigation;
+            browser.nav_selected = index;
+            if already {
+                return open_navigation(state);
+            }
+        }
+        ClickTarget::Category(category) => {
+            clear_filter(state);
+            let browser = state.browser.as_mut()?;
+            if browser.category != category {
+                browser.category = category;
+                browser.select_member();
+            }
+            browser.focus = Focus::Members;
+        }
+        ClickTarget::Member(index) => {
+            if state.browser.as_ref().is_some_and(|browser| {
+                browser.focus != Focus::Members || browser.selected() == index
+            }) {
+                clear_filter(state);
+            }
+            let browser = state.browser.as_mut()?;
+            let already = browser.focus == Focus::Members && browser.selected() == index;
+            if browser.selected() != index {
+                browser.selected[browser.category as usize] = index;
+                browser.select_member();
+            }
+            browser.focus = if already {
+                if browser.editor.fields.is_empty() {
+                    Focus::Action(0)
+                } else {
+                    Focus::Field(0)
                 }
-                i.selected = i.selected.min(names.len().saturating_sub(1));
-                i.names = names;
-                i.node = Some(node);
-            }
-            Err(e) => i.error = Some(e),
+            } else {
+                Focus::Members
+            };
         }
-    }
-    if let Some(iface) = drill {
-        state.nav.interface = iface;
-        return push_interface(state);
+        ClickTarget::Field(index) => {
+            clear_filter(state);
+            state.browser.as_mut()?.focus = Focus::Field(index);
+        }
+        ClickTarget::Action(index) => {
+            clear_filter(state);
+            state.browser.as_mut()?.focus = Focus::Action(index);
+            return activate(state, index);
+        }
+        ClickTarget::Result => {
+            clear_filter(state);
+            state.browser.as_mut()?.focus = Focus::Result;
+        }
+        ClickTarget::Tab(index) => state.select_tab(index),
+        ClickTarget::CloseTab(index) => state.close_tab_at(index),
+        ClickTarget::NewTab => state.new_tab(),
+        ClickTarget::WatchAction(index) => watch_action(state, index),
+        ClickTarget::PopupTool(index) => {
+            let popup = state.popup.as_mut()?;
+            if popup.selected == index {
+                return popup_key(state, KeyCode::Enter);
+            }
+            popup.selected = index;
+            popup.scroll = 0;
+            popup.status = None;
+        }
     }
     None
 }
 
-/// Populate the top Interface screen's property-value snapshot from a GetAll result.
-fn load_properties(
-    state: &mut State,
-    res: Result<Vec<(String, OwnedValue)>, crate::error::Error>,
-) -> Option<Effect> {
-    if let Screen::Interface(i) = state.top_mut() {
-        i.loading = false;
-        match res {
-            Ok(vals) => {
-                i.prop_values = vals
-                    .into_iter()
-                    .map(|(k, v)| (k, crate::value::pretty::pretty(&v)))
-                    .collect();
-            }
-            Err(e) => i.error = Some(e),
-        }
-    }
-    None
-}
-
-/// Methods extracted from an interface.
-type Methods = Vec<MethodMember>;
-/// (name, signature, access) per property.
-type Properties = Vec<(String, String, String)>;
-/// (name, signature) per signal.
-type Signals = Vec<(String, String)>;
-
-/// Extract (methods, properties, signals) for `iface_name` from an introspection
-/// node. Method signature = the concatenated IN-arg signatures; signal
-/// signature = all args; property = (name, type, access).
-fn members_of(node: &Node, iface_name: &str) -> (Methods, Properties, Signals) {
-    let Some(iface) = node
+fn members_of(node: &Node<'_>, interface: &str) -> Members {
+    let Some(interface) = node
         .interfaces()
         .iter()
-        .find(|i| i.name().as_ref() == iface_name)
+        .find(|iface| iface.name().as_ref() == interface)
     else {
-        return (vec![], vec![], vec![]);
+        return Members::default();
     };
-    let methods = iface
+    let methods = interface
         .methods()
         .iter()
-        .map(|m| {
-            let in_args: Vec<(String, String)> = m
+        .map(|method| {
+            let args: Vec<_> = method
                 .args()
                 .iter()
-                .filter(|a| a.direction() == Some(ArgDirection::In))
-                .map(|a| (a.name().unwrap_or("").to_string(), sig_str(a.ty())))
+                .filter(|arg| arg.direction() != Some(ArgDirection::Out))
+                .map(|arg| (arg.name().unwrap_or("").to_string(), sig_str(arg.ty())))
                 .collect();
-            let in_sig: String = in_args.iter().map(|(_, s)| s.clone()).collect();
-            MethodMember {
-                name: m.name().to_string(),
-                signature: in_sig,
-                args: in_args,
+            let signature = args
+                .iter()
+                .map(|(_, signature)| signature.as_str())
+                .collect();
+            let returns = method
+                .args()
+                .iter()
+                .filter(|arg| arg.direction() == Some(ArgDirection::Out))
+                .map(|arg| sig_str(arg.ty()))
+                .collect();
+            Method {
+                name: method.name().to_string(),
+                signature,
+                returns,
+                args,
             }
         })
         .collect();
-    let properties = iface
+    let properties = interface
         .properties()
         .iter()
-        .map(|p| {
-            (
-                p.name().to_string(),
-                sig_str(p.ty()),
-                access_str(p.access()).to_string(),
-            )
+        .map(|property| Property {
+            name: property.name().to_string(),
+            signature: sig_str(property.ty()),
+            access: access_str(property.access()).into(),
         })
         .collect();
-    let signals = iface
+    let signals = interface
         .signals()
         .iter()
-        .map(|s| {
-            let args: String = s.args().iter().map(|a| sig_str(a.ty())).collect();
-            (s.name().to_string(), args)
+        .map(|signal| Signal {
+            name: signal.name().to_string(),
+            signature: signal.args().iter().map(|arg| sig_str(arg.ty())).collect(),
         })
         .collect();
-    (methods, properties, signals)
-}
-
-/// Push an Interfaces screen in loading state. The service/object are already
-/// recorded in [`State::nav`] by the caller.
-fn push_interfaces(state: &mut State) {
-    state.push_screen(Screen::Interfaces(InterfacesScreen {
-        names: vec![],
-        node: None,
-        selected: 0,
-        loading: true,
-        error: None,
-    }));
-}
-
-/// Push an Interface screen. `state.nav.interface` is set by the caller;
-/// members are parsed from the parent Interfaces screen's cached introspection
-/// node (no extra fetch).
-fn push_interface(state: &mut State) -> Option<Effect> {
-    let iface = state.nav.interface.clone();
-    let members = match state.top() {
-        Screen::Interfaces(i) => i.node.as_ref().map(|n| members_of(n, &iface)),
-        _ => None,
-    };
-    let (methods, properties, signals) = members.unwrap_or_default();
-    // Only fetch property VALUES (GetAll) when the interface actually has
-    // properties — calling GetAll on a property-less interface is pointless, and
-    // some objects error on it (their GetAll rejects interfaces they don't
-    // track, e.g. the standard org.freedesktop.DBus.* ones). `loading` is true
-    // only while such a fetch is in flight.
-    let has_props = !properties.is_empty();
-    state.push_screen(Screen::Interface(InterfaceScreen {
+    Members {
         methods,
         properties,
         signals,
-        prop_values: vec![],
-        focus: Default::default(),
-        in_buttons: false,
-        button_selected: 0,
-        selected: [0, 0, 0],
-        loading: has_props,
-        error: None,
-    }));
-    if has_props {
-        Some(Effect::FetchProperties(
-            state.nav.service.clone(),
-            state.nav.object.clone(),
-            iface,
-        ))
-    } else {
-        None
     }
 }
 
-/// Build the form fields for a method call: one `tui-input` per IN-arg, labeled
-/// "name  sig" (or just `sig` when the arg name is empty). Zero-arg methods yield
-/// zero fields — the Detail is just the `[Trigger]` button.
-fn call_fields(args: &[(String, String)]) -> (Vec<tui_input::Input>, Vec<String>) {
-    let labels = args
-        .iter()
-        .map(|(name, sig)| {
-            if name.is_empty() {
-                sig.clone()
+/// Signal/property rules constrain sender as well as path and interface.
+/// PropertiesChanged additionally constrains arg0 to the selected interface.
+/// Method calls constrain destination (the sender is the caller).
+pub fn listen_rule(context: &Context, target: &ListenTarget) -> Result<zbus::MatchRule<'static>> {
+    let builder = zbus::MatchRule::builder().path(context.object.as_str())?;
+    let rule = match target {
+        ListenTarget::Signal(member) => builder
+            .msg_type(zbus::message::Type::Signal)
+            .sender(context.service.as_str())?
+            .interface(context.interface.as_str())?
+            .member(member.as_str())?
+            .build(),
+        ListenTarget::Property(_) => builder
+            .msg_type(zbus::message::Type::Signal)
+            .sender(context.service.as_str())?
+            .interface("org.freedesktop.DBus.Properties")?
+            .member("PropertiesChanged")?
+            .arg(0, context.interface.as_str())?
+            .build(),
+        ListenTarget::Method(member) => {
+            // The async subscription setup resolves well-known destinations
+            // to unique names, which are the only names zbus accepts here.
+            let builder = if context.service.starts_with(':') {
+                builder.destination(context.service.as_str())?
             } else {
-                format!("{name}  {sig}")
-            }
-        })
-        .collect();
-    let inputs = args.iter().map(|_| tui_input::Input::default()).collect();
-    (inputs, labels)
-}
-
-/// Build the `(title, Effect)` a Detail action fires, from its kind + inputs.
-/// Shared by the `[Trigger]` Enter and the 0-input auto-trigger.
-fn detail_action(d: &DetailScreen, nav: &NavContext) -> (String, Effect) {
-    match &d.kind {
-        ActionKind::Call { method, signature } => {
-            let args: Vec<String> = d
-                .inputs
-                .iter()
-                .flat_map(|i| shell_split(i.value()))
-                .collect();
-            (
-                format!("{}.{}", nav.interface, method),
-                Effect::CallMethod {
-                    service: nav.service.clone(),
-                    object: nav.object.clone(),
-                    iface: nav.interface.clone(),
-                    method: method.clone(),
-                    signature: signature.clone(),
-                    args,
-                },
-            )
-        }
-        ActionKind::Get { property } => (
-            format!("{}.{}", nav.interface, property),
-            Effect::GetProperty {
-                service: nav.service.clone(),
-                object: nav.object.clone(),
-                iface: nav.interface.clone(),
-                property: property.clone(),
-            },
-        ),
-        ActionKind::Set {
-            property,
-            signature,
-        } => {
-            let value = d
-                .inputs
-                .first()
-                .map(|i| i.value().to_string())
-                .unwrap_or_default();
-            (
-                format!("{}.{}", nav.interface, property),
-                Effect::SetProperty {
-                    service: nav.service.clone(),
-                    object: nav.object.clone(),
-                    iface: nav.interface.clone(),
-                    property: property.clone(),
-                    signature: signature.clone(),
-                    value,
-                },
-            )
-        }
-        ActionKind::Listen { target } => {
-            // Listen targets a member/property; title surfaces which.
-            let member_or_prop = match target {
-                ListenTarget::Signal { member } | ListenTarget::Method { member } => member.clone(),
-                ListenTarget::Property { property } => property.clone(),
+                builder
             };
-            (
-                format!("listen {}.{}", nav.interface, member_or_prop),
-                Effect::Listen {
-                    service: nav.service.clone(),
-                    object: nav.object.clone(),
-                    iface: nav.interface.clone(),
-                    target: target.clone(),
-                },
-            )
+            builder
+                .msg_type(zbus::message::Type::MethodCall)
+                .interface(context.interface.as_str())?
+                .member(member.as_str())?
+                .build()
         }
-    }
-}
-
-/// Build the loading Result screen + Effect a Detail action fires, from its
-/// kind + inputs. Returns owned data so the caller can release the `&State`
-/// borrow before pushing. Shared by the Detail `[Trigger]` and the 0-input
-/// auto-trigger.
-fn build_detail_result(d: &DetailScreen, nav: &NavContext) -> (ResultScreen, Effect) {
-    let copy_op = copy_op_from_detail(d, nav);
-    let (title, effect) = detail_action(d, nav);
-    let rs = ResultScreen {
-        title,
-        result: None,
-        error: None,
-        loading: true,
-        scroll: 0,
-        hscroll: 0,
-        messages: vec![],
-        cancel: None,
-        op: Some(copy_op),
     };
-    (rs, effect)
-}
-
-/// Push a Detail form for an action. `inputs`/`field_labels` are non-empty only
-/// for calls (one input per IN-arg) and Set (one input, labeled with the
-/// property's signature); Get keeps both empty. A Listen carries its match-rule
-/// preview as a single label (no inputs).
-fn push_detail(
-    state: &mut State,
-    kind: ActionKind,
-    inputs: Vec<tui_input::Input>,
-    field_labels: Vec<String>,
-) {
-    state.push_screen(Screen::Detail(DetailScreen {
-        kind,
-        inputs,
-        field_labels,
-        field_selected: 0,
-        focus: DetailFocus::default(),
-        loading: false,
-        error: None,
-    }));
-}
-
-/// The match rule that subscribes to a listen target — shared by the Detail
-/// preview here and the live `MessageStream` in `app.rs`.
-///
-/// - Signal → the signal's own rule on `(iface, member, object)`.
-/// - Property → subscribe `org.freedesktop.DBus.Properties.PropertiesChanged` on
-///   `object`; the named property is filtered client-side in `app.rs`.
-/// - Method → a `type='method_call'` rule on `(iface, member, object)`; the TUI
-///   listens via BecomeMonitor on a dedicated connection, which delivers only
-///   matching calls.
-pub(crate) fn listen_rule(
-    iface: &str,
-    object: &str,
-    target: &ListenTarget,
-) -> crate::error::Result<zbus::MatchRule<'static>> {
-    match target {
-        ListenTarget::Signal { member } => crate::dbus::monitor::build_match_rule(
-            Some(iface),
-            Some(member),
-            Some(object),
-            None,
-            None,
-            Some(zbus::message::Type::Signal),
-        ),
-        ListenTarget::Property { .. } => crate::dbus::monitor::build_match_rule(
-            Some("org.freedesktop.DBus.Properties"),
-            Some("PropertiesChanged"),
-            Some(object),
-            None,
-            None,
-            Some(zbus::message::Type::Signal),
-        ),
-        ListenTarget::Method { member } => crate::dbus::monitor::build_match_rule(
-            Some(iface),
-            Some(member),
-            Some(object),
-            None,
-            None,
-            Some(zbus::message::Type::MethodCall),
-        ),
-    }
+    Ok(rule.into_owned())
 }

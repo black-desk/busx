@@ -1,0 +1,6 @@
+---
+source: crates/busx/tests/tui_pty.rs
+assertion_line: 538
+expression: "command.replace(address, \"<SOCKET>\")"
+---
+dbus-send --bus=<SOCKET> --print-reply --dest=org.busx.Test /org/busx/Test org.freedesktop.DBus.Properties.Get string:org.busx.Test string:volume

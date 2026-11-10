@@ -1,0 +1,8 @@
+---
+source: crates/busx/tests/tui_pty.rs
+assertion_line: 144
+expression: "lines.join(\"\\n\")"
+---
+Terminal too small
+Need at least 32 x 10
+Ctrl-C to quit

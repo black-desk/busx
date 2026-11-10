@@ -1,0 +1,6 @@
+---
+source: crates/busx/tests/tui_pty.rs
+assertion_line: 538
+expression: "command.replace(address, \"<SOCKET>\")"
+---
+busx --address=<SOCKET> call org.busx.Test /org/busx/Test org.busx.Test Join as 1 '$foo'

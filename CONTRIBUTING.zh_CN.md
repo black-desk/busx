@@ -1,5 +1,6 @@
 <!--
 SPDX-FileCopyrightText: 2026 Chen Linxian <me@black-desk.cn>
+SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 
 SPDX-License-Identifier: MIT
 -->
@@ -83,11 +84,14 @@ TUI 渲染逻辑用 [`insta`][insta] 做快照测试，期望快照在
 `crates/busx/tests/snapshots/*.snap`。每个测试用 `tuiprobe`
 起一个真实终端，跑真正的 `busx`（连到 `testbus`
 私有 bus），驱动到目标状态后截屏——走完整条 `main` → CLI → crossterm → ratatui →
-`render` 管线。`wait_for_snapshot!`
-轮询直到屏幕匹配已有的期望快照（收敛前的中间帧永不持久化），随后
-`insta::assert_snapshot!` 断言新帧。
+`render` 管线。TUI 测试用 `tuiprobe::TuiProbe::wait_for`
+等待可见结果，不依赖期望快照控制交互时序。只对选定的稳定画面使用
+`insta::assert_snapshot!`，覆盖 80×24、窄屏、参数对齐、导航、监听、帮助和标签栏溢出。服务表格中的 PID 和测试进程名会归一化，保留终端列宽；另通过真实 D-Bus 调用、属性值、匹配规则和截获的剪贴板命令独立验证操作效果。延迟回复场景由 fixture 的释放通道控制，不依赖固定等待来安排标签切换。
 
 [insta]: https://insta.rs
+
+容器调用的复制用例还会用 `busctl` 执行复制的命令，因此本套测试除 `dbus-daemon`
+外还需要 `busctl`。
 
 当你**有意**改动 TUI 渲染（布局、文案、配色），快照测试会失败——这是预期的。接受新输出：
 

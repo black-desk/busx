@@ -1,0 +1,21 @@
+---
+source: crates/busx/tests/tui_pty.rs
+assertion_line: 144
+expression: "lines.join(\"\\n\")"
+---
+busx · Custom bus    1 /Test                  ×               +
+org.busx.Test › /org/busx/Test › org.busx.Test
+┌──────────────────────────────────────────────────────────────┐
+│ Properties 4  Methods 10  Signals 0                          │
+│  Name                 Type   Mode Value                      │
+│> counts               a{uu}  r    {1: 10, 2: 20}             │
+└──────────────────────────────────────────────────────────────┘
+┌counts────────────────────────────────────────────────────────┐
+│a{uu} · r                                                     │
+│Current  {1: 10, 2: 20}                                       │
+│ Read   Watch   Copy command                                  │
+│                                                              │
+│                                                              │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+j/k select · h/l category · Enter details · / filter    · ? help

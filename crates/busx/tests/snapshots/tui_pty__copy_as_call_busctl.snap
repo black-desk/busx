@@ -1,5 +1,0 @@
----
-source: crates/busx/tests/tui_pty.rs
-expression: clip.contents()
----
-busctl --address=<SOCKET> call org.busx.Test /org/busx/Test org.busx.Test TakeHints a{sv}

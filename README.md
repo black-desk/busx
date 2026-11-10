@@ -136,12 +136,58 @@ is `0` on success, `1` on failure; piping into `less`/`head` does not panic
 
 - **Runs in a terminal**: no graphical environment needed — works over SSH, in a
   TTY, in a container; d-feet / d-spy are GTK apps that need a desktop.
-- **copy-as**: any operation (method call, get / set property, listen for
-  signals) can be copied as a command line in `dbus-send` / `busctl` / `qdbus` /
-  `gdbus` form
-- **inline filter**: press `/` on any list screen (services / objects /
-  interfaces) to filter by substring (case-insensitive) — type to narrow, `↑↓`
-  to pick, `Enter` to open, `Esc` to clear
+- **Service browser**: a shared object/interface tree and member categories
+  (properties, methods, signals). At 80 columns and above, navigation stays
+  beside the inspector; narrower terminals show the focused pane. `Tab` /
+  `Shift+Tab` move focus, `h/l` switch member categories or fold objects, and
+  `j/k` select rows (arrow keys remain available). `gg/G` jump to the first/last
+  item; `n` returns to navigation. Navigation distinguishes object paths
+  (`▸ /App47`) from indented interfaces (`@ org.gnome.SessionManager.App`).
+  Interface names retain their full namespace; names that exceed the pane width
+  are truncated with an ellipsis, and the selected full name is shown above.
+  Leaf objects start folded; unbranched container paths are compressed.
+  Breadcrumbs use `›` to keep object-path slashes unambiguous.
+- **Inline operations**: select a member to inspect its signature, property
+  permissions (`r` / `w` / `rw`), and current value. Fill parameters and
+  activate `Call` / `Write` explicitly; parameters and results stay together.
+  Parameter inputs share an aligned label column. Focusing an input starts in
+  normal mode: `j/k` selects a field, `i` enters insert mode, and `Esc` returns
+  to normal mode without moving focus. Moving down from the last field focuses
+  the action row; up returns to the last field, and `h/l` selects an action. In
+  insert mode, `Tab` moves between fields; `Enter` finishes editing and focuses
+  the actions without executing. `Expand result` opens large replies
+  full-screen, and `Esc` returns to the editor. Basic values are entered
+  verbatim, including spaces and empty strings; containers use busctl-style
+  count-prefixed tokens, e.g. `2 hello world` for `as`. Ordinary characters,
+  including `q`, type normally inside inputs; `Ctrl+C` closes the current tab
+  from any input.
+- **Independent tabs**: `t` opens a new service browser; `gt/gT` switch to the
+  next/previous tab, and `{number}gt` jumps to a tab. Each tab keeps its own
+  service, object, interface, inputs, results, filter, and scroll position. `q`
+  closes the current tab; closing the last tab exits. `Ctrl+C` closes the
+  current tab even while editing. These letter commands apply in normal mode;
+  typed characters are preserved while editing. The top `+` also opens a tab,
+  tab titles switch tabs, and each tab's `×` closes it.
+- **Contextual footer**: one line shows actions for the focused area and the
+  help entry. Status messages temporarily replace the action hints; global tab
+  shortcuts are listed in help. While editing, leave insert mode with `Esc`
+  before pressing `?` for help.
+- **Watch in place**: `Watch` changes the current tab into a single signal,
+  property-change, or method-call subscription. Use `t` to browse elsewhere
+  while this tab continues listening. `p` freezes the display while collection
+  continues, `s` stops but keeps the messages, `x` clears retained events, and
+  `End` follows the latest event. `Esc` stops the subscription and restores that
+  tab's browser, inputs, and selection; closing the tab also stops it. Each
+  watch retains at most 1,000 events; method-call watching requires permission
+  to become a bus monitor.
+- **copy-as**: `c` previews the current operation as a `dbus-send` / `busctl` /
+  `qdbus` / `gdbus` / `busx` command; choose a tool and press `Enter` to copy.
+  `y` copies result or watch text. Unsupported tool formats are marked in the
+  preview.
+- **Inline filter**: `/` filters services, object/interface navigation, or the
+  active member tab by substring (case-insensitive). Type to narrow, `Up/Down`
+  to select, `Enter` to open, and `Esc` to clear. `?` shows contextual keyboard
+  help outside inputs.
 
 ## Install
 
