@@ -1,5 +1,6 @@
 <!--
 SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 
 SPDX-License-Identifier: MIT
 -->
@@ -136,9 +137,10 @@ python 即可。所有诊断（错误、警告）打到 stderr 并带 `busx:` �
   返回普通模式并保留焦点。在最后一个字段向下移到按钮行，向上返回最后一个字段，`h/l`
   选择按钮。插入模式下 `Tab` 切换字段，`Enter`
   结束编辑并聚焦操作按钮，不会直接执行。 `Expand result` 全屏查看大结果，`Esc`
-  返回编辑区。基本类型的值原样输入，支持空格和空字符串；容器使用 busctl 风格的数量前缀，例如
-  `as` 输入 `2 hello world`。编辑时 `q` 等普通字符正常输入， `Ctrl+C`
-  可在输入框内关闭当前标签。
+  返回编辑区。基本类型的值原样输入，支持空格和空字符串；容器使用 busctl 风格的 token，例如
+  `as` 输入 `2 hello world`。容器输入处提示通过 `?`
+  查看语法规则和 busctl 来源，编辑时先按 `Esc`。编辑时 `q` 等普通字符正常输入，
+  `Ctrl+C` 可在输入框内关闭当前标签。
 - **独立标签页**：`t` 新建服务浏览标签，`gt/gT` 切到下一个／上一个标签，
   `{数字}gt`
   跳到指定标签。每页独立保存服务、对象、接口、参数、结果、过滤条件和滚动位置。

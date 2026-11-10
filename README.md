@@ -1,5 +1,6 @@
 <!--
 SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 
 SPDX-License-Identifier: MIT
 -->
@@ -158,9 +159,10 @@ is `0` on success, `1` on failure; piping into `less`/`head` does not panic
   the actions without executing. `Expand result` opens large replies
   full-screen, and `Esc` returns to the editor. Basic values are entered
   verbatim, including spaces and empty strings; containers use busctl-style
-  count-prefixed tokens, e.g. `2 hello world` for `as`. Ordinary characters,
-  including `q`, type normally inside inputs; `Ctrl+C` closes the current tab
-  from any input.
+  tokens, e.g. `2 hello world` for `as`. Container inputs point to `?` help for
+  syntax rules and the busctl reference; press `Esc` first when editing.
+  Ordinary characters, including `q`, type normally inside inputs; `Ctrl+C`
+  closes the current tab from any input.
 - **Independent tabs**: `t` opens a new service browser; `gt/gT` switch to the
   next/previous tab, and `{number}gt` jumps to a tab. Each tab keeps its own
   service, object, interface, inputs, results, filter, and scroll position. `q`
