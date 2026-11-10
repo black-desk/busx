@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -592,6 +593,17 @@ fn copy_container_call_and_watch_commands() {
     let mut p = spawn(&bus.address, 100, 28, Some(&clip));
     open_interface(&mut p);
     method(&mut p, "TakeHints");
+    wait(&mut p, "Input syntax: Esc, then ? for help");
+    text(&mut p, "?");
+    key(&mut p, KeyCode::PageDown);
+    key(&mut p, KeyCode::PageDown);
+    wait(&mut p, "Input syntax follows busctl (see man busctl).");
+    wait(
+        &mut p,
+        "Example: as takes 2 hello world; empty arrays take 0.",
+    );
+    key(&mut p, KeyCode::Esc);
+    wait(&mut p, "Input syntax: Esc, then ? for help");
     edit(&mut p, "0");
     let command = copy_tool(&mut p, &clip, "busctl");
     // This scenario has no quoted tokens: execute the copied argv directly.

@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -179,7 +180,7 @@ pub fn render(
     if state.help_open {
         targets.clear();
         frame.render_widget(Clear, area);
-        let help = "busx · keyboard\n\nt            new browsing tab\nq            close current tab (last tab exits)\ngt / gT      next / previous tab\n{number}gt   jump to tab number\nTab / S-Tab  next / previous pane or form control\ngg / G       first / last item or result line\nj / k        down / up\nh / l        member categories · fold objects · actions\nEnter        inspect · activate focused action\n/            filter services, navigation, or members\nr            refresh service/tree/property values\nn            focus navigation (also on narrow screens)\nc            copy command (choose a tool)\ny            copy result or watch text\nEsc          leave input · back to navigation · back\nCtrl-C       close current tab, including from inputs\n\nNavigation: /App47 is an object; @ marks an interface.\nInterface names retain their full namespace.\nLong names are clipped; the selected full name is above.\nArrow keys remain aliases for hjkl.\n\nInputs: i enters INSERT; Esc returns to NORMAL.\nj/k selects fields in NORMAL; Tab moves focus.\nEnter finishes editing and focuses actions without running.\nIn INSERT, q, t and other characters enter text normally.\nFilters accept text immediately after /.\nContainers: busctl tokens, e.g. array: 2 hello world\nCall and Write run only when their action is activated.\n\nWatch uses the current tab for one subscription.\np pauses display, s stops but keeps retained messages,\nx clears retained events, End or G follows latest.\nEsc returns to browsing and stops this subscription.\nq closes the tab and stops its subscription.\nUse t to browse elsewhere while this tab listens.\nOnly the latest 1000 events are retained per watch.\n\nResult: hjkl scroll, PgUp/PgDn page, gg/G first/last.\nEsc returns from an expanded result to its source page.\n\nEsc or ? closes help";
+        let help = "busx · keyboard\n\nt            new browsing tab\nq            close current tab (last tab exits)\ngt / gT      next / previous tab\n{number}gt   jump to tab number\nTab / S-Tab  next / previous pane or form control\ngg / G       first / last item or result line\nj / k        down / up\nh / l        member categories · fold objects · actions\nEnter        inspect · activate focused action\n/            filter services, navigation, or members\nr            refresh service/tree/property values\nn            focus navigation (also on narrow screens)\nc            copy command (choose a tool)\ny            copy result or watch text\nEsc          leave input · back to navigation · back\nCtrl-C       close current tab, including from inputs\n\nNavigation: /App47 is an object; @ marks an interface.\nInterface names retain their full namespace.\nLong names are clipped; the selected full name is above.\nArrow keys remain aliases for hjkl.\n\nInputs: i enters INSERT; Esc returns to NORMAL.\nj/k selects fields in NORMAL; Tab moves focus.\nEnter finishes editing and focuses actions without running.\nIn INSERT, q, t and other characters enter text normally.\nFilters accept text immediately after /.\nInput syntax follows busctl (see man busctl).\nBasic values: enter verbatim, including spaces.\nArrays/dicts: count, then elements/key-value pairs.\nExample: as takes 2 hello world; empty arrays take 0.\nStructs: fields in order; variants: signature then value.\nQuote container tokens with spaces, e.g. 1 \"hello world\".\nCall and Write run only when their action is activated.\n\nWatch uses the current tab for one subscription.\np pauses display, s stops but keeps retained messages,\nx clears retained events, End or G follows latest.\nEsc returns to browsing and stops this subscription.\nq closes the tab and stops its subscription.\nUse t to browse elsewhere while this tab listens.\nOnly the latest 1000 events are retained per watch.\n\nResult: hjkl scroll, PgUp/PgDn page, gg/G first/last.\nEsc returns from an expanded result to its source page.\n\nEsc or ? closes help";
         frame.render_widget(
             Paragraph::new(help)
                 .wrap(Wrap { trim: false })
@@ -736,8 +737,7 @@ fn inspector(
     };
     if containers && !browser.editor.fields.is_empty() && y < inner.height {
         frame.render_widget(
-            Paragraph::new("Containers: count + tokens (as: 2 hello world)")
-                .style(Style::default().fg(MUTED)),
+            Paragraph::new("Input syntax: Esc, then ? for help").style(Style::default().fg(MUTED)),
             line(inner, y),
         );
         y += 1;
