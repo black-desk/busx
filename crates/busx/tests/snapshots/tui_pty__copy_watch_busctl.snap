@@ -1,0 +1,6 @@
+---
+source: crates/busx/tests/tui_pty.rs
+assertion_line: 538
+expression: "command.replace(address, \"<SOCKET>\")"
+---
+busctl --address=<SOCKET> monitor "type='method_call',interface='org.busx.Test',member='TakeHints',destination=':1.0',path='/org/busx/Test'"

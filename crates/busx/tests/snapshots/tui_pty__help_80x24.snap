@@ -1,0 +1,29 @@
+---
+source: crates/busx/tests/tui_pty.rs
+assertion_line: 144
+expression: "lines.join(\"\\n\")"
+---
+┌Help · arrows scroll · Esc close──────────────────────────────────────────────┐
+│busx · keyboard                                                               │
+│                                                                              │
+│t            new browsing tab                                                 │
+│q            close current tab (last tab exits)                               │
+│gt / gT      next / previous tab                                              │
+│{number}gt   jump to tab number                                               │
+│Tab / S-Tab  next / previous pane or form control                             │
+│gg / G       first / last item or result line                                 │
+│j / k        down / up                                                        │
+│h / l        member categories · fold objects · actions                       │
+│Enter        inspect · activate focused action                                │
+│/            filter services, navigation, or members                          │
+│r            refresh service/tree/property values                             │
+│n            focus navigation (also on narrow screens)                        │
+│c            copy command (choose a tool)                                     │
+│y            copy result or watch text                                        │
+│Esc          leave input · back to navigation · back                          │
+│Ctrl-C       close current tab, including from inputs                         │
+│                                                                              │
+│Navigation: /App47 is an object; @ marks an interface.                        │
+│Interface names retain their full namespace.                                  │
+│Long names are clipped; the selected full name is above.                      │
+└──────────────────────────────────────────────────────────────────────────────┘

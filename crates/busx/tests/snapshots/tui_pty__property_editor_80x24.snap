@@ -1,0 +1,29 @@
+---
+source: crates/busx/tests/tui_pty.rs
+assertion_line: 144
+expression: "lines.join(\"\\n\")"
+---
+busx · Custom bus    1 /Test                  ×                               +
+org.busx.Test › /org/busx/Test › org.busx.Test
+┌Navigation─────────────┐┌─────────────────────────────────────────────────────┐
+│  ▾ /                  ││ Properties 4  Methods 10  Signals 0                 │
+│    ▾ /org             ││  Name              Type   Mode Value                │
+│      ▾ /busx          ││  counts            a{uu}  r    {1: 10, 2: 20}       │
+│        ▾ /Test        ││  hints             a{sv}  r    {"urgency": <y 1>}   │
+│>         @ org.busx.T…││  name              s      r    "busx-test"          │
+│        ▸ /sub         ││> volume            d      rw   2.75                 │
+│                       │└─────────────────────────────────────────────────────┘
+│                       │┌volume───────────────────────────────────────────────┐
+│                       ││d · rw                                               │
+│                       ││Current  2.75                                        │
+│                       ││New value  d  1.5                                    │
+│                       ││ Write   Read   Watch   Copy command   Expand result │
+│                       ││SUCCESS                                              │
+│                       ││2.75                                                 │
+│                       ││                                                     │
+│                       ││                                                     │
+│                       ││                                                     │
+│                       ││                                                     │
+│/ object · @ interface ││                                                     │
+└───────────────────────┘└─────────────────────────────────────────────────────┘
+h/l action · k inputs · j result · Enter run                            · ? help

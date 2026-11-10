@@ -1,341 +1,699 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Pure display state. A navigation stack of `Screen`s; `render`
-//! draws the top screen + a breadcrumb. `update`/`render` read only this.
+//! Display state for the service browser, inline inspector, and tab-local watches.
+
+use std::collections::VecDeque;
+
+use ratatui::layout::Rect;
+use tui_input::Input;
 
 use crate::dbus::conn::Bus;
 use crate::dbus::types::{ObjectNode, ServiceInfo};
+use crate::error::Error;
 use crate::tui::copy::{CopyOp, Tool};
-use ratatui::layout::Rect;
 
-/// The navigation context: the service / object / interface the user has
-/// drilled into. Each field is set as the user descends one level (service at
-/// the Objects screen, object at Interfaces, interface at Interface) and
-/// cleared on the way back up, so the context always reflects the current
-/// screen's depth. This is the single source of truth — screens carry only view
-/// state, never these strings (which is what removes the clone-on-push dance in
-/// `update` and lets `render`/copy-op read one consistent context).
-#[derive(Clone, Debug, Default)]
-pub struct NavContext {
+pub const EVENT_LIMIT: usize = 1_000;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Context {
     pub service: String,
     pub object: String,
     pub interface: String,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Page {
+    Services,
+    Browser,
+    Watch,
+    Expanded,
+}
+
+/// Connection-wide data plus independent browser tabs. Dereferencing State
+/// accesses the active tab; background replies explicitly locate their owner.
 pub struct State {
-    /// The accumulated service/object/interface of the current drill path.
-    pub nav: NavContext,
-    /// Navigation stack; the last element is the currently-shown screen.
-    /// **Never empty** — the invariant is upheld by [`State::loading_service`]
-    /// (the only constructor, a one-element stack) plus [`State::pop_screen`]
-    /// at the root). Private so external code can't break it; the field is
-    /// reached via [`State::top`] / [`State::top_mut`] / [`State::screens`].
-    screens: Vec<Screen>,
-    pub quit: bool,
-    /// The copy-as popup overlay (`Some` while open; `c` opens, `Esc`/`Enter`
-    /// close). Rendered on top of the current screen by `render::render_popup`.
-    pub popup: Option<CopyAsPopup>,
-    /// Interactive widget rects from the last render, for mouse hit-testing.
-    /// Populated by the loop after `render` (render writes them to an out-param).
-    pub click_targets: Vec<(Rect, ClickTarget)>,
-    /// The `?` help overlay (open/closed). Renders on top of the current screen;
-    /// captures keys while open (Esc/`?` close it; other keys are swallowed).
-    pub help_open: bool,
-    /// The bus busx is connected to, so copy-as emits the matching
-    /// `--user`/`--system`/`--address` flag per tool. Set once at startup in
-    /// `app::run`; defaults to [`Bus::Session`] (the test default).
-    pub bus: Bus,
-    /// Whether the Interfaces list shows the standard D-Bus interfaces
-    /// (Properties/Introspectable/Peer). Hidden by default; set from
-    /// `--show-standard-interfaces` at startup.
-    pub show_standard_interfaces: bool,
-    /// An inline `/` filter active on the current list screen (Service /
-    /// Objects / Interfaces). `Some` while the user is typing; the list shows
-    /// only rows whose key contains the query (case-insensitive). Cleared on
-    /// push/pop so each screen starts unfiltered. `None` ⇒ show every row.
-    pub filter: Option<tui_input::Input>,
-}
-
-/// A clickable region recorded by `render`, mapping a screen rect to what a
-/// left-click there should do (so the mouse handler can hit-test).
-#[derive(Clone, Debug, PartialEq)]
-pub enum ClickTarget {
-    ServiceRow(usize),
-    ObjectsRow(usize),
-    InterfacesRow(usize),
-    MethodRow(usize),
-    PropertyRow(usize),
-    SignalRow(usize),
-    ActionButton(usize),
-    DetailField(usize),
-    DetailTrigger,
-    PopupTool(usize),
-}
-
-/// The copy-as popup state: the operation being rendered, each tool's generated
-/// command (or `None` = unsupported → shown greyed), and the focused tool index.
-///
-/// `commands` is precomputed once when the popup opens so navigation and preview
-/// are pure reads (no `generate` calls on every keypress).
-#[derive(Clone, Debug)]
-pub struct CopyAsPopup {
-    /// The operation being rendered as another tool's command.
-    #[allow(dead_code)]
-    pub op: CopyOp,
-    /// Per-tool generated command (`None` = the tool can't express it). Indexed
-    /// in [`Tool::ALL`] order so `selected` indexes both this and the popup rows.
-    pub commands: [(Tool, Option<String>); Tool::ALL.len()],
-    /// The focused tool row (0..=`Tool::ALL.len()-1`), in [`Tool::ALL`] order.
-    pub selected: usize,
-    /// Status shown after a copy attempt: `None` = no copy yet;
-    /// `Some("copying…")` / `Some("copied")` / `Some("error: …")`. Rendered as a
-    /// status line at the bottom of the popup. Set by the `Msg::ClipboardResult`
-    /// handler (and the transient "copying…" placeholder on Enter).
-    pub status: Option<String>,
-}
-
-pub enum Screen {
-    Service(ServiceScreen),
-    Objects(ObjectsScreen),
-    Interfaces(InterfacesScreen),
-    Interface(InterfaceScreen),
-    Detail(DetailScreen),
-    Result(ResultScreen),
-}
-
-#[derive(Default)]
-pub struct ServiceScreen {
+    pub tabs: Vec<Tab>,
+    pub active_tab: usize,
     pub services: Vec<ServiceInfo>,
-    pub selected: usize,
-    pub loading: bool,
-    pub error: Option<crate::error::Error>,
+    pub services_request: u64,
+    pub services_loading: bool,
+    pub services_error: Option<Error>,
+    pub help_open: bool,
+    pub help_scroll: usize,
+    pub key_prefix: Option<KeyPrefix>,
+    pub click_targets: Vec<(Rect, ClickTarget)>,
+    pub bus: Bus,
+    pub show_standard_interfaces: bool,
+    pub quit: bool,
+    next_id: u64,
 }
 
-/// The object paths of one service, shown as a flat list (d-feet style): each
-/// row is a full path like `/org/freedesktop/DBus` — multi-level paths expanded
-/// rather than collapsed into a tree. The service itself lives in
-/// [`State::nav`].
-pub struct ObjectsScreen {
-    pub paths: Vec<String>,
-    pub selected: usize,
-    pub loading: bool,
-    pub error: Option<crate::error::Error>,
+pub struct Tab {
+    pub id: u64,
+    pub page: Page,
+    pub service_selected: usize,
+    pub browser: Option<Browser>,
+    pub watch: Option<Watch>,
+    pub expanded: Option<Expanded>,
+    pub popup: Option<CopyAsPopup>,
+    pub filter: Option<Input>,
+    pub status: Option<String>,
+    pub clipboard_request: Option<u64>,
+    pub scroll: [usize; 3],
 }
 
-/// The non-standard interfaces of one object. The service/object live in
-/// [`State::nav`].
-pub struct InterfacesScreen {
-    pub names: Vec<String>,
-    /// Cached introspection of this object — the source of `names` now and of the
-    /// interface members (methods/properties/signals) when drilling in.
-    pub node: Option<zbus_xml::Node<'static>>,
-    pub selected: usize,
-    pub loading: bool,
-    pub error: Option<crate::error::Error>,
+impl Default for Tab {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            page: Page::Services,
+            service_selected: 0,
+            browser: None,
+            watch: None,
+            expanded: None,
+            popup: None,
+            filter: None,
+            status: None,
+            clipboard_request: None,
+            scroll: [0; 3],
+        }
+    }
 }
 
-/// One method: `name` + concatenated IN-signature (display) + per-IN-arg
-/// (name, signature) for the call Detail form's input fields.
-#[derive(Clone, Debug)]
-pub struct MethodMember {
-    pub name: String,
-    pub signature: String,
-    pub args: Vec<(String, String)>,
+impl Tab {
+    pub fn title(&self) -> String {
+        let page = self
+            .expanded
+            .as_ref()
+            .filter(|_| self.page == Page::Expanded)
+            .map_or(self.page, |expanded| expanded.origin);
+        if page == Page::Watch {
+            return self.watch.as_ref().map_or_else(
+                || "Watch".into(),
+                |watch| format!("Watch {}", watch.target.name()),
+            );
+        }
+        if page == Page::Services {
+            return "Services".into();
+        }
+        self.browser
+            .as_ref()
+            .map(|browser| {
+                if browser.context.object.is_empty() || browser.context.object == "/" {
+                    browser.context.service.clone()
+                } else {
+                    format!(
+                        "/{}",
+                        browser.context.object.rsplit('/').next().unwrap_or("")
+                    )
+                }
+            })
+            .unwrap_or_else(|| "Browse".into())
+    }
+
+    pub fn stop_watch(&mut self) {
+        if let Some(watch) = &mut self.watch {
+            watch.cancel = None;
+            watch.stopped = true;
+            watch.starting = false;
+        }
+    }
 }
 
-/// One interface: methods / properties (with values) / signals, three columns,
-/// plus a right-side action-button bar for the focused column's selected member.
-/// The service/object/interface live in [`State::nav`].
-pub struct InterfaceScreen {
-    pub methods: Vec<MethodMember>,
-    /// (name, signature, access) per property.
-    pub properties: Vec<(String, String, String)>,
-    /// (name, signature) per signal.
-    pub signals: Vec<(String, String)>,
-    /// GetAll snapshot: property name → pretty value. Refreshed on load / `r`.
-    pub prop_values: Vec<(String, String)>,
-    pub focus: InterfaceFocus,
-    /// Whether the focus is in the right-side action-button bar (rather than in
-    /// a member column). `focus` is always the current column (the one whose
-    /// selected member the buttons act on); `in_buttons` decides whether ↑↓
-    /// moves `button_selected` (true) or the column's `selected` (false).
-    pub in_buttons: bool,
-    /// Which action button is highlighted in the right panel.
-    pub button_selected: usize,
-    pub selected: [usize; 3],
-    pub loading: bool,
-    pub error: Option<crate::error::Error>,
+impl std::ops::Deref for State {
+    type Target = Tab;
+    fn deref(&self) -> &Tab {
+        &self.tabs[self.active_tab]
+    }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum InterfaceFocus {
-    #[default]
-    Methods,
-    Properties,
-    Signals,
-}
-
-/// An action form. Call = one input per IN-arg; Set = one input; Get = no
-/// inputs; Listen = a match-rule preview as a single label (no inputs).
-/// The service/object/interface live in [`State::nav`].
-pub struct DetailScreen {
-    pub kind: ActionKind,
-    /// One `tui-input` per form field (call args / set value). Empty for get /
-    /// zero-arg calls.
-    pub inputs: Vec<tui_input::Input>,
-    /// "name  sig" per input (display label). Empty for get / zero-arg calls.
-    pub field_labels: Vec<String>,
-    pub field_selected: usize,
-    pub focus: DetailFocus,
-    pub loading: bool,
-    pub error: Option<crate::error::Error>,
-}
-
-#[derive(Clone, Debug)]
-pub enum ActionKind {
-    Call { method: String, signature: String },
-    Get { property: String },
-    Set { property: String, signature: String },
-    Listen { target: ListenTarget },
-}
-
-/// What a listen targets — a signal member, a property's `PropertiesChanged`
-/// notifications, or a method-call stream via BecomeMonitor.
-#[derive(Clone, Debug)]
-pub enum ListenTarget {
-    Signal { member: String },
-    Property { property: String },
-    Method { member: String },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum DetailFocus {
-    #[default]
-    Field,
-    Trigger,
-}
-
-/// The outcome of a one-shot action (call/get/set), or a streaming listen.
-pub struct ResultScreen {
-    pub title: String,
-    pub result: Option<ActionResult>,
-    pub error: Option<crate::error::Error>,
-    pub loading: bool,
-    pub scroll: usize,
-    /// Horizontal scroll offset (in chars) for a long single line that
-    /// overflows the result area. Render shows `<`/`>` at the edges to hint at
-    /// hidden content (←/→ or h/l to scroll).
-    pub hscroll: usize,
-    /// Streaming-listen mode: appended message blocks (`format_message` output).
-    pub messages: Vec<String>,
-    /// Cancel sender for an active listen. Stored when `Msg::ListenStarted`
-    /// arrives; dropped when this screen is popped (Esc) → the listen task exits.
-    pub cancel: Option<futures::channel::oneshot::Sender<()>>,
-    /// The operation that produced this Result, so `c` can open a copy-as popup
-    /// for it. `None` for Results created without one (test literals, etc.).
-    pub op: Option<CopyOp>,
-}
-
-#[derive(Clone, Debug)]
-pub enum ActionResult {
-    Call(Vec<String>), // each reply value, pretty-printed
-    Get(String),       // the property value, pretty-printed
-    Set,               // success
+impl std::ops::DerefMut for State {
+    fn deref_mut(&mut self) -> &mut Tab {
+        &mut self.tabs[self.active_tab]
+    }
 }
 
 impl State {
-    /// A Service screen in the loading state (the TUI's initial screen).
-    pub fn loading_service() -> Self {
-        State {
-            nav: NavContext::default(),
-            screens: vec![Screen::Service(ServiceScreen {
-                services: vec![],
-                selected: 0,
-                loading: true,
-                error: None,
-            })],
-            quit: false,
-            popup: None,
-            click_targets: Vec::new(),
+    pub fn new(bus: Bus, show_standard_interfaces: bool) -> Self {
+        Self {
+            tabs: vec![Tab::default()],
+            active_tab: 0,
+            services: vec![],
+            services_request: 0,
+            services_loading: true,
+            services_error: None,
             help_open: false,
-            bus: Bus::Session,
-            show_standard_interfaces: false,
-            filter: None,
+            help_scroll: 0,
+            key_prefix: None,
+            click_targets: vec![],
+            bus,
+            show_standard_interfaces,
+            quit: false,
+            next_id: 0,
         }
     }
 
-    /// The currently-shown screen. The stack is never empty (private field,
-    /// `loading_service` starts non-empty, `pop_screen` refuses at the root), so
-    /// `len() - 1` is a valid index — no `expect`/`unwrap` needed.
-    pub fn top(&self) -> &Screen {
-        &self.screens[self.screens.len() - 1]
+    /// IDs are connection-wide: closing a tab cannot make its late replies
+    /// match a subsequently opened tab or subscription.
+    pub fn request_id(&mut self) -> u64 {
+        self.next_id += 1;
+        self.next_id
     }
 
-    pub fn top_mut(&mut self) -> &mut Screen {
-        let last = self.screens.len() - 1;
-        &mut self.screens[last]
+    pub fn new_tab(&mut self) {
+        let id = self.request_id();
+        self.tabs.push(Tab {
+            id,
+            ..Tab::default()
+        });
+        self.select_tab(self.tabs.len() - 1);
     }
 
-    /// Read-only view of the screen stack (for depth assertions in tests).
-    pub fn screens(&self) -> &[Screen] {
-        &self.screens
-    }
-
-    /// Push a screen onto the navigation stack.
-    pub fn push_screen(&mut self, screen: Screen) {
-        self.filter = None;
-        self.screens.push(screen);
-    }
-
-    /// Pop the top screen, clearing the nav field it owns (service at Objects,
-    /// object at Interfaces, interface at Interface). Detail/Result own no nav
-    /// field (they sit above Interface). Returns `false` at the root screen,
-    /// where there is nothing to pop — the caller then quits instead.
-    pub fn pop_screen(&mut self) -> bool {
-        if self.screens.len() <= 1 {
-            return false;
+    pub fn select_tab(&mut self, index: usize) {
+        if index < self.tabs.len() {
+            self.active_tab = index;
+            self.key_prefix = None;
+            self.click_targets.clear();
         }
-        self.filter = None;
-        match self.screens.last() {
-            Some(Screen::Objects(_)) => self.nav.service.clear(),
-            Some(Screen::Interfaces(_)) => self.nav.object.clear(),
-            Some(Screen::Interface(_)) => self.nav.interface.clear(),
-            _ => {}
+    }
+
+    pub fn close_tab(&mut self) {
+        self.close_tab_at(self.active_tab);
+    }
+
+    pub fn close_tab_at(&mut self, index: usize) {
+        let Some(tab) = self.tabs.get_mut(index) else {
+            return;
+        };
+        tab.stop_watch();
+        if self.tabs.len() == 1 {
+            self.quit = true;
+            return;
         }
-        self.screens.pop();
-        true
+        self.tabs.remove(index);
+        let active = self.active_tab - usize::from(index < self.active_tab);
+        self.select_tab(active.min(self.tabs.len() - 1));
+    }
+
+    pub fn query(&self) -> &str {
+        self.filter.as_ref().map_or("", Input::value)
+    }
+
+    pub fn watch(&self) -> Option<&Watch> {
+        self.watch.as_ref()
+    }
+    pub fn watch_mut(&mut self) -> Option<&mut Watch> {
+        self.watch.as_mut()
     }
 }
 
-/// Flatten the walked object-path tree into a depth-first list of full paths
-/// (root first), e.g. `["/org/foo", "/bar"]` — the d-feet flat view. Pure
-/// container paths (no interfaces ⇒ no object of their own) are skipped.
-pub fn flatten_paths(root: &ObjectNode) -> Vec<String> {
-    let mut out = Vec::new();
-    if !root.interfaces.is_empty() {
-        out.push(root.path.clone());
-    }
-    for child in &root.children {
-        out.extend(flatten_paths(child));
-    }
-    out
+pub struct Browser {
+    pub context: Context,
+    pub objects: Vec<NavObject>,
+    pub nav_selected: usize,
+    pub focus: Focus,
+    pub tree_request: u64,
+    pub interface_request: u64,
+    pub properties_request: u64,
+    pub tree_loading: bool,
+    pub interface_loading: bool,
+    pub properties_loading: bool,
+    pub error: Option<Error>,
+    pub properties_error: Option<Error>,
+    pub members: Members,
+    pub category: Category,
+    pub selected: [usize; 3],
+    pub values: Vec<(String, String)>,
+    pub editor: Editor,
 }
 
-/// The filtered view of a list: the raw indices whose `key` contains `query`
-/// (case-insensitive substring). An empty query returns every index, so the
-/// unfiltered case routes through the same path — callers need not special-case
-/// "no filter". Used by the list screens' render + arrow navigation + drill.
-pub fn filter_view<T>(items: &[T], query: &str, key: impl Fn(&T) -> &str) -> Vec<usize> {
-    if query.is_empty() {
-        return (0..items.len()).collect();
+impl Browser {
+    pub fn new(service: String, request: u64) -> Self {
+        Self {
+            context: Context {
+                service,
+                ..Context::default()
+            },
+            objects: vec![],
+            nav_selected: 0,
+            focus: Focus::Navigation,
+            tree_request: request,
+            interface_request: 0,
+            properties_request: 0,
+            tree_loading: true,
+            interface_loading: false,
+            properties_loading: false,
+            error: None,
+            properties_error: None,
+            members: Members::default(),
+            category: Category::Properties,
+            selected: [0; 3],
+            values: vec![],
+            editor: Editor::default(),
+        }
     }
-    let q = query.to_ascii_lowercase();
-    items
-        .iter()
-        .enumerate()
-        .filter(|(_, it)| key(it).to_ascii_lowercase().contains(&q))
-        .map(|(i, _)| i)
-        .collect()
+
+    pub fn navigation(&self, query: &str) -> Vec<NavRow> {
+        let mut rows = vec![];
+        let query = query.to_ascii_lowercase();
+        let mut hidden_prefix: Option<String> = None;
+        for (index, object) in self.objects.iter().enumerate() {
+            if query.is_empty()
+                && hidden_prefix
+                    .as_ref()
+                    .is_some_and(|prefix| object.path.starts_with(prefix))
+            {
+                continue;
+            }
+            hidden_prefix = None;
+            if query.is_empty() && !object.expanded {
+                hidden_prefix = Some(format!("{}/", object.path.trim_end_matches('/')));
+            }
+            let matches_path = object.path.to_ascii_lowercase().contains(&query);
+            let interfaces: Vec<_> = object
+                .interfaces
+                .iter()
+                .enumerate()
+                .filter(|(_, name)| matches_path || name.to_ascii_lowercase().contains(&query))
+                .collect();
+            if matches_path || !interfaces.is_empty() {
+                rows.push(NavRow::Object(index));
+                if object.expanded || !query.is_empty() {
+                    rows.extend(
+                        interfaces
+                            .into_iter()
+                            .map(|(i, _)| NavRow::Interface(index, i)),
+                    );
+                }
+            }
+        }
+        rows
+    }
+
+    /// A filtered row can belong to a folded subtree. Reveal its ancestors
+    /// before clearing the filter, so selection stays on the opened object.
+    pub fn reveal_object(&mut self, index: usize, expand_selected: bool) {
+        let path = self.objects[index].path.clone();
+        for object in &mut self.objects {
+            let ancestor = object.path != path
+                && path.starts_with(&format!("{}/", object.path.trim_end_matches('/')));
+            if ancestor || (expand_selected && object.path == path) {
+                object.expanded = true;
+            }
+        }
+    }
+
+    pub fn visible_members(&self, query: &str) -> Vec<usize> {
+        let query = query.to_ascii_lowercase();
+        (0..self.member_count())
+            .filter(|&index| {
+                self.member_name(index)
+                    .to_ascii_lowercase()
+                    .contains(&query)
+            })
+            .collect()
+    }
+
+    pub fn member_count(&self) -> usize {
+        match self.category {
+            Category::Properties => self.members.properties.len(),
+            Category::Methods => self.members.methods.len(),
+            Category::Signals => self.members.signals.len(),
+        }
+    }
+
+    pub fn member_name(&self, index: usize) -> &str {
+        match self.category {
+            Category::Properties => self.members.properties.get(index).map(|p| p.name.as_str()),
+            Category::Methods => self.members.methods.get(index).map(|m| m.name.as_str()),
+            Category::Signals => self.members.signals.get(index).map(|s| s.name.as_str()),
+        }
+        .unwrap_or("")
+    }
+
+    pub fn selected(&self) -> usize {
+        self.selected[self.category as usize]
+    }
+
+    pub fn value(&self, name: &str) -> Option<&str> {
+        self.values
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// Selection previews never execute a remote action, including no-arg calls.
+    pub fn select_member(&mut self) {
+        let fields = match self.category {
+            Category::Methods => self
+                .members
+                .methods
+                .get(self.selected())
+                .map(|m| {
+                    m.args
+                        .iter()
+                        .map(|(name, signature)| Field {
+                            label: format!(
+                                "{}  {signature}",
+                                if name.is_empty() { "arg" } else { name }
+                            ),
+                            input: Input::default(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            Category::Properties => self
+                .members
+                .properties
+                .get(self.selected())
+                .filter(|p| p.writable())
+                .map(|p| {
+                    vec![Field {
+                        label: format!("New value  {}", p.signature),
+                        input: Input::default(),
+                    }]
+                })
+                .unwrap_or_default(),
+            Category::Signals => vec![],
+        };
+        self.editor = Editor {
+            fields,
+            ..Editor::default()
+        };
+    }
+
+    pub fn actions(&self) -> Vec<Action> {
+        if self.interface_loading || self.context.interface.is_empty() || self.member_count() == 0 {
+            return vec![];
+        }
+        let mut actions = match self.category {
+            Category::Methods => vec![Action::Call, Action::Watch],
+            Category::Properties => {
+                let Some(property) = self.members.properties.get(self.selected()) else {
+                    return vec![];
+                };
+                let mut actions = vec![];
+                if property.writable() {
+                    actions.push(Action::Write);
+                }
+                if property.readable() {
+                    actions.push(Action::Read);
+                }
+                actions.push(Action::Watch);
+                actions
+            }
+            Category::Signals => vec![Action::Watch],
+        };
+        actions.push(Action::Copy);
+        if self.editor.outcome.is_some() {
+            actions.push(Action::Expand);
+        }
+        actions
+    }
+}
+
+pub struct NavObject {
+    pub path: String,
+    pub depth: usize,
+    pub interfaces: Vec<String>,
+    pub expanded: bool,
+}
+
+pub fn navigation_objects(root: ObjectNode, show_standard: bool) -> Vec<NavObject> {
+    fn walk(node: ObjectNode, show: bool, depth: usize, out: &mut Vec<NavObject>) {
+        // Compress unbranched container paths such as /org/gnome. Their full
+        // prefix remains in the object's path and the breadcrumb.
+        if node.interfaces.is_empty() && node.children.len() == 1 {
+            for child in node.children {
+                walk(child, show, depth, out);
+            }
+            return;
+        }
+        let expanded = !node.children.is_empty() || out.is_empty();
+        let mut interfaces: Vec<_> = node
+            .interfaces
+            .into_iter()
+            .filter(|name| show || !crate::dbus::introspect::is_standard_interface(name))
+            .collect();
+        interfaces.sort();
+        out.push(NavObject {
+            path: node.path,
+            depth,
+            interfaces,
+            expanded,
+        });
+        let mut children = node.children;
+        children.sort_by(|left, right| left.path.cmp(&right.path));
+        for child in children {
+            walk(child, show, depth + 1, out);
+        }
+    }
+    let mut objects = vec![];
+    walk(root, show_standard, 0, &mut objects);
+    objects
+}
+
+#[derive(Clone, Copy)]
+pub enum KeyPrefix {
+    Count(usize),
+    G(Option<usize>),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum NavRow {
+    Object(usize),
+    Interface(usize, usize),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Focus {
+    Navigation,
+    Members,
+    Field(usize),
+    Action(usize),
+    Result,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Category {
+    Properties,
+    Methods,
+    Signals,
+}
+
+impl Category {
+    pub const ALL: [Self; 3] = [Self::Properties, Self::Methods, Self::Signals];
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Properties => "Properties",
+            Self::Methods => "Methods",
+            Self::Signals => "Signals",
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct Members {
+    pub methods: Vec<Method>,
+    pub properties: Vec<Property>,
+    pub signals: Vec<Signal>,
+}
+
+pub struct Method {
+    pub name: String,
+    pub signature: String,
+    pub returns: String,
+    pub args: Vec<(String, String)>,
+}
+
+pub struct Property {
+    pub name: String,
+    pub signature: String,
+    pub access: String,
+}
+
+impl Property {
+    pub fn readable(&self) -> bool {
+        self.access != "write"
+    }
+    pub fn writable(&self) -> bool {
+        self.access != "read"
+    }
+    pub fn mode(&self) -> &'static str {
+        match self.access.as_str() {
+            "read" => "r",
+            "write" => "w",
+            _ => "rw",
+        }
+    }
+}
+
+pub struct Signal {
+    pub name: String,
+    pub signature: String,
+}
+
+#[derive(Default)]
+pub struct Editor {
+    pub fields: Vec<Field>,
+    pub editing: bool,
+    pub pending: Option<u64>,
+    pub outcome: Option<Outcome>,
+    pub last_op: Option<CopyOp>,
+    pub scroll: usize,
+    pub hscroll: usize,
+}
+
+pub struct Field {
+    pub label: String,
+    pub input: Input,
+}
+
+pub struct Outcome {
+    pub result: Option<ActionResult>,
+    pub error: Option<Error>,
+}
+
+impl Outcome {
+    pub fn text(&self) -> String {
+        if let Some(error) = &self.error {
+            return error_text(error);
+        }
+        match &self.result {
+            Some(ActionResult::Call(values)) if values.is_empty() => {
+                "Success (no return values)".into()
+            }
+            Some(ActionResult::Call(values)) => values.join("\n"),
+            Some(ActionResult::Get(value)) => value.clone(),
+            Some(ActionResult::Set) => "Written successfully".into(),
+            None => String::new(),
+        }
+    }
+}
+
+pub fn error_text(error: &Error) -> String {
+    let mut text = error.to_string();
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        text.push_str(&format!("\n  caused by: {cause}"));
+        source = cause.source();
+    }
+    text
+}
+
+pub enum ActionResult {
+    Call(Vec<String>),
+    Get(String),
+    Set,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Action {
+    Call,
+    Read,
+    Write,
+    Watch,
+    Copy,
+    Expand,
+}
+
+impl Action {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Call => "Call",
+            Self::Read => "Read",
+            Self::Write => "Write",
+            Self::Watch => "Watch",
+            Self::Copy => "Copy command",
+            Self::Expand => "Expand result",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ListenTarget {
+    Signal(String),
+    Property(String),
+    Method(String),
+}
+
+impl ListenTarget {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Signal(name) | Self::Property(name) | Self::Method(name) => name,
+        }
+    }
+}
+
+pub struct Watch {
+    pub id: u64,
+    pub context: Context,
+    pub target: ListenTarget,
+    pub rule: String,
+    pub cancel: Option<futures::channel::oneshot::Sender<()>>,
+    pub starting: bool,
+    pub stopped: bool,
+    pub error: Option<Error>,
+    pub events: VecDeque<String>,
+    pub total: u64,
+    /// Pausing freezes the display, not the subscription; both buffers are bounded.
+    pub paused: Option<String>,
+    pub scroll: usize,
+    pub hscroll: usize,
+    pub follow: bool,
+}
+
+impl Watch {
+    pub fn status(&self) -> &'static str {
+        if self.error.is_some() {
+            "ERROR"
+        } else if self.starting {
+            "START"
+        } else if self.stopped {
+            "STOP"
+        } else {
+            "RUN"
+        }
+    }
+    pub fn text(&self) -> String {
+        if let Some(text) = &self.paused {
+            return text.clone();
+        }
+        self.events.iter().cloned().collect::<Vec<_>>().join("\n\n")
+    }
+}
+
+pub struct Expanded {
+    pub origin: Page,
+    pub title: String,
+    pub text: String,
+    pub op: Option<CopyOp>,
+    pub scroll: usize,
+    pub hscroll: usize,
+}
+
+pub struct CopyAsPopup {
+    pub commands: Vec<(Tool, Option<String>)>,
+    pub selected: usize,
+    pub status: Option<String>,
+    pub scroll: usize,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum ClickTarget {
+    Service(usize),
+    Navigation(usize),
+    Category(Category),
+    Member(usize),
+    Field(usize),
+    Action(usize),
+    Result,
+    Tab(usize),
+    CloseTab(usize),
+    NewTab,
+    WatchAction(usize),
+    PopupTool(usize),
 }
