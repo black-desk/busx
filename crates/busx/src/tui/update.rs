@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -362,8 +363,10 @@ fn key_event(state: &mut State, key: KeyEvent) -> Option<Effect> {
             return None;
         }
         KeyCode::Char('c') => {
-            if let Some(op) = current_op(state) {
-                open_copy(state, op);
+            match current_op(state) {
+                Ok(Some(op)) => open_copy(state, op),
+                Ok(None) => {}
+                Err(error) => set_editor_error(state, error),
             }
             return None;
         }
@@ -920,6 +923,7 @@ fn draft_op(browser: &Browser, action: Option<Action>) -> Result<CopyOp> {
             for ((_, signature), field) in method.args.iter().zip(&browser.editor.fields) {
                 args.extend(field_tokens(signature, field.input.value())?);
             }
+            crate::value::encode::parse(&method.signature, &args)?;
             Ok(CopyOp::Call {
                 service: context.service.clone(),
                 object: context.object.clone(),
@@ -951,13 +955,15 @@ fn draft_op(browser: &Browser, action: Option<Action>) -> Result<CopyOp> {
                     .first()
                     .map(|field| field.input.value())
                     .unwrap_or_default();
+                let value = field_tokens(&property.signature, value)?;
+                crate::value::encode::parse(&property.signature, &value)?;
                 Ok(CopyOp::Set {
                     service: context.service.clone(),
                     object: context.object.clone(),
                     iface: context.interface.clone(),
                     property: property.name.clone(),
                     signature: property.signature.clone(),
-                    value: field_tokens(&property.signature, value)?,
+                    value,
                 })
             } else {
                 Ok(CopyOp::Get {
@@ -981,21 +987,26 @@ fn draft_op(browser: &Browser, action: Option<Action>) -> Result<CopyOp> {
     }
 }
 
-fn current_op(state: &State) -> Option<CopyOp> {
+fn current_op(state: &State) -> Result<Option<CopyOp>> {
     match state.page {
         Page::Browser => {
-            let browser = state.browser.as_ref()?;
+            let Some(browser) = state.browser.as_ref() else {
+                return Ok(None);
+            };
             if browser.focus == Focus::Result {
-                browser.editor.last_op.clone()
+                Ok(browser.editor.last_op.clone())
             } else {
-                draft_op(browser, None).ok()
+                draft_op(browser, None).map(Some)
             }
         }
-        Page::Watch => state.watch().map(|watch| CopyOp::Listen {
+        Page::Watch => Ok(state.watch().map(|watch| CopyOp::Listen {
             rule: watch.rule.clone(),
-        }),
-        Page::Expanded => state.expanded.as_ref()?.op.clone(),
-        _ => None,
+        })),
+        Page::Expanded => Ok(state
+            .expanded
+            .as_ref()
+            .and_then(|expanded| expanded.op.clone())),
+        _ => Ok(None),
     }
 }
 
@@ -1024,7 +1035,7 @@ fn expand(state: &mut State) -> Option<Effect> {
     }
     let op = match state.page {
         Page::Browser => state.browser.as_ref()?.editor.last_op.clone(),
-        _ => current_op(state),
+        _ => current_op(state).ok().flatten(),
     };
     let title = match state.page {
         Page::Browser => {
