@@ -2,6 +2,7 @@
 SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 
 SPDX-License-Identifier: MIT
 -->
@@ -219,8 +220,9 @@ is `0` on success, `1` on failure; piping into `less`/`head` does not panic
   to become a bus monitor.
 - **copy-as**: `c` previews the current operation as a `dbus-send` / `busctl` /
   `qdbus` / `gdbus` / `busx` command; choose a tool and press `Enter` to copy.
-  `y` copies result or watch text. Unsupported tool formats are marked in the
-  preview.
+  `y` copies result or watch text. Inputs are validated with busctl syntax
+  before the preview opens; invalid or incomplete values show an error instead.
+  Unsupported tool formats are marked in the preview.
 - **Inline filter**: `/` filters services, object/interface navigation, or the
   active member tab by substring (case-insensitive). Type to narrow, `Up/Down`
   to select, `Enter` to open, and `Esc` to clear. `?` shows contextual keyboard

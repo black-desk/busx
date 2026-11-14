@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -1010,6 +1011,23 @@ fn copy_commands_match_selected_operation_and_quote_arguments() {
     assert!(command.contains("'$foo'"), "{command}");
     assert!(!command.contains("\"$foo\""));
     copy_snapshot("copy_join_busx", &command, &bus.address);
+}
+
+#[test]
+fn copy_command_rejects_unparseable_arguments() {
+    let bus = testbus::bus_owned();
+    let clip = ClipboardMock::new();
+    let mut p = spawn(&bus.address, 100, 28, Some(&clip));
+    open_interface(&mut p);
+    method(&mut p, "EchoBool");
+    edit(&mut p, "maybe");
+
+    // Copy uses the same busctl-style parser as execution. Invalid input is
+    // shown in the result area instead of opening a popup with a bad command.
+    text(&mut p, "c");
+    wait(&mut p, "invalid boolean `maybe`");
+    assert!(!p.contains("Copy command · Esc close"));
+    assert!(clip.contents().is_empty());
 }
 
 #[test]
