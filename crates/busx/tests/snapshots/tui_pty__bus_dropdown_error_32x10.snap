@@ -1,0 +1,14 @@
+---
+source: crates/busx/tests/tui_pty.rs
+expression: "lines.join(\"\\n\")"
+---
+ 1 Custom ×                   +
+┌Services (17)─────────────Bus▾┐
+│┌Bus · current tab───────────┐│
+││   Session                  ││
+││   System                   ││
+││ > Custom address           ││
+││ Address                    ││
+││Enter a D-Bus address       ││
+└│↑/↓ choose · Enter · Esc    │┘
+j└────────────────────────────┘p

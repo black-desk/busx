@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -54,10 +55,10 @@ pub fn run(
     let (conn, bus) =
         async_global_executor::block_on(dbus::conn::connect_with_bus(user, system, address))?;
     let (tx, rx) = flume::bounded::<Msg>(1024);
-    let mut state = State::new(bus.clone(), show_standard_interfaces);
+    let mut state = State::new(bus, conn, show_standard_interfaces);
     let id = state.request_id();
     state.services_request = id;
-    run_effect(Effect::Services(id), conn.clone(), bus.clone(), tx.clone());
+    run_effect(Effect::Services(id, state.id), &state, tx.clone());
     let _guard = TerminalGuard;
     enable_raw_mode()?;
     execute!(
@@ -107,7 +108,7 @@ pub fn run(
             }
         };
         if let Some(effect) = update(&mut state, msg) {
-            run_effect(effect, conn.clone(), bus.clone(), tx.clone());
+            run_effect(effect, &state, tx.clone());
         }
     }
     Ok(())
@@ -122,26 +123,54 @@ fn terminal_event(event: Event) -> Option<Msg> {
     }
 }
 
-fn run_effect(effect: Effect, conn: Connection, bus: Bus, tx: flume::Sender<Msg>) {
+fn run_effect(effect: Effect, state: &State, tx: flume::Sender<Msg>) {
     if let Effect::Clipboard(id, text) = effect {
         std::thread::spawn(move || {
             let _ = tx.send(Msg::Clipboard(id, write_to_clipboard(&text)));
         });
         return;
     }
+    if let Effect::Connect(id, bus) = effect {
+        async_global_executor::spawn(async move {
+            let result = match bus {
+                Bus::Session => dbus::conn::connect_with_bus(true, false, None).await,
+                Bus::System => dbus::conn::connect_with_bus(false, true, None).await,
+                Bus::Other(address) => {
+                    dbus::conn::connect_with_bus(false, false, Some(&address)).await
+                }
+            };
+            let _ = tx.send_async(Msg::Connected(id, result)).await;
+        })
+        .detach();
+        return;
+    }
+    let tab_id = match &effect {
+        Effect::Services(_, tab_id)
+        | Effect::Objects(_, tab_id, _)
+        | Effect::Interface(_, tab_id, _)
+        | Effect::Properties(_, tab_id, _)
+        | Effect::Execute(_, tab_id, _, _)
+        | Effect::Listen(_, tab_id, _, _) => *tab_id,
+        Effect::Connect(_, _) | Effect::Clipboard(_, _) => unreachable!(),
+    };
+    let Some(tab) = state.tabs.iter().find(|tab| tab.id == tab_id) else {
+        return;
+    };
+    let conn = tab.connection.clone();
+    let bus = tab.bus.clone();
     async_global_executor::spawn(async move {
         let msg = match effect {
-            Effect::Services(id) => {
+            Effect::Services(id, _) => {
                 Msg::Services(id, dbus::list::list_names(&conn, false, false).await)
             }
-            Effect::Objects(id, service) => {
+            Effect::Objects(id, _, service) => {
                 Msg::Objects(id, dbus::tree::object_tree(&conn, &service).await)
             }
-            Effect::Interface(id, context) => Msg::Interface(
+            Effect::Interface(id, _, context) => Msg::Interface(
                 id,
                 dbus::introspect::introspect(&conn, &context.service, &context.object).await,
             ),
-            Effect::Properties(id, context) => {
+            Effect::Properties(id, _, context) => {
                 let result = match dbus::property::get_all(
                     &conn,
                     &context.service,
@@ -167,7 +196,7 @@ fn run_effect(effect: Effect, conn: Connection, bus: Bus, tx: flume::Sender<Msg>
                 let result = execute_op(&conn, &op).await;
                 Msg::Action(id, tab_id, context, op, result)
             }
-            Effect::Listen(id, context, target) => {
+            Effect::Listen(id, _, context, target) => {
                 let (cancel_tx, cancel_rx) = futures::channel::oneshot::channel();
                 if tx.send_async(Msg::WatchReady(id, cancel_tx)).await.is_err() {
                     return;
@@ -180,7 +209,7 @@ fn run_effect(effect: Effect, conn: Connection, bus: Bus, tx: flume::Sender<Msg>
                 };
                 Msg::WatchEnded(id, result)
             }
-            Effect::Clipboard(_, _) => return,
+            Effect::Connect(_, _) | Effect::Clipboard(_, _) => unreachable!(),
         };
         let _ = tx.send_async(msg).await;
     })

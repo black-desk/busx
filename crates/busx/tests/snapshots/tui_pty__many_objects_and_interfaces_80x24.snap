@@ -1,10 +1,9 @@
 ---
 source: crates/busx/tests/tui_pty.rs
-assertion_line: 144
 expression: "lines.join(\"\\n\")"
 ---
-busx · Custom bus    1 /Ui                    ×                               +
-org.example.UnrelatedNamespace
+ 1 🔍  …UiFixture ×                                                            +
+ ^ org.example.UnrelatedNamespace
 ┌Navigation─────────────┐┌─────────────────────────────────────────────────────┐
 │        ▾ /Ui          ││ Properties 1  Methods 1  Signals 1                  │
 │>         @ org.exampl…││  Name              Type   Mode Value                │

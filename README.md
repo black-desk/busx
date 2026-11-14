@@ -1,6 +1,7 @@
 <!--
 SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 
 SPDX-License-Identifier: MIT
 -->
@@ -151,7 +152,7 @@ is `0` on success, `1` on failure; piping into `less`/`head` does not panic
 - **Inline operations**: select a member to inspect its signature, property
   permissions (`r` / `w` / `rw`), and current value. Fill parameters and
   activate `Call` / `Write` explicitly; parameters and results stay together.
-  Parameter inputs share an aligned label column. Focusing an input starts in
+  Parameter inputs share an aligned label column. Keyboard focus starts in
   normal mode: `j/k` selects a field, `i` enters insert mode, and `Esc` returns
   to normal mode without moving focus. Moving down from the last field focuses
   the action row; up returns to the last field, and `h/l` selects an action. In
@@ -170,6 +171,40 @@ is `0` on success, `1` on failure; piping into `less`/`head` does not panic
   current tab even while editing. These letter commands apply in normal mode;
   typed characters are preserved while editing. The top `+` also opens a tab,
   tab titles switch tabs, and each tab's `×` closes it.
+- **Per-tab buses**: new tabs inherit the current bus. On a service-list tab,
+  press `b` or click `Bus▾` on the right of the Services title row to choose
+  Session, System, or a custom address for the current tab. Browser and watch
+  tabs do not offer this menu. The compact dropdown opens directly below the
+  trigger, with their right edges aligned, keeping the page visible. Selecting
+  Session or System with the mouse applies it immediately; keyboard selection is
+  confirmed with Enter. Selecting Custom address reveals its input and always
+  requires Enter. Esc, clicking outside, or clicking `Bus▾` again closes the
+  menu without activating the page underneath. A successful switch stops that
+  tab's watch and returns it to the service list; other tabs keep their buses,
+  inputs, results, and subscriptions. Failed or cancelled connections preserve
+  the current page. Service-list tabs are named `Session`, `System`, or
+  `Custom`; browsing tabs use a magnifying glass and a shortened service name,
+  e.g. `🔍 …NetworkManager`, and listening tabs use `👁️ …volume`. The ellipsis
+  marks omitted context; full names remain in the page context. Namespaces
+  expand only as needed to distinguish services, and same-named listeners add
+  their service, e.g. `👁️ …Player:volume`. A bus suffix appears when otherwise
+  identical titles belong to different buses. The `Bus▾` menu shows the current
+  tab's selected bus. Expanded results keep their source tab's title. Tab widths
+  follow their labels; long titles are clipped, and overflow keeps the active
+  tab visible.
+- **Mouse interaction**: the `^` control at the left of the context row goes up
+  one visible level. Wide browsers return to the service list; narrow member
+  views return to navigation first. Expanded results return to their source
+  page, and leaving a watch stops its subscription. The service list hides the
+  control. The symbol and its two padding spaces are clickable. Clicking a
+  service opens it; clicking an object folds or unfolds it. Clicking an
+  interface loads its members, keeping focus in navigation when panes are side
+  by side, or showing the member list on narrow screens. Clicking a member
+  selects it without moving focus into the form. Clicking an input enters insert
+  mode at the clicked position; clicking the filter positions its cursor. The
+  wheel scrolls the area under the pointer without moving keyboard focus or
+  changing the selected member. In command previews, click a tool to select it
+  and click `Copy` to copy the command.
 - **Contextual footer**: one line shows actions for the focused area and the
   help entry. Status messages temporarily replace the action hints; global tab
   shortcuts are listed in help. While editing, leave insert mode with `Esc`

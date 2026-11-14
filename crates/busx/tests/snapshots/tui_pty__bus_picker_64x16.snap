@@ -1,0 +1,20 @@
+---
+source: crates/busx/tests/tui_pty.rs
+expression: "lines.join(\"\\n\")"
+---
+ 1 Custom ×                                                   +
+┌Services (17)─────────────────────────────────────────────Bus▾┐
+│  Name            ┌Bus · current tab─────────────────────────┐│
+│  org.busx.ScrollA│   Session                                ││
+│  org.busx.ScrollB│ > System                                 ││
+│> org.busx.ScrollC│   Custom address                         ││
+│  org.busx.ScrollD│↑/↓ choose · Enter · Esc                  ││
+│  org.busx.ScrollE└──────────────────────────────────────────┘│
+│  org.busx.ScrollF                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollG                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollH                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollI                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollJ                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollK                      <PID>      <FIXTURE>  │
+└──────────────────────────────────────────────────────────────┘
+j/k select · Enter open · / filter · b bus              · ? help

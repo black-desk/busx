@@ -1,0 +1,28 @@
+---
+source: crates/busx/tests/tui_pty.rs
+expression: "lines.join(\"\\n\")"
+---
+ 1 🔍  …busx.Test ×  2 🔍  …example.Test ×                                                          +
+ ^ /
+┌Navigation─────────────┐┌Object───────────────────────────────────────────────────────────────────┐
+│> ▾ /                  ││/                                                                        │
+│    ▾ /org             ││                                                                         │
+│      ▾ /busx          ││0 interface(s)                                                           │
+│        ▸ /Test        ││                                                                         │
+│                       ││Expand the object and select an interface.                               │
+│                       ││Enter opens its members.                                                 │
+│                       ││                                                                         │
+│                       ││                                                                         │
+│                       ││                                                                         │
+│                       ││                                                                         │
+│                       ││                                                                         │
+│                       ││                                                                         │
+│                       ││                                                                         │
+│                       ││                                                                         │
+│                       ││                                                                         │
+│                       ││                                                                         │
+│                       ││                                                                         │
+│                       ││                                                                         │
+│/ object · @ interface ││                                                                         │
+└───────────────────────┘└─────────────────────────────────────────────────────────────────────────┘
+j/k select · h/l fold · Enter open · / filter                                               · ? help

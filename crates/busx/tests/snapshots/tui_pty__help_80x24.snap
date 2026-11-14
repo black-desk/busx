@@ -1,6 +1,5 @@
 ---
 source: crates/busx/tests/tui_pty.rs
-assertion_line: 144
 expression: "lines.join(\"\\n\")"
 ---
 ┌Help · arrows scroll · Esc close──────────────────────────────────────────────┐
@@ -8,6 +7,7 @@ expression: "lines.join(\"\\n\")"
 │                                                                              │
 │t            new browsing tab                                                 │
 │q            close current tab (last tab exits)                               │
+│b            switch bus from the service list                                 │
 │gt / gT      next / previous tab                                              │
 │{number}gt   jump to tab number                                               │
 │Tab / S-Tab  next / previous pane or form control                             │
@@ -25,5 +25,4 @@ expression: "lines.join(\"\\n\")"
 │                                                                              │
 │Navigation: /App47 is an object; @ marks an interface.                        │
 │Interface names retain their full namespace.                                  │
-│Long names are clipped; the selected full name is above.                      │
 └──────────────────────────────────────────────────────────────────────────────┘

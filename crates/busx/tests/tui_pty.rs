@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -13,7 +14,7 @@ use std::fs;
 use std::time::{Duration, Instant};
 
 use portable_pty::CommandBuilder;
-use tuiprobe::{KeyCode, MouseButton, ScrollDirection, TuiProbe};
+use tuiprobe::{KeyCode, KeyModifiers, MouseButton, ScrollDirection, TuiProbe};
 use zbus::blocking::{Connection, Proxy, connection::Builder};
 
 const SERVICE: &str = "org.busx.Test";
@@ -46,8 +47,42 @@ fn wait(probe: &mut TuiProbe, needle: &str) {
 }
 fn services(probe: &mut TuiProbe) {
     probe
-        .wait_for(|s| s.contains("Services (") && s.contains("Name") && !s.contains("loading"))
+        .wait_for(|s| {
+            s.contains("Services (")
+                && s.contains("Name")
+                && !s.contains("loading")
+                && !s.contains("Bus · current tab")
+        })
         .unwrap();
+}
+
+fn location(probe: &TuiProbe, needle: &str) -> (u16, u16) {
+    probe
+        .screen_contents()
+        .lines()
+        .enumerate()
+        .find_map(|(row, line)| {
+            line.find(needle)
+                .map(|offset| (line[..offset].chars().count() as u16, row as u16))
+        })
+        .unwrap_or_else(|| panic!("missing {needle:?}\n{}", probe.screen_contents()))
+}
+
+fn click_up(probe: &mut TuiProbe, column: u16) {
+    let (x, y) = location(probe, " ^ ");
+    assert_eq!((x, y), (0, 1));
+    probe.mouse_click(x + column, y, MouseButton::Left).unwrap();
+}
+
+fn custom_bus(probe: &mut TuiProbe, address: &str) {
+    text(probe, "b");
+    wait(probe, "Bus · current tab");
+    // These scenarios start on a custom bus, so its address already has focus.
+    probe
+        .send_key_with_mods(KeyCode::Char('u'), KeyModifiers::CTRL)
+        .unwrap();
+    text(probe, address);
+    key(probe, KeyCode::Enter);
 }
 fn filter(probe: &mut TuiProbe, query: &str) {
     text(probe, "/");
@@ -63,7 +98,10 @@ fn open_service(probe: &mut TuiProbe, service: &str) {
         .unwrap();
 }
 fn open_interface(probe: &mut TuiProbe) {
-    open_service(probe, SERVICE);
+    open_interface_for(probe, SERVICE);
+}
+fn open_interface_for(probe: &mut TuiProbe, service: &str) {
+    open_service(probe, service);
     filter(probe, SERVICE);
     key(probe, KeyCode::Down); // first matching object -> its interface
     key(probe, KeyCode::Enter);
@@ -99,6 +137,7 @@ fn connection(address: &str) -> Connection {
 fn target(conn: &Connection) -> Proxy<'_> {
     Proxy::new(conn, SERVICE, PATH, SERVICE).unwrap()
 }
+#[track_caller]
 fn poll(mut condition: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while !condition() {
@@ -119,23 +158,36 @@ fn close_last(probe: &mut TuiProbe) {
 fn snapshot(name: &str, probe: &TuiProbe) {
     let screen = probe.screen_contents();
     let mut lines: Vec<String> = screen.lines().map(str::to_owned).collect();
-    if let Some(header) = lines
-        .iter()
-        .position(|line| line.contains("Name") && line.contains("PID"))
-    {
-        let pid_end = lines[header].chars().position(|ch| ch == 'P').unwrap() + 3;
+    let dropdown_column = lines.iter().find_map(|line| {
+        line.find("┌Bus · current tab")
+            .map(|x| line[..x].chars().count())
+    });
+    if let Some((title, width)) = lines.iter().enumerate().find_map(|(row, line)| {
+        let width = line.chars().count();
+        (line.starts_with("┌Services ") && width >= 52).then_some((row, width))
+    }) {
+        // The right-aligned dropdown can hide the metadata column headers.
+        let pid_end = width - 18;
         for line in lines
             .iter_mut()
-            .skip(header + 1)
-            .take_while(|line| !line.starts_with('└'))
+            .skip(title + 2)
+            .take_while(|line| !line.starts_with('└') || !line.ends_with('┘'))
         {
             let mut cells: Vec<char> = line.chars().collect();
-            if cells.len() < pid_end + 15 || cells.get(3).is_none_or(|ch| ch.is_whitespace()) {
+            // All metadata is hidden on rows covered by the menu. Preserve
+            // its text and border instead of normalizing those cells.
+            if cells.len() < pid_end + 15
+                || dropdown_column.is_some_and(|x| matches!(cells.get(x), Some('┌' | '│' | '└')))
+            {
                 continue;
             }
             let process: String = cells[pid_end + 2..pid_end + 15].iter().collect();
+            let fixture = process.trim_start().starts_with("tui_pty-");
+            if cells.get(3).is_none_or(|ch| ch.is_whitespace()) && !fixture {
+                continue;
+            }
             cells[pid_end - 7..pid_end].copy_from_slice(&"  <PID>".chars().collect::<Vec<_>>());
-            if process.trim_start().starts_with("tui_pty-") {
+            if fixture {
                 cells[pid_end + 2..pid_end + 15]
                     .copy_from_slice(&"    <FIXTURE>".chars().collect::<Vec<_>>());
             }
@@ -193,6 +245,13 @@ fn service_list_layout_and_small_terminal() {
     let bus = testbus::bus_owned();
     let mut p = spawn(&bus.address, 80, 24, None);
     services(&mut p);
+    assert!(
+        p.screen_contents()
+            .lines()
+            .next()
+            .unwrap()
+            .contains("1 Custom ×")
+    );
     snapshot("services_80x24", &p);
     p.resize(64, 12).unwrap();
     p.wait_for(|s| s.lines().count() == 12 && s.contains("Name") && s.contains("? help"))
@@ -282,6 +341,13 @@ fn call_zero_arg_method_and_expand_result() {
     key(&mut p, KeyCode::Esc);
     wait(&mut p, "SUCCESS");
     assert!(p.contains("Methods"));
+    key(&mut p, KeyCode::Enter);
+    wait(&mut p, "Result · y copy");
+    click_up(&mut p, 2);
+    p.wait_for(|s| {
+        s.contains("Methods") && s.contains("SUCCESS") && !s.contains("Result · y copy")
+    })
+    .unwrap();
 }
 
 #[test]
@@ -373,7 +439,8 @@ fn tabs_preserve_inputs_results_filters_and_close_independently() {
     filter(&mut p, "ScrollC");
     wait(&mut p, "org.busx.ScrollC");
     // Mouse selection also works while the other tab owns a filter input.
-    p.mouse_click(22, 0, MouseButton::Left).unwrap();
+    let (x, y) = location(&p, "1 🔍");
+    p.mouse_click(x, y, MouseButton::Left).unwrap();
     wait(&mut p, "SUCCESS");
     assert!(p.contains("1 remembered"));
     text(&mut p, "gt");
@@ -385,9 +452,9 @@ fn tabs_preserve_inputs_results_filters_and_close_independently() {
     text(&mut p, "1gt");
     wait(&mut p, "SUCCESS");
     text(&mut p, "gT");
-    wait(&mut p, "3 Services");
+    wait(&mut p, "3 Custom");
     text(&mut p, "q");
-    wait(&mut p, "2 Services");
+    wait(&mut p, "2 Custom");
     text(&mut p, "q");
     wait(&mut p, "SUCCESS");
     close_last(&mut p);
@@ -399,12 +466,12 @@ fn mouse_new_and_close_tab_buttons() {
     let mut p = spawn(&bus.address, 80, 24, None);
     services(&mut p);
     p.mouse_click(78, 0, MouseButton::Left).unwrap();
-    wait(&mut p, "2 Services");
+    wait(&mut p, "2 Custom");
     // Close the first, inactive tab via its visible ×, keeping tab 2 active.
     let header = p.screen_contents().lines().next().unwrap().to_string();
     let x = header.chars().position(|ch| ch == '×').unwrap() as u16;
     p.mouse_click(x, 0, MouseButton::Left).unwrap();
-    p.wait_for(|s| !s.lines().next().unwrap().contains("2 Services"))
+    p.wait_for(|s| !s.lines().next().unwrap().contains("2 Custom"))
         .unwrap();
     assert!(p.is_running());
     close_last(&mut p);
@@ -418,16 +485,357 @@ fn tab_strip_overflow_keeps_active_tab_visible() {
     for _ in 0..9 {
         text(&mut p, "t");
     }
-    wait(&mut p, "10 Se");
+    wait(&mut p, "10 Custom");
+    services(&mut p);
+    let header = p.screen_contents().lines().next().unwrap().to_string();
+    assert!(header.contains("7 Custom ×"), "{header}");
+    assert!(header.contains("8 Custom ×"), "{header}");
+    assert!(header.contains("9 Custom ×"), "{header}");
+    assert!(header.contains("10 Custom ×"), "{header}");
     snapshot("tabs_overflow_64x12", &p);
     text(&mut p, "1gt");
-    wait(&mut p, "1 Ser");
+    wait(&mut p, "1 Custom");
     text(&mut p, "gT");
-    wait(&mut p, "10 Se");
+    wait(&mut p, "10 Custom");
+    p.resize(32, 12).unwrap();
+    p.wait_for(|screen| {
+        let header = screen.lines().next().unwrap();
+        header.chars().count() <= 32
+            && header.contains("10")
+            && header.matches('×').count() >= 1
+            && header.contains('+')
+    })
+    .unwrap();
+    p.resize(100, 12).unwrap();
+    p.wait_for(|screen| {
+        let header = screen.lines().next().unwrap();
+        header.contains("10 Custom") && header.matches('×').count() == 7
+    })
+    .unwrap();
+}
+
+#[test]
+fn browser_titles_shorten_names_disambiguate_and_keep_mouse_targets_aligned() {
+    let bus = testbus::bus_owned();
+    let _other = Builder::address(bus.address.as_str())
+        .unwrap()
+        .name("org.example.Test")
+        .unwrap()
+        .serve_at(PATH, ForeignInterface)
+        .unwrap()
+        .build()
+        .unwrap();
+    let mut p = spawn(&bus.address, 100, 24, None);
+    open_service(&mut p, SERVICE);
+    let header = p.screen_contents().lines().next().unwrap().to_string();
+    assert!(
+        header.contains('🔍') && header.contains("…Test"),
+        "{header}"
+    );
+    assert!(
+        !header.contains("org.busx.Test") && !header.contains("· Custom"),
+        "{header}"
+    );
+    text(&mut p, "t");
+    open_service(&mut p, "org.example.Test");
+    p.wait_for(|screen| {
+        let header = screen.lines().next().unwrap();
+        header.contains("…busx.Test") && header.contains("…example.Test")
+    })
+    .unwrap();
+    let header = p.screen_contents().lines().next().unwrap().to_string();
+    assert!(header.contains("…busx.Test ×"), "{header}");
+    assert!(header.contains("…example.Test ×"), "{header}");
+    snapshot("browser_tab_titles_100x24", &p);
+    // The emoji occupies two terminal columns. Closing the inactive tab must
+    // still hit its own close button and keep the other browser open.
+    let header = p.screen_contents().lines().next().unwrap().to_string();
+    let close_x = header.chars().position(|ch| ch == '×').unwrap() as u16;
+    p.mouse_click(close_x, 0, MouseButton::Left).unwrap();
+    p.wait_for(|screen| {
+        let header = screen.lines().next().unwrap();
+        header.contains("…Test")
+            && !header.contains("…example.Test")
+            && !header.contains("…busx.Test")
+    })
+    .unwrap();
+    filter(&mut p, "org.example.UnrelatedNamespace");
+    key(&mut p, KeyCode::Down);
+    key(&mut p, KeyCode::Enter);
+    wait(&mut p, "foreign-interface");
+    assert!(p.contains("org.example.Test"));
+    text(&mut p, "n");
+    wait(&mut p, "h/l fold");
+    p.resize(64, 12).unwrap();
+    p.wait_for(|screen| {
+        screen.lines().count() == 12 && screen.lines().next().unwrap().contains('🔍')
+    })
+    .unwrap();
+    text(&mut p, "t");
+    services(&mut p);
+    wait(&mut p, "2 Custom");
+    let (x, y) = location(&p, "1 🔍");
+    p.mouse_click(x, y, MouseButton::Left).unwrap();
+    wait(&mut p, "Navigation");
+    assert!(p.screen_contents().lines().next().unwrap().contains('🔍'));
+    text(&mut p, "q");
+    services(&mut p);
+    wait(&mut p, "1 Custom");
+    close_last(&mut p);
+}
+
+#[test]
+fn watch_titles_mark_listening_and_disambiguate_same_named_members() {
+    let bus = testbus::bus_owned();
+    let mut p = spawn(&bus.address, 100, 24, None);
+    start_property_watch(&mut p);
+    let header = p.screen_contents().lines().next().unwrap().to_string();
+    assert!(
+        header.contains('👁') && header.contains("…volume"),
+        "{header}"
+    );
+    assert!(
+        !header.contains("Watch") && !header.contains("· Custom"),
+        "{header}"
+    );
+    text(&mut p, "p");
+    wait(&mut p, "PAUSED DISPLAY");
+    let header = p.screen_contents().lines().next().unwrap().to_string();
+    assert!(
+        header.contains('👁') && header.contains("…volume"),
+        "{header}"
+    );
+    text(&mut p, "t");
+    start_property_watch_for(&mut p, "org.busx.ScrollA");
+    p.wait_for(|screen| {
+        let header = screen.lines().next().unwrap();
+        header.matches('👁').count() == 2
+            && header.contains("…Test:volume")
+            && header.contains("…ScrollA:volume")
+    })
+    .unwrap();
+    let header = p.screen_contents().lines().next().unwrap().to_string();
+    assert!(header.contains("…Test:volume ×"), "{header}");
+    assert!(header.contains("…ScrollA:volume ×"), "{header}");
+    snapshot("watch_tab_titles_100x24", &p);
+    let header = p.screen_contents().lines().next().unwrap().to_string();
+    let close_x = header.chars().position(|ch| ch == '×').unwrap() as u16;
+    p.mouse_click(close_x, 0, MouseButton::Left).unwrap();
+    p.wait_for(|screen| {
+        let header = screen.lines().next().unwrap();
+        header.matches('👁').count() == 1
+            && header.contains("…volume")
+            && !header.contains("ScrollA:volume")
+    })
+    .unwrap();
+    close_last(&mut p);
+}
+
+#[test]
+fn session_and_system_tabs_keep_independent_buses_and_watches() {
+    let session = testbus::bus_owned();
+    let system = testbus::bus_owned();
+    let session_conn = connection(&session.address);
+    let system_conn = connection(&system.address);
+    session_conn.request_name("org.busx.SessionOnly").unwrap();
+    system_conn.request_name("org.busx.SystemOnly").unwrap();
+    let session_proxy = target(&session_conn);
+    let system_proxy = target(&system_conn);
+    // Include the test client's own property-cache subscription in the baseline.
+    assert_eq!(session_proxy.get_property::<f64>("volume").unwrap(), 0.5);
+    let baseline = property_subscriptions(&session_conn);
+    let mut p = TuiProbe::new(100, 28).unwrap();
+    let mut cmd = CommandBuilder::new(assert_cmd::cargo::cargo_bin!("busx"));
+    cmd.arg("--user");
+    cmd.env("DBUS_SESSION_BUS_ADDRESS", &session.address);
+    cmd.env("DBUS_SYSTEM_BUS_ADDRESS", &system.address);
+    p.spawn(cmd).unwrap();
+    services(&mut p);
+    wait(&mut p, "1 Session");
+    assert!(p.contains("org.busx.SessionOnly"));
+    assert!(!p.contains("org.busx.SystemOnly"));
+    start_property_watch(&mut p);
+    poll(|| property_subscriptions(&session_conn) == baseline + 1);
+    text(&mut p, "t");
+    services(&mut p);
+    wait(&mut p, "2 Session");
+    // The header and b both open the same current-tab bus selector.
+    let (x, y) = location(&p, "Bus▾");
+    p.mouse_click(x + 3, y, MouseButton::Left).unwrap();
+    wait(&mut p, "Bus · current tab");
+    let (x, y) = location(&p, "System");
+    p.mouse_click(x, y, MouseButton::Left).unwrap();
+    services(&mut p);
+    wait(&mut p, "2 System");
+    assert!(p.contains("org.busx.SystemOnly"));
+    assert!(!p.contains("org.busx.SessionOnly"));
+    open_interface(&mut p);
+    probe_property(&mut p, "volume");
+    edit(&mut p, "8.5");
+    key(&mut p, KeyCode::Down);
+    call(&mut p);
+    assert_eq!(system_proxy.get_property::<f64>("volume").unwrap(), 8.5);
+    assert_eq!(session_proxy.get_property::<f64>("volume").unwrap(), 0.5);
+    text(&mut p, "c");
+    wait(&mut p, "dbus-send --system");
+    key(&mut p, KeyCode::Esc);
+    p.wait_for(|s| !s.contains("Copy command · Esc close"))
+        .unwrap();
+    text(&mut p, "t");
+    services(&mut p);
+    wait(&mut p, "3 System");
+    text(&mut p, "b");
+    wait(&mut p, "Bus · current tab");
+    key(&mut p, KeyCode::Up); // System -> Session
+    key(&mut p, KeyCode::Enter);
+    services(&mut p);
+    wait(&mut p, "3 Session");
+    open_service(&mut p, SERVICE);
+    p.wait_for(|screen| {
+        let header = screen.lines().next().unwrap();
+        header.contains("…Test · System") && header.contains("…Test · Session")
+    })
+    .unwrap();
+    text(&mut p, "q");
+    wait(&mut p, "SUCCESS");
+    system_proxy.set_property("volume", 9.5f64).unwrap();
+    session_proxy.set_property("volume", 6.25f64).unwrap();
+    text(&mut p, "gt");
+    wait(&mut p, "6.25");
+    wait(&mut p, "1 events");
+    assert!(!p.contains("9.5"));
+    assert!(!p.contains("Bus▾"));
+    wait(&mut p, "6.25");
+    poll(|| property_subscriptions(&session_conn) == baseline + 1);
+    text(&mut p, "gt");
+    key(&mut p, KeyCode::Esc);
+    wait(&mut p, "h/l fold");
+    key(&mut p, KeyCode::Esc);
+    services(&mut p);
+    text(&mut p, "r");
+    wait(&mut p, "org.busx.SystemOnly");
+    assert!(!p.contains("org.busx.SessionOnly"));
+}
+
+#[test]
+fn custom_bus_switch_starts_from_services_and_reloads_after_success() {
+    let first = testbus::bus_owned();
+    let second = testbus::bus_owned();
+    let other = connection(&second.address);
+    other.request_name("org.busx.SecondBus").unwrap();
+    let mut p = spawn(&first.address, 80, 24, None);
+    services(&mut p);
+    custom_bus(&mut p, &second.address);
+    services(&mut p);
+    wait(&mut p, "org.busx.SecondBus");
+}
+
+#[test]
+fn bus_picker_keyboard_selection_and_cancel_preserve_the_tab() {
+    let bus = testbus::bus_owned();
+    let mut p = spawn(&bus.address, 64, 16, None);
+    services(&mut p);
+    filter(&mut p, "ScrollC");
+    key(&mut p, KeyCode::Esc);
+    p.wait_for(|s| !s.contains("Filter /")).unwrap();
+    text(&mut p, "b");
+    wait(&mut p, "Bus · current tab");
+    p.send_key_with_mods(KeyCode::Char('u'), KeyModifiers::CTRL)
+        .unwrap();
+    text(&mut p, "unix:path=/tmp/busx-example");
+    wait(&mut p, "unix:path=/tmp/busx-example");
+    key(&mut p, KeyCode::Down); // custom -> session
+    p.wait_for(|s| s.lines().any(|line| line.contains("> Session")))
+        .unwrap();
+    key(&mut p, KeyCode::Down);
+    p.wait_for(|s| s.lines().any(|line| line.contains("> System")))
+        .unwrap();
+    snapshot("bus_picker_64x16", &p);
+    key(&mut p, KeyCode::Esc);
+    services(&mut p);
+    wait(&mut p, "1 Custom");
+    text(&mut p, "b");
+    wait(&mut p, "Bus · current tab");
+    p.send_key_with_mods(KeyCode::Char('u'), KeyModifiers::CTRL)
+        .unwrap();
+    key(&mut p, KeyCode::Enter);
+    wait(&mut p, "Enter a D-Bus address");
+    key(&mut p, KeyCode::Esc);
+    services(&mut p);
+    close_last(&mut p);
+}
+
+#[test]
+fn bus_picker_dropdown_overlays_the_page_and_outside_clicks_preserve_focus() {
+    let assert_menu_position = |p: &TuiProbe| {
+        let (trigger_x, trigger_y) = location(p, "Bus▾");
+        let (menu_x, menu_y) = location(p, "┌Bus · current tab");
+        let screen = p.screen_contents();
+        let right_corner = screen
+            .lines()
+            .nth(menu_y as usize)
+            .unwrap()
+            .chars()
+            .skip(menu_x as usize)
+            .position(|ch| ch == '┐')
+            .unwrap() as u16
+            + menu_x;
+        assert!(menu_x > 0);
+        assert_eq!(menu_y, trigger_y + 1);
+        assert_eq!(right_corner, trigger_x + 3);
+    };
+    let bus = testbus::bus_owned();
+    let mut p = spawn(&bus.address, 80, 24, None);
+    services(&mut p);
+    let (x, y) = location(&p, "Bus▾");
+    assert_eq!(y, 1);
+    assert!(!p.screen_contents().lines().next().unwrap().contains("Bus▾"));
+    p.mouse_click(x, y, MouseButton::Left).unwrap();
+    wait(&mut p, "Bus · current tab");
+    assert_menu_position(&p);
+    assert!(p.contains("Name"));
+    assert!(p.contains("org.busx.ScrollA"));
+    assert!(!p.contains("[ Connect ]"));
+    // Clicking the service list closes the menu without opening a service.
+    p.mouse_click(5, 3, MouseButton::Left).unwrap();
+    p.wait_for(|s| !s.contains("Bus · current tab")).unwrap();
+    assert!(p.contains("Services ("));
+    // The trigger toggles the menu, and browser pages have no bus trigger.
+    let (x, y) = location(&p, "Bus▾");
+    p.mouse_click(x, y, MouseButton::Left).unwrap();
+    wait(&mut p, "Bus · current tab");
+    p.mouse_click(x, y, MouseButton::Left).unwrap();
+    p.wait_for(|s| !s.contains("Bus · current tab")).unwrap();
+    open_service(&mut p, SERVICE);
+    assert!(!p.contains("Bus▾"));
+    text(&mut p, "b");
+    p.wait_for(|s| !s.contains("Bus · current tab")).unwrap();
+    key(&mut p, KeyCode::Esc);
+    services(&mut p);
+    let (x, y) = location(&p, "Bus▾");
+    p.mouse_click(x, y, MouseButton::Left).unwrap();
+    wait(&mut p, "Bus · current tab");
+    p.resize(32, 10).unwrap();
+    p.wait_for(|s| s.lines().count() == 10 && s.lines().all(|line| line.chars().count() <= 32))
+        .unwrap();
+    assert_menu_position(&p);
+    p.send_key_with_mods(KeyCode::Char('u'), KeyModifiers::CTRL)
+        .unwrap();
+    key(&mut p, KeyCode::Enter);
+    wait(&mut p, "Enter a D-Bus address");
+    assert!(!p.contains("[ Connect ]"));
+    assert!(p.contains("Enter · Esc"));
+    snapshot("bus_dropdown_error_32x10", &p);
+    let (x, y) = location(&p, "Bus▾");
+    p.mouse_click(x + 3, y, MouseButton::Left).unwrap();
+    p.wait_for(|s| !s.contains("Bus · current tab")).unwrap();
 }
 
 fn start_property_watch(p: &mut TuiProbe) {
-    open_interface(p);
+    start_property_watch_for(p, SERVICE);
+}
+fn start_property_watch_for(p: &mut TuiProbe, service: &str) {
+    open_interface_for(p, service);
     probe_property(p, "volume");
     key(p, KeyCode::Enter);
     text(p, "ll");
@@ -505,6 +913,24 @@ fn watch_pause_clear_stop_and_escape_restore_browser() {
     wait(&mut p, "Waiting for events...");
     poll(|| property_subscriptions(&conn) == baseline + 1);
     key(&mut p, KeyCode::Esc);
+    wait(&mut p, "Enter run");
+    poll(|| property_subscriptions(&conn) == baseline);
+    // The shared up control returns from an expanded watch without stopping
+    // it, then stops the subscription when leaving the watch itself.
+    key(&mut p, KeyCode::Enter);
+    wait(&mut p, "Waiting for events...");
+    poll(|| property_subscriptions(&conn) == baseline + 1);
+    proxy.set_property("volume", 6.75f64).unwrap();
+    wait(&mut p, "6.75");
+    key(&mut p, KeyCode::Enter);
+    wait(&mut p, "Result · y copy");
+    click_up(&mut p, 1);
+    wait(&mut p, "Following latest");
+    poll(|| property_subscriptions(&conn) == baseline + 1);
+    proxy.set_property("volume", 7.25f64).unwrap();
+    wait(&mut p, "7.25");
+    wait(&mut p, "2 events");
+    click_up(&mut p, 1);
     wait(&mut p, "Enter run");
     poll(|| property_subscriptions(&conn) == baseline);
 }
@@ -701,6 +1127,252 @@ fn open_ui_interface(p: &mut TuiProbe) {
 }
 
 #[test]
+fn mouse_filter_cursor_stays_in_services_navigation_and_members() {
+    let bus = testbus::bus_owned();
+    let (_fixture, _started, _release) = ui_fixture(&bus.address);
+    let mut p = spawn(&bus.address, 80, 24, None);
+    let insert_in_filter = |p: &mut TuiProbe, query: &str, offset: usize| {
+        filter(p, query);
+        let (x, y) = location(p, "Filter /");
+        p.mouse_click(x + 8 + offset as u16, y, MouseButton::Left)
+            .unwrap();
+        text(p, "X");
+        wait(
+            p,
+            &format!("Filter /{}X{}", &query[..offset], &query[offset..]),
+        );
+        key(p, KeyCode::Backspace);
+        wait(p, &format!("Filter /{query}"));
+        key(p, KeyCode::Esc);
+        p.wait_for(|s| !s.contains("Filter /")).unwrap();
+    };
+    services(&mut p);
+    insert_in_filter(&mut p, "ScrollA", 2);
+    open_service(&mut p, "org.busx.UiFixture");
+    insert_in_filter(&mut p, "org.busx.UiFixture", 9);
+    filter(&mut p, "org.busx.UiFixture");
+    key(&mut p, KeyCode::Down);
+    key(&mut p, KeyCode::Enter);
+    wait(&mut p, "Ready");
+    let (x, y) = location(&p, "Methods");
+    p.mouse_click(x, y, MouseButton::Left).unwrap();
+    wait(&mut p, "DelayedEcho");
+    insert_in_filter(&mut p, "DelayedEcho", 7);
+    assert!(p.contains("Enter details"));
+}
+
+#[test]
+fn mouse_up_from_browser_ignores_form_focus_and_preserves_drafts() {
+    let bus = testbus::bus_owned();
+    let (_fixture, started, _release) = ui_fixture(&bus.address);
+    let mut p = spawn(&bus.address, 80, 24, None);
+    services(&mut p);
+    assert!(!p.contains(" ^ "));
+    open_ui_interface(&mut p);
+    method(&mut p, "DelayedEcho");
+    text(&mut p, "i");
+    text(&mut p, "draft");
+    wait(&mut p, "draft");
+    wait(&mut p, "INSERT");
+    // All three columns, including both spaces, are clickable. Returning
+    // from an input or action goes straight to Services in the wide layout.
+    click_up(&mut p, 0);
+    services(&mut p);
+    assert!(!p.contains(" ^ "));
+    open_service(&mut p, "org.busx.UiFixture");
+    wait(&mut p, "NORMAL");
+    assert!(p.contains("draft"));
+    key(&mut p, KeyCode::Enter);
+    wait(&mut p, "Enter run");
+    click_up(&mut p, 1);
+    services(&mut p);
+    open_service(&mut p, "org.busx.UiFixture");
+    assert!(p.contains("draft"));
+    text(&mut p, "n");
+    filter(&mut p, "org.busx.UiFixture");
+    click_up(&mut p, 2);
+    services(&mut p);
+    assert!(!p.contains("Filter /"));
+    assert!(!p.contains(" ^ "));
+    assert!(started.try_recv().is_err());
+    assert!(p.is_running());
+}
+
+#[test]
+fn mouse_narrow_navigation_opens_members_and_preserves_parameter_drafts() {
+    let bus = testbus::bus_owned();
+    let (_fixture, started, _release) = ui_fixture(&bus.address);
+    let mut p = spawn(&bus.address, 64, 24, None);
+    open_service(&mut p, "org.busx.UiFixture");
+    filter(&mut p, "org.busx.UiFixture");
+    let (x, y) = location(&p, "@ org.busx.UiFixture");
+    p.mouse_click(x, y, MouseButton::Left).unwrap();
+    wait(&mut p, "Ready");
+    assert!(!p.contains("Navigation"));
+    assert!(!p.contains("Filter /"));
+    let (x, y) = location(&p, "Methods");
+    p.mouse_click(x, y, MouseButton::Left).unwrap();
+    wait(&mut p, "DelayedEcho");
+    let (x, y) = location(&p, "DelayedEcho");
+    for _ in 0..3 {
+        p.mouse_click(x, y, MouseButton::Left).unwrap();
+    }
+    wait(&mut p, "Enter details");
+    let (_, y) = location(&p, "short  s");
+    p.mouse_click(36, y, MouseButton::Left).unwrap();
+    text(&mut p, "alpha");
+    wait(&mut p, "alpha");
+    let (_, y) = location(&p, "much_longer_parameter_name");
+    p.mouse_click(36, y, MouseButton::Left).unwrap();
+    text(&mut p, "beta");
+    wait(&mut p, "beta");
+    let (x, y) = location(&p, "alpha");
+    p.mouse_click(x + 2, y, MouseButton::Left).unwrap();
+    text(&mut p, "X");
+    wait(&mut p, "alXpha");
+    assert!(p.contains("beta"));
+    click_up(&mut p, 0);
+    wait(&mut p, "Navigation");
+    filter(&mut p, "org.busx.UiFixture");
+    let (x, y) = location(&p, "@ org.busx.UiFixture");
+    p.mouse_click(x, y, MouseButton::Left).unwrap();
+    wait(&mut p, "Enter details");
+    assert!(p.contains("alXpha"));
+    assert!(p.contains("beta"));
+    assert!(started.try_recv().is_err());
+    p.resize(32, 12).unwrap();
+    p.wait_for(|s| s.lines().count() == 12 && s.lines().all(|line| line.chars().count() <= 32))
+        .unwrap();
+    click_up(&mut p, 2);
+    wait(&mut p, "Navigation");
+    click_up(&mut p, 1);
+    services(&mut p);
+    assert!(!p.contains(" ^ "));
+}
+
+#[test]
+fn mouse_selection_inputs_and_wheel_keep_focus_at_the_pointer_target() {
+    let bus = testbus::bus_owned();
+    let (_fixture, started, _release) = ui_fixture(&bus.address);
+    let mut p = spawn(&bus.address, 80, 24, None);
+    open_ui_interface(&mut p);
+    text(&mut p, "l");
+    wait(&mut p, "DelayedEcho");
+    let (x, y) = location(&p, "DelayedEcho");
+    for _ in 0..3 {
+        p.mouse_click(x, y, MouseButton::Left).unwrap();
+    }
+    // Filtering proves repeated clicks kept keyboard focus in the member list.
+    filter(&mut p, "DelayedEcho");
+    key(&mut p, KeyCode::Enter);
+    wait(&mut p, "NORMAL");
+    edit(&mut p, "alpha");
+    key(&mut p, KeyCode::Down);
+    edit(&mut p, "beta");
+    let (x, y) = location(&p, "alpha");
+    p.mouse_click(x + 2, y, MouseButton::Left).unwrap();
+    text(&mut p, "X");
+    wait(&mut p, "alXpha");
+    wait(&mut p, "INSERT");
+    let (x, y) = location(&p, "beta");
+    p.mouse_click(x + 2, y, MouseButton::Left).unwrap();
+    text(&mut p, "Y");
+    wait(&mut p, "beYta");
+    p.resize(80, 20).unwrap();
+    p.wait_for(|s| s.lines().count() == 20 && s.contains("beYta"))
+        .unwrap();
+    let first_nav = p.screen_contents_crop(0, 3, 25, 1);
+    p.mouse_scroll(8, 5, ScrollDirection::Down).unwrap();
+    p.wait_for(|s| {
+        s.lines()
+            .nth(3)
+            .map(|line| line.chars().take(25).collect::<String>())
+            != Some(first_nav.clone())
+    })
+    .unwrap();
+    // Scrolling another pane must preserve the active field and insertion mode.
+    text(&mut p, "Z");
+    wait(&mut p, "beYZta");
+    p.mouse_scroll(35, 6, ScrollDirection::Down).unwrap();
+    text(&mut p, "!");
+    wait(&mut p, "beYZ!ta");
+    assert!(p.contains("alXpha"));
+    assert!(started.try_recv().is_err());
+    let (x, y) = location(&p, "@ org.busx.U");
+    p.mouse_click(x, y, MouseButton::Left).unwrap();
+    p.mouse_click(x, y, MouseButton::Left).unwrap();
+    wait(&mut p, "h/l fold");
+    assert!(p.contains("alXpha"));
+    assert!(p.contains("beYZ!ta"));
+    let header = p.screen_contents().lines().next().unwrap().to_string();
+    assert!(
+        header.contains("🔍") && header.contains("…UiFixture"),
+        "{header}"
+    );
+    assert!(!header.contains("/Ui"), "{header}");
+}
+
+#[test]
+fn switching_buses_discards_replies_from_the_previous_tab_identity() {
+    let first = testbus::bus_owned();
+    let second = testbus::bus_owned();
+    let (_first_fixture, first_started, first_release) = ui_fixture(&first.address);
+    let (_second_fixture, second_started, second_release) = ui_fixture(&second.address);
+    let mut p = spawn(&first.address, 80, 24, None);
+    open_ui_interface(&mut p);
+    method(&mut p, "DelayedEcho");
+    edit(&mut p, "old");
+    key(&mut p, KeyCode::Down);
+    edit(&mut p, "bus");
+    key(&mut p, KeyCode::Down);
+    key(&mut p, KeyCode::Enter);
+    first_started.recv_timeout(Duration::from_secs(5)).unwrap();
+    text(&mut p, "n");
+    key(&mut p, KeyCode::Esc);
+    services(&mut p);
+    custom_bus(&mut p, &second.address);
+    services(&mut p);
+    open_ui_interface(&mut p);
+    method(&mut p, "DelayedEcho");
+    edit(&mut p, "new");
+    key(&mut p, KeyCode::Down);
+    edit(&mut p, "bus");
+    key(&mut p, KeyCode::Down);
+    key(&mut p, KeyCode::Enter);
+    second_started.recv_timeout(Duration::from_secs(5)).unwrap();
+    first_release.send(()).unwrap();
+    second_release.send(()).unwrap();
+    wait(&mut p, "new/bus");
+    assert!(p.contains("SUCCESS"));
+    assert!(!p.contains("old/bus"));
+}
+
+#[test]
+fn mouse_command_tools_select_without_copying_until_copy_is_clicked() {
+    let bus = testbus::bus_owned();
+    let clip = ClipboardMock::new();
+    let mut p = spawn(&bus.address, 100, 28, Some(&clip));
+    open_interface(&mut p);
+    probe_property(&mut p, "volume");
+    text(&mut p, "c");
+    wait(&mut p, "Copy command · Esc close");
+    let (x, y) = location(&p, "dbus-send");
+    p.mouse_click(x, y, MouseButton::Left).unwrap();
+    p.mouse_click(x, y, MouseButton::Left).unwrap();
+    let (x, y) = location(&p, "busctl");
+    p.mouse_click(x, y, MouseButton::Left).unwrap();
+    wait(&mut p, "busctl --address=");
+    let (x, y) = location(&p, "[ Copy ]");
+    p.mouse_click(x + 2, y, MouseButton::Left).unwrap();
+    wait(&mut p, "Copied");
+    poll(|| !clip.contents().is_empty());
+    let copied = clip.contents();
+    assert!(copied.starts_with("busctl "), "{copied}");
+    assert_eq!(copied.matches("busctl ").count(), 1, "{copied}");
+    assert!(!copied.contains("dbus-send"), "{copied}");
+}
+
+#[test]
 fn aligned_parameters_and_background_reply_stay_with_the_owner_tab() {
     let bus = testbus::bus_owned();
     let (_fixture, started, release) = ui_fixture(&bus.address);
@@ -773,7 +1445,7 @@ fn many_objects_and_unrelated_interface_names_remain_distinguishable() {
         key(&mut p, KeyCode::Up);
     }
     key(&mut p, KeyCode::Down);
-    p.wait_for(|s| s.lines().nth(1) == Some("org.example.UnrelatedNamespace"))
+    p.wait_for(|s| s.lines().nth(1) == Some(" ^ org.example.UnrelatedNamespace"))
         .unwrap();
     snapshot("many_objects_and_interfaces_80x24", &p);
     key(&mut p, KeyCode::Enter);
