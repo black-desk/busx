@@ -16,10 +16,10 @@ expression: "lines.join(\"\\n\")"
 │                       ││d · rw                                               │
 │                       ││Current  2.75                                        │
 │                       ││New value  d  1.5                                    │
-│                       ││ Write   Read   Watch   Copy command   Open in editor │
+│                       ││ Write   Read   Watch   Copy command                 │
+│                       ││ Open in editor                                      │
 │                       ││SUCCESS                                              │
 │                       ││2.75                                                 │
-│                       ││                                                     │
 │                       ││                                                     │
 │                       ││                                                     │
 │                       ││                                                     │
