@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -32,20 +33,15 @@ pub enum Page {
     Expanded,
 }
 
-/// Connection-wide data plus independent browser tabs. Dereferencing State
+/// Window-wide data plus independent browser tabs. Dereferencing State
 /// accesses the active tab; background replies explicitly locate their owner.
 pub struct State {
     pub tabs: Vec<Tab>,
     pub active_tab: usize,
-    pub services: Vec<ServiceInfo>,
-    pub services_request: u64,
-    pub services_loading: bool,
-    pub services_error: Option<Error>,
     pub help_open: bool,
     pub help_scroll: usize,
     pub key_prefix: Option<KeyPrefix>,
     pub click_targets: Vec<(Rect, ClickTarget)>,
-    pub bus: Bus,
     pub show_standard_interfaces: bool,
     pub quit: bool,
     next_id: u64,
@@ -53,6 +49,13 @@ pub struct State {
 
 pub struct Tab {
     pub id: u64,
+    pub bus: Bus,
+    pub connection: zbus::Connection,
+    pub services: Vec<ServiceInfo>,
+    pub services_request: u64,
+    pub services_loading: bool,
+    pub services_error: Option<Error>,
+    pub bus_picker: Option<BusPicker>,
     pub page: Page,
     pub service_selected: usize,
     pub browser: Option<Browser>,
@@ -63,12 +66,20 @@ pub struct Tab {
     pub status: Option<String>,
     pub clipboard_request: Option<u64>,
     pub scroll: [usize; 3],
+    pub follow_selection: [bool; 2],
 }
 
-impl Default for Tab {
-    fn default() -> Self {
+impl Tab {
+    pub fn new(id: u64, bus: Bus, connection: zbus::Connection) -> Self {
         Self {
-            id: 0,
+            id,
+            bus,
+            connection,
+            services: vec![],
+            services_request: 0,
+            services_loading: true,
+            services_error: None,
+            bus_picker: None,
             page: Page::Services,
             service_selected: 0,
             browser: None,
@@ -79,39 +90,33 @@ impl Default for Tab {
             status: None,
             clipboard_request: None,
             scroll: [0; 3],
+            follow_selection: [true; 2],
         }
     }
-}
 
-impl Tab {
-    pub fn title(&self) -> String {
-        let page = self
-            .expanded
+    pub fn bus_name(&self) -> &'static str {
+        match self.bus {
+            Bus::Session => "Session",
+            Bus::System => "System",
+            Bus::Other(_) => "Custom",
+        }
+    }
+
+    fn title_page(&self) -> Page {
+        self.expanded
             .as_ref()
             .filter(|_| self.page == Page::Expanded)
-            .map_or(self.page, |expanded| expanded.origin);
-        if page == Page::Watch {
-            return self.watch.as_ref().map_or_else(
-                || "Watch".into(),
-                |watch| format!("Watch {}", watch.target.name()),
-            );
+            .map_or(self.page, |expanded| expanded.origin)
+    }
+
+    fn title_context(&self) -> Option<&Context> {
+        if self.title_page() == Page::Watch {
+            self.watch.as_ref().map(|watch| &watch.context)
+        } else if self.title_page() == Page::Browser {
+            self.browser.as_ref().map(|browser| &browser.context)
+        } else {
+            None
         }
-        if page == Page::Services {
-            return "Services".into();
-        }
-        self.browser
-            .as_ref()
-            .map(|browser| {
-                if browser.context.object.is_empty() || browser.context.object == "/" {
-                    browser.context.service.clone()
-                } else {
-                    format!(
-                        "/{}",
-                        browser.context.object.rsplit('/').next().unwrap_or("")
-                    )
-                }
-            })
-            .unwrap_or_else(|| "Browse".into())
     }
 
     pub fn stop_watch(&mut self) {
@@ -137,38 +142,122 @@ impl std::ops::DerefMut for State {
 }
 
 impl State {
-    pub fn new(bus: Bus, show_standard_interfaces: bool) -> Self {
+    pub fn new(bus: Bus, connection: zbus::Connection, show_standard_interfaces: bool) -> Self {
         Self {
-            tabs: vec![Tab::default()],
+            tabs: vec![Tab::new(0, bus, connection)],
             active_tab: 0,
-            services: vec![],
-            services_request: 0,
-            services_loading: true,
-            services_error: None,
             help_open: false,
             help_scroll: 0,
             key_prefix: None,
             click_targets: vec![],
-            bus,
             show_standard_interfaces,
             quit: false,
             next_id: 0,
         }
     }
 
-    /// IDs are connection-wide: closing a tab cannot make its late replies
+    /// IDs are window-wide: closing a tab cannot make its late replies
     /// match a subsequently opened tab or subscription.
     pub fn request_id(&mut self) -> u64 {
         self.next_id += 1;
         self.next_id
     }
 
+    /// Keep the shortest service suffix that distinguishes open contexts.
+    fn service_title(&self, service: &str, member: Option<&str>) -> String {
+        if service.starts_with(':') {
+            return service.into();
+        }
+        let parts: Vec<_> = service.split('.').collect();
+        for start in (0..parts.len()).rev() {
+            let suffix = parts[start..].join(".");
+            let ending = format!(".{suffix}");
+            let ambiguous = self
+                .tabs
+                .iter()
+                .filter(|tab| match member {
+                    Some(member) => {
+                        tab.title_page() == Page::Watch
+                            && tab
+                                .watch
+                                .as_ref()
+                                .is_some_and(|watch| watch.target.name() == member)
+                    }
+                    None => tab.title_page() == Page::Browser,
+                })
+                .filter_map(Tab::title_context)
+                .any(|context| {
+                    context.service != service
+                        && (context.service == suffix || context.service.ends_with(&ending))
+                });
+            if !ambiguous {
+                return format!("{}{suffix}", if start == 0 { "" } else { "…" });
+            }
+        }
+        service.into()
+    }
+
+    pub fn tab_titles(&self) -> Vec<String> {
+        let titles: Vec<_> = self
+            .tabs
+            .iter()
+            .map(|tab| match tab.title_page() {
+                Page::Services => tab.bus_name().into(),
+                Page::Watch => tab.watch.as_ref().map_or_else(
+                    || "👁️".into(),
+                    |watch| {
+                        let shared_member = self
+                            .tabs
+                            .iter()
+                            .filter(|other| other.title_page() == Page::Watch)
+                            .filter_map(|other| other.watch.as_ref())
+                            .any(|other| {
+                                other.target.name() == watch.target.name()
+                                    && other.context.service != watch.context.service
+                            });
+                        let source = if shared_member {
+                            format!(
+                                "{}:",
+                                self.service_title(
+                                    &watch.context.service,
+                                    Some(watch.target.name())
+                                )
+                                .trim_start_matches('…')
+                            )
+                        } else {
+                            String::new()
+                        };
+                        format!("👁️ …{source}{}", watch.target.name())
+                    },
+                ),
+                _ => tab.browser.as_ref().map_or_else(
+                    || "🔍".into(),
+                    |browser| format!("🔍 {}", self.service_title(&browser.context.service, None)),
+                ),
+            })
+            .collect();
+        titles
+            .iter()
+            .enumerate()
+            .map(|(index, title)| {
+                let tab = &self.tabs[index];
+                let shared_bus = tab.title_context().is_some()
+                    && titles.iter().enumerate().any(|(other, candidate)| {
+                        other != index && candidate == title && self.tabs[other].bus != tab.bus
+                    });
+                if shared_bus {
+                    format!("{title} · {}", tab.bus_name())
+                } else {
+                    title.clone()
+                }
+            })
+            .collect()
+    }
+
     pub fn new_tab(&mut self) {
         let id = self.request_id();
-        self.tabs.push(Tab {
-            id,
-            ..Tab::default()
-        });
+        self.tabs
+            .push(Tab::new(id, self.bus.clone(), self.connection.clone()));
         self.select_tab(self.tabs.len() - 1);
     }
 
@@ -682,13 +771,32 @@ pub struct CopyAsPopup {
     pub scroll: usize,
 }
 
+pub struct BusPicker {
+    pub selected: usize,
+    pub address: Input,
+    pub pending: Option<u64>,
+    pub error: Option<String>,
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub enum ClickTarget {
+    Up { to_navigation: bool },
+    BusPicker,
+    BusMenu,
+    BusDismiss,
+    BusOption(usize),
+    BusAddress,
+    Filter,
+    ServicesPane,
+    NavigationPane,
+    MembersPane,
+    WatchEvents,
+    ExpandedResult,
     Service(usize),
-    Navigation(usize),
+    Navigation(usize, Focus),
     Category(Category),
     Member(usize),
-    Field(usize),
+    Field(usize, u16),
     Action(usize),
     Result,
     Tab(usize),
@@ -696,4 +804,5 @@ pub enum ClickTarget {
     NewTab,
     WatchAction(usize),
     PopupTool(usize),
+    PopupCopy,
 }

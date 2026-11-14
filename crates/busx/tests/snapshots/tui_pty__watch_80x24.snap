@@ -1,10 +1,9 @@
 ---
 source: crates/busx/tests/tui_pty.rs
-assertion_line: 144
 expression: "lines.join(\"\\n\")"
 ---
-busx · Custom bus    1 Watch volume           ×                               +
-org.busx.Test › /org/busx/Test › org.busx.Test
+ 1 👁  …volume ×                                                               +
+ ^ org.busx.Test › /org/busx/Test › org.busx.Test
 ┌volume · RUN · 0 events───────────────────────────────────────────────────────┐
 │Waiting for events...                                                         │
 │                                                                              │
@@ -24,6 +23,6 @@ org.busx.Test › /org/busx/Test › org.busx.Test
 │                                                                              │
 │                                                                              │
 │Following latest · retained 0/1000                                            │
-│ Pause   Stop   Clear   Back                                                  │
+│ Pause   Stop   Clear                                                         │
 └──────────────────────────────────────────────────────────────────────────────┘
 hjkl scroll · p pause · s stop · x clear · Enter expand                 · ? help

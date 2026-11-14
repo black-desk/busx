@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -13,7 +14,6 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph, Wrap};
 
-use crate::dbus::conn::Bus;
 use crate::tui::state::*;
 
 const ACCENT: Color = Color::Cyan;
@@ -47,12 +47,8 @@ pub fn render(
         Constraint::Length(1),
     ])
     .areas(area);
-    let bus = match state.bus {
-        Bus::Session => "Session bus",
-        Bus::System => "System bus",
-        Bus::Other(_) => "Custom bus",
-    };
-    tab_bar(frame, line(header, 0), state, bus, targets);
+    tab_bar(frame, line(header, 0), state, targets);
+    let context_width = header.width.saturating_sub(3) as usize;
     let context = match state.page {
         Page::Services => String::new(),
         Page::Browser => state
@@ -68,25 +64,39 @@ pub fn render(
                             &browser.objects[object].interfaces[interface]
                         }
                     };
-                    return truncate(name, header.width as usize);
+                    return truncate(name, context_width);
                 }
-                breadcrumb(&browser.context, header.width as usize)
+                breadcrumb(&browser.context, context_width)
             })
             .unwrap_or_default(),
         Page::Watch => state
             .watch()
-            .map(|watch| breadcrumb(&watch.context, header.width as usize))
+            .map(|watch| breadcrumb(&watch.context, context_width))
             .unwrap_or_default(),
         Page::Expanded => state
             .expanded
             .as_ref()
-            .map(|expanded| truncate(&expanded.title, header.width as usize))
+            .map(|expanded| truncate(&expanded.title, context_width))
             .unwrap_or_default(),
     };
     if state.page != Page::Services {
+        let [up, context_area] =
+            Layout::horizontal([Constraint::Length(3), Constraint::Min(1)]).areas(line(header, 1));
+        frame.render_widget(Paragraph::new(" ^ ").style(active()), up);
+        targets.push((
+            up,
+            ClickTarget::Up {
+                to_navigation: state.page == Page::Browser
+                    && area.width < 80
+                    && state
+                        .browser
+                        .as_ref()
+                        .is_some_and(|browser| browser.focus != Focus::Navigation),
+            },
+        ));
         frame.render_widget(
             Paragraph::new(context).style(Style::default().fg(MUTED)),
-            line(header, 1),
+            context_area,
         );
     }
     let (content, filter) = if state.filter.is_some() {
@@ -101,7 +111,16 @@ pub fn render(
         Page::Services => services(frame, content, state, targets, &mut scroll[0]),
         Page::Browser => {
             if let Some(browser) = &state.browser {
-                browser_view(frame, content, browser, state.query(), targets, scroll);
+                browser_view(
+                    frame,
+                    content,
+                    browser,
+                    state.query(),
+                    targets,
+                    scroll,
+                    state.follow_selection,
+                    state.bus_picker.is_none(),
+                );
             }
         }
         Page::Watch => watch_view(frame, content, state, targets, scroll),
@@ -110,6 +129,7 @@ pub fn render(
                 let block = Block::bordered().title("Result · y copy · c copy command");
                 let inner = block.inner(content);
                 frame.render_widget(block, content);
+                targets.push((inner, ClickTarget::ExpandedResult));
                 scroll[2] = result_text(
                     frame,
                     inner,
@@ -125,7 +145,8 @@ pub fn render(
         let [label, field] =
             Layout::horizontal([Constraint::Length(9), Constraint::Min(1)]).areas(area);
         frame.render_widget(Paragraph::new(" Filter /"), label);
-        input_widget(frame, field, input, true, true);
+        input_widget(frame, field, input, true, state.bus_picker.is_none());
+        targets.push((field, ClickTarget::Filter));
     }
     let editing = state.filter.is_some()
         || (state.page == Page::Browser
@@ -138,7 +159,7 @@ pub fn render(
         "INSERT · Tab next · Enter done · Esc normal"
     } else {
         match state.page {
-            Page::Services => "j/k select · Enter open · / filter",
+            Page::Services => "j/k select · Enter open · / filter · b bus",
             Page::Browser => match state.browser.as_ref().map(|browser| browser.focus) {
                 Some(Focus::Navigation) => "j/k select · h/l fold · Enter open · / filter",
                 Some(Focus::Action(_)) => "h/l action · k inputs · j result · Enter run",
@@ -180,7 +201,7 @@ pub fn render(
     if state.help_open {
         targets.clear();
         frame.render_widget(Clear, area);
-        let help = "busx · keyboard\n\nt            new browsing tab\nq            close current tab (last tab exits)\ngt / gT      next / previous tab\n{number}gt   jump to tab number\nTab / S-Tab  next / previous pane or form control\ngg / G       first / last item or result line\nj / k        down / up\nh / l        member categories · fold objects · actions\nEnter        inspect · activate focused action\n/            filter services, navigation, or members\nr            refresh service/tree/property values\nn            focus navigation (also on narrow screens)\nc            copy command (choose a tool)\ny            copy result or watch text\nEsc          leave input · back to navigation · back\nCtrl-C       close current tab, including from inputs\n\nNavigation: /App47 is an object; @ marks an interface.\nInterface names retain their full namespace.\nLong names are clipped; the selected full name is above.\nArrow keys remain aliases for hjkl.\n\nInputs: i enters INSERT; Esc returns to NORMAL.\nj/k selects fields in NORMAL; Tab moves focus.\nEnter finishes editing and focuses actions without running.\nIn INSERT, q, t and other characters enter text normally.\nFilters accept text immediately after /.\nInput syntax follows busctl (see man busctl).\nBasic values: enter verbatim, including spaces.\nArrays/dicts: count, then elements/key-value pairs.\nExample: as takes 2 hello world; empty arrays take 0.\nStructs: fields in order; variants: signature then value.\nQuote container tokens with spaces, e.g. 1 \"hello world\".\nCall and Write run only when their action is activated.\n\nWatch uses the current tab for one subscription.\np pauses display, s stops but keeps retained messages,\nx clears retained events, End or G follows latest.\nEsc returns to browsing and stops this subscription.\nq closes the tab and stops its subscription.\nUse t to browse elsewhere while this tab listens.\nOnly the latest 1000 events are retained per watch.\n\nResult: hjkl scroll, PgUp/PgDn page, gg/G first/last.\nEsc returns from an expanded result to its source page.\n\nEsc or ? closes help";
+        let help = "busx · keyboard\n\nt            new browsing tab\nq            close current tab (last tab exits)\nb            switch bus from the service list\ngt / gT      next / previous tab\n{number}gt   jump to tab number\nTab / S-Tab  next / previous pane or form control\ngg / G       first / last item or result line\nj / k        down / up\nh / l        member categories · fold objects · actions\nEnter        inspect · activate focused action\n/            filter services, navigation, or members\nr            refresh service/tree/property values\nn            focus navigation (also on narrow screens)\nc            copy command (choose a tool)\ny            copy result or watch text\nEsc          leave input · back to navigation · back\nCtrl-C       close current tab, including from inputs\n\nNavigation: /App47 is an object; @ marks an interface.\nInterface names retain their full namespace.\nLong names are clipped; the selected full name is above.\nArrow keys remain aliases for hjkl.\n\nMouse: ^ goes up one visible level; hidden on the service list.\nClick members to select, inputs to edit; wheel scrolls.\nInputs: i enters INSERT; Esc returns to NORMAL.\nj/k selects fields in NORMAL; Tab moves focus.\nEnter finishes editing and focuses actions without running.\nIn INSERT, q, t and other characters enter text normally.\nFilters accept text immediately after /.\nInput syntax follows busctl (see man busctl).\nBasic values: enter verbatim, including spaces.\nArrays/dicts: count, then elements/key-value pairs.\nExample: as takes 2 hello world; empty arrays take 0.\nStructs: fields in order; variants: signature then value.\nQuote container tokens with spaces, e.g. 1 \"hello world\".\nCall and Write run only when their action is activated.\n\nWatch uses the current tab for one subscription.\np pauses display, s stops but keeps retained messages,\nx clears retained events, End or G follows latest.\nEsc returns to browsing and stops this subscription.\nq closes the tab and stops its subscription.\nUse t to browse elsewhere while this tab listens.\nOnly the latest 1000 events are retained per watch.\n\nResult: hjkl scroll, PgUp/PgDn page, gg/G first/last.\nEsc returns from an expanded result to its source page.\n\nEsc or ? closes help";
         frame.render_widget(
             Paragraph::new(help)
                 .wrap(Wrap { trim: false })
@@ -188,6 +209,16 @@ pub fn render(
                 .block(Block::bordered().title("Help · arrows scroll · Esc close")),
             area,
         );
+    }
+    if let Some(picker) = &state.bus_picker
+        && let Some(trigger) = targets
+            .iter()
+            .find_map(|(area, target)| (*target == ClickTarget::BusPicker).then_some(*area))
+    {
+        targets.clear();
+        targets.push((area, ClickTarget::BusDismiss));
+        targets.push((trigger, ClickTarget::BusPicker));
+        bus_picker(frame, area, trigger, picker, targets);
     }
 }
 
@@ -203,9 +234,21 @@ fn services(
     } else {
         format!("Services ({})", state.services.len())
     };
-    let block = Block::bordered().title(title);
+    let bus_style = if state.bus_picker.is_some() {
+        selected().fg(ACCENT)
+    } else {
+        active()
+    };
+    let block = Block::bordered()
+        .title(title)
+        .title(Line::from(Span::styled("Bus▾", bus_style)).right_aligned());
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    targets.push((
+        Rect::new(area.right().saturating_sub(5), area.y, 4.min(area.width), 1),
+        ClickTarget::BusPicker,
+    ));
+    targets.push((inner, ClickTarget::ServicesPane));
     if let Some(error) = &state.services_error {
         frame.render_widget(
             Paragraph::new(error_text(error))
@@ -263,12 +306,14 @@ fn services(
         rows,
         state.service_selected,
         true,
+        state.follow_selection[0],
         scroll,
         targets,
         ClickTarget::Service,
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn browser_view(
     frame: &mut Frame,
     area: Rect,
@@ -276,6 +321,8 @@ fn browser_view(
     query: &str,
     targets: &mut Vec<(Rect, ClickTarget)>,
     scroll: &mut [usize; 3],
+    follow_selection: [bool; 2],
+    show_cursor: bool,
 ) {
     if area.width >= 80 {
         let [nav, content] =
@@ -291,6 +338,8 @@ fn browser_view(
             },
             targets,
             &mut scroll[0],
+            follow_selection[0],
+            Focus::Navigation,
         );
         workspace(
             frame,
@@ -303,14 +352,35 @@ fn browser_view(
             },
             targets,
             scroll,
+            follow_selection[1],
+            show_cursor,
         );
     } else if browser.focus == Focus::Navigation {
-        navigation(frame, area, browser, query, targets, &mut scroll[0]);
+        navigation(
+            frame,
+            area,
+            browser,
+            query,
+            targets,
+            &mut scroll[0],
+            follow_selection[0],
+            Focus::Members,
+        );
     } else {
-        workspace(frame, area, browser, query, targets, scroll);
+        workspace(
+            frame,
+            area,
+            browser,
+            query,
+            targets,
+            scroll,
+            follow_selection[1],
+            show_cursor,
+        );
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn navigation(
     frame: &mut Frame,
     area: Rect,
@@ -318,6 +388,8 @@ fn navigation(
     query: &str,
     targets: &mut Vec<(Rect, ClickTarget)>,
     scroll: &mut usize,
+    follow_selection: bool,
+    click_focus: Focus,
 ) {
     let block = Block::bordered()
         .title(if browser.tree_loading {
@@ -332,6 +404,7 @@ fn navigation(
         });
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    targets.push((inner, ClickTarget::NavigationPane));
     let [items, legend] =
         Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(inner);
     frame.render_widget(
@@ -370,12 +443,14 @@ fn navigation(
         rows,
         browser.nav_selected,
         browser.focus == Focus::Navigation,
+        follow_selection,
         scroll,
         targets,
-        ClickTarget::Navigation,
+        |index| ClickTarget::Navigation(index, click_focus),
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn workspace(
     frame: &mut Frame,
     area: Rect,
@@ -383,6 +458,8 @@ fn workspace(
     query: &str,
     targets: &mut Vec<(Rect, ClickTarget)>,
     scroll: &mut [usize; 3],
+    follow_selection: bool,
+    show_cursor: bool,
 ) {
     if let Some(error) = &browser.error {
         frame.render_widget(
@@ -423,7 +500,15 @@ fn workspace(
     };
     let [members, detail] =
         Layout::vertical([Constraint::Length(top_height), Constraint::Min(1)]).areas(area);
-    member_list(frame, members, browser, query, targets, &mut scroll[1]);
+    member_list(
+        frame,
+        members,
+        browser,
+        query,
+        targets,
+        &mut scroll[1],
+        follow_selection,
+    );
     if !query.is_empty()
         && browser.focus == Focus::Members
         && browser.visible_members(query).is_empty()
@@ -433,7 +518,7 @@ fn workspace(
             detail,
         );
     } else {
-        inspector(frame, detail, browser, targets, &mut scroll[2]);
+        inspector(frame, detail, browser, targets, &mut scroll[2], show_cursor);
     }
 }
 
@@ -444,6 +529,7 @@ fn member_list(
     query: &str,
     targets: &mut Vec<(Rect, ClickTarget)>,
     scroll: &mut usize,
+    follow_selection: bool,
 ) {
     let block = Block::bordered().border_style(if browser.focus == Focus::Members {
         active()
@@ -452,6 +538,7 @@ fn member_list(
     });
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    targets.push((inner, ClickTarget::MembersPane));
     if inner.height == 0 {
         return;
     }
@@ -562,6 +649,7 @@ fn member_list(
         rows,
         browser.selected(),
         browser.focus == Focus::Members,
+        follow_selection,
         scroll,
         targets,
         ClickTarget::Member,
@@ -574,6 +662,7 @@ fn inspector(
     browser: &Browser,
     targets: &mut Vec<(Rect, ClickTarget)>,
     result_scroll: &mut usize,
+    show_cursor: bool,
 ) {
     let name = browser.member_name(browser.selected());
     let title = if name.is_empty() { "Details" } else { name };
@@ -710,9 +799,9 @@ fn inspector(
             input,
             &field.input,
             browser.focus == Focus::Field(index),
-            browser.editor.editing && browser.focus == Focus::Field(index),
+            show_cursor && browser.editor.editing && browser.focus == Focus::Field(index),
         );
-        targets.push((row, ClickTarget::Field(index)));
+        targets.push((row, ClickTarget::Field(index, input.x)));
         y += 1;
     }
     let containers = match browser.category {
@@ -826,6 +915,7 @@ fn watch_view(
         Constraint::Length(1),
     ])
     .areas(inner);
+    targets.push((events, ClickTarget::WatchEvents));
     if let Some(error) = &watch.error {
         frame.render_widget(
             Paragraph::new(error_text(error))
@@ -880,7 +970,6 @@ fn watch_view(
         },
         "Stop",
         "Clear",
-        "Back",
     ]
     .iter()
     .enumerate()
@@ -896,45 +985,46 @@ fn watch_view(
 
 /// Keep the active tab visible even when there are more tabs than terminal
 /// columns. Tab numbers remain absolute when the strip scrolls horizontally.
-fn tab_bar(
-    frame: &mut Frame,
-    area: Rect,
-    state: &State,
-    bus: &str,
-    targets: &mut Vec<(Rect, ClickTarget)>,
-) {
-    let prefix = if area.width >= 60 {
-        format!("busx · {bus}  ")
-    } else {
-        "busx ".into()
-    };
-    let prefix_width = Line::raw(prefix.as_str()).width() as u16;
-    frame.render_widget(
-        Paragraph::new(prefix).style(active()),
-        Rect::new(area.x, area.y, prefix_width, 1),
-    );
+fn tab_bar(frame: &mut Frame, area: Rect, state: &State, targets: &mut Vec<(Rect, ClickTarget)>) {
     let new_tab = Rect::new(area.right().saturating_sub(3), area.y, 3, 1);
     frame.render_widget(Paragraph::new(" + ").style(active()), new_tab);
     targets.push((new_tab, ClickTarget::NewTab));
-    let available = new_tab.x.saturating_sub(area.x + prefix_width + 2) as usize;
-    let visible = (available / 10).max(1).min(state.tabs.len());
-    let first = state
-        .active_tab
-        .saturating_sub(visible / 2)
-        .min(state.tabs.len() - visible);
-    let width = (available / visible).min(28) as u16;
-    let mut x = area.x + prefix_width;
+    let available = new_tab.x.saturating_sub(area.x + 2) as usize;
+    let titles: Vec<_> = state
+        .tab_titles()
+        .iter()
+        .enumerate()
+        .map(|(index, title)| format!(" {} {title}", index + 1))
+        .collect();
+    let widths: Vec<_> = titles
+        .iter()
+        .map(|title| {
+            (Line::raw(title.as_str()).width() + 3)
+                .min(28)
+                .min(available)
+        })
+        .collect();
+    let mut first = 0;
+    let mut end = state.active_tab + 1;
+    let mut used: usize = widths[..end].iter().sum();
+    while used > available && first < state.active_tab {
+        used -= widths[first];
+        first += 1;
+    }
+    while end < titles.len() && used + widths[end] <= available {
+        used += widths[end];
+        end += 1;
+    }
+    let mut x = area.x;
     if first > 0 {
         frame.render_widget(Paragraph::new("‹"), Rect::new(x, area.y, 1, 1));
+        x += 1;
     }
-    x += 1;
-    for (index, tab) in state.tabs.iter().enumerate().skip(first).take(visible) {
+    for (index, title) in titles.iter().enumerate().take(end).skip(first) {
+        let width = widths[index] as u16;
         let rect = Rect::new(x, area.y, width, 1);
         let title_width = width.saturating_sub(3);
-        let title = truncate(
-            &format!(" {} {} ", index + 1, tab.title()),
-            title_width as usize,
-        );
+        let title = truncate(title, title_width as usize);
         let style = if index == state.active_tab {
             selected()
         } else {
@@ -949,9 +1039,97 @@ fn tab_bar(
         targets.push((close_rect, ClickTarget::CloseTab(index)));
         x += width;
     }
-    if first + visible < state.tabs.len() && x < new_tab.x {
+    if end < state.tabs.len() && x < new_tab.x {
         frame.render_widget(Paragraph::new("›"), Rect::new(x, area.y, 1, 1));
     }
+}
+
+fn bus_picker(
+    frame: &mut Frame,
+    area: Rect,
+    trigger: Rect,
+    picker: &BusPicker,
+    targets: &mut Vec<(Rect, ClickTarget)>,
+) {
+    let custom = picker.selected == 2;
+    let message_height = if picker.pending.is_some() {
+        1
+    } else if picker.error.is_some() {
+        3
+    } else {
+        0
+    };
+    let width = area.width.saturating_sub(2).min(44);
+    let y = trigger.bottom();
+    let area = Rect::new(
+        trigger.right().saturating_sub(width).max(area.x),
+        y,
+        width,
+        (6 + u16::from(custom) + message_height).min(area.bottom().saturating_sub(y)),
+    );
+    frame.render_widget(Clear, area);
+    targets.push((area, ClickTarget::BusMenu));
+    let block = Block::bordered()
+        .title("Bus · current tab")
+        .border_style(active());
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let [options, address, message, hint] = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Length(u16::from(custom)),
+        Constraint::Min(0),
+        Constraint::Length(1),
+    ])
+    .areas(inner);
+    for (index, label) in ["Session", "System", "Custom address"].iter().enumerate() {
+        let row = line(options, index as u16);
+        frame.render_widget(
+            Paragraph::new(format!(
+                " {} {label}",
+                if picker.selected == index { ">" } else { " " }
+            ))
+            .style(if picker.selected == index {
+                selected()
+            } else {
+                Style::default()
+            }),
+            row,
+        );
+        targets.push((row, ClickTarget::BusOption(index)));
+    }
+    if custom {
+        let [label, field] =
+            Layout::horizontal([Constraint::Length(10), Constraint::Min(1)]).areas(address);
+        frame.render_widget(
+            Paragraph::new(" Address  ").style(Style::default().fg(MUTED)),
+            label,
+        );
+        input_widget(
+            frame,
+            field,
+            &picker.address,
+            true,
+            picker.pending.is_none(),
+        );
+        targets.push((field, ClickTarget::BusAddress));
+    }
+    let (text, color) = if picker.pending.is_some() {
+        ("Connecting...", Color::Yellow)
+    } else if let Some(error) = &picker.error {
+        (error.as_str(), Color::Red)
+    } else {
+        ("", MUTED)
+    };
+    frame.render_widget(
+        Paragraph::new(text)
+            .wrap(Wrap { trim: false })
+            .style(Style::default().fg(color)),
+        message,
+    );
+    frame.render_widget(
+        Paragraph::new("↑/↓ choose · Enter · Esc").style(Style::default().fg(MUTED)),
+        hint,
+    );
 }
 
 fn copy_popup(
@@ -1017,10 +1195,13 @@ fn copy_popup(
         ),
         status,
     );
+    let [keys, copy] = Layout::horizontal([Constraint::Min(1), Constraint::Length(8)]).areas(hint);
     frame.render_widget(
         Paragraph::new("Left/Right tool · Enter copy · PgUp/PgDn scroll"),
-        hint,
+        keys,
     );
+    frame.render_widget(Paragraph::new("[ Copy ]").style(active()), copy);
+    targets.push((copy, ClickTarget::PopupCopy));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1030,6 +1211,7 @@ fn list(
     rows: Vec<(usize, String)>,
     selected_index: usize,
     focused: bool,
+    follow_selection: bool,
     offset: &mut usize,
     targets: &mut Vec<(Rect, ClickTarget)>,
     target: impl Fn(usize) -> ClickTarget,
@@ -1050,7 +1232,7 @@ fn list(
         .iter()
         .enumerate()
         .map(|(position_index, (_, text))| {
-            ListItem::new(format!(
+            let item = ListItem::new(format!(
                 "{} {}",
                 if position == Some(position_index) {
                     ">"
@@ -1058,12 +1240,23 @@ fn list(
                     " "
                 },
                 truncate(text, area.width.saturating_sub(2) as usize)
-            ))
+            ));
+            if !follow_selection && position == Some(position_index) {
+                item.style(if focused {
+                    selected()
+                } else {
+                    Style::default().fg(ACCENT)
+                })
+            } else {
+                item
+            }
         })
         .collect();
-    let mut list_state =
-        ListState::default().with_offset((*offset).min(rows.len().saturating_sub(1)));
-    list_state.select(position);
+    let mut list_state = ListState::default()
+        .with_offset((*offset).min(rows.len().saturating_sub(area.height as usize)));
+    if follow_selection {
+        list_state.select(position);
+    }
     frame.render_stateful_widget(
         List::new(items).highlight_style(if focused {
             selected()

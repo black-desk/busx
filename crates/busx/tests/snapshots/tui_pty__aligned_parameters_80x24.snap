@@ -1,10 +1,9 @@
 ---
 source: crates/busx/tests/tui_pty.rs
-assertion_line: 144
 expression: "lines.join(\"\\n\")"
 ---
-busx · Custom bus    1 /Ui                    ×                               +
-org.busx.UiFixture › /org/busx/Ui › org.busx.UiFixture
+ 1 🔍  …UiFixture ×                                                            +
+ ^ org.busx.UiFixture › /org/busx/Ui › org.busx.UiFixture
 ┌Navigation─────────────┐┌─────────────────────────────────────────────────────┐
 │  ▾ /                  ││ Properties 1  Methods 1  Signals 1                  │
 │    ▾ /org             ││  Method            In       Out                     │

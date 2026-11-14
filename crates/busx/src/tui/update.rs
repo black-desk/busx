@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -11,6 +12,7 @@ use crossterm::event::{
 use tui_input::backend::crossterm::EventHandler;
 use zbus_xml::{ArgDirection, Node};
 
+use crate::dbus::conn::Bus;
 use crate::dbus::introspect::{access_str, sig_str};
 use crate::error::{Error, Result};
 use crate::tui::copy::{CopyOp, Tool, generate};
@@ -30,19 +32,47 @@ fn update_message(state: &mut State, msg: Msg) -> Option<Effect> {
         Msg::Key(key) => key_event(state, key),
         Msg::Mouse(event) => mouse(state, event),
         Msg::Resize => None,
+        Msg::Connected(id, result) => {
+            let index = state.tabs.iter().position(|tab| {
+                tab.bus_picker
+                    .as_ref()
+                    .is_some_and(|picker| picker.pending == Some(id))
+            })?;
+            match result {
+                Ok((connection, bus)) => {
+                    state.tabs[index].stop_watch();
+                    // Replacing the tab identity prevents replies from the old
+                    // bus from reaching an identically named service here.
+                    let tab_id = state.request_id();
+                    let request = state.request_id();
+                    let mut tab = Tab::new(tab_id, bus, connection);
+                    tab.services_request = request;
+                    state.tabs[index] = tab;
+                    if index == state.active_tab {
+                        state.key_prefix = None;
+                        state.click_targets.clear();
+                    }
+                    Some(Effect::Services(request, tab_id))
+                }
+                Err(error) => {
+                    let picker = state.tabs[index].bus_picker.as_mut()?;
+                    picker.pending = None;
+                    picker.error = Some(format!("Connection failed: {}", error_text(&error)));
+                    None
+                }
+            }
+        }
         Msg::Services(id, result) => {
-            if id == state.services_request {
-                state.services_loading = false;
+            if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.services_request == id) {
+                tab.services_loading = false;
                 match result {
                     Ok(services) => {
-                        for tab in &mut state.tabs {
-                            tab.service_selected =
-                                tab.service_selected.min(services.len().saturating_sub(1));
-                        }
-                        state.services = services;
-                        state.services_error = None;
+                        tab.service_selected =
+                            tab.service_selected.min(services.len().saturating_sub(1));
+                        tab.services = services;
+                        tab.services_error = None;
                     }
-                    Err(error) => state.services_error = Some(error),
+                    Err(error) => tab.services_error = Some(error),
                 }
             }
             None
@@ -236,6 +266,10 @@ fn key_event(state: &mut State, key: KeyEvent) -> Option<Effect> {
         state.close_tab();
         return None;
     }
+    if state.bus_picker.is_some() {
+        state.key_prefix = None;
+        return bus_picker_key(state, key);
+    }
     if state.popup.is_some() {
         state.key_prefix = None;
         return popup_key(state, key.code);
@@ -291,6 +325,7 @@ fn key_event(state: &mut State, key: KeyEvent) -> Option<Effect> {
         return None;
     }
     state.status = None;
+    state.follow_selection = [true; 2];
     if vim_sequence(state, key) {
         return None;
     }
@@ -301,6 +336,10 @@ fn key_event(state: &mut State, key: KeyEvent) -> Option<Effect> {
         }
         KeyCode::Char('t') => {
             state.new_tab();
+            return refresh(state);
+        }
+        KeyCode::Char('b') if state.page == Page::Services => {
+            open_bus_picker(state);
             return None;
         }
         KeyCode::Char('?') => {
@@ -510,7 +549,7 @@ fn open_service(state: &mut State) -> Option<Effect> {
     state.browser = Some(Browser::new(service.clone(), id));
     state.page = Page::Browser;
     state.filter = None;
-    Some(Effect::Objects(id, service))
+    Some(Effect::Objects(id, state.id, service))
 }
 
 fn open_navigation(state: &mut State) -> Option<Effect> {
@@ -554,7 +593,7 @@ fn open_navigation(state: &mut State) -> Option<Effect> {
     browser.focus = Focus::Members;
     let context = browser.context.clone();
     state.filter = None;
-    Some(Effect::Interface(id, context))
+    Some(Effect::Interface(id, state.id, context))
 }
 
 fn fetch_properties(state: &mut State) -> Option<Effect> {
@@ -563,11 +602,12 @@ fn fetch_properties(state: &mut State) -> Option<Effect> {
 
 fn fetch_properties_for(state: &mut State, index: usize) -> Option<Effect> {
     let id = state.request_id();
-    let browser = state.tabs.get_mut(index)?.browser.as_mut()?;
+    let tab = state.tabs.get_mut(index)?;
+    let browser = tab.browser.as_mut()?;
     browser.properties_request = id;
     browser.properties_loading = true;
     browser.properties_error = None;
-    Some(Effect::Properties(id, browser.context.clone()))
+    Some(Effect::Properties(id, tab.id, browser.context.clone()))
 }
 
 fn refresh(state: &mut State) -> Option<Effect> {
@@ -577,20 +617,21 @@ fn refresh(state: &mut State) -> Option<Effect> {
             state.services_request = id;
             state.services_loading = true;
             state.services_error = None;
-            Some(Effect::Services(id))
+            Some(Effect::Services(id, state.id))
         }
         Page::Browser => {
+            let tab_id = state.id;
             let browser = state.browser.as_mut()?;
             if browser.focus == Focus::Navigation {
                 browser.tree_request = id;
                 browser.tree_loading = true;
                 browser.error = None;
-                Some(Effect::Objects(id, browser.context.service.clone()))
+                Some(Effect::Objects(id, tab_id, browser.context.service.clone()))
             } else if browser.error.is_some() && !browser.context.interface.is_empty() {
                 browser.interface_request = id;
                 browser.interface_loading = true;
                 browser.error = None;
-                Some(Effect::Interface(id, browser.context.clone()))
+                Some(Effect::Interface(id, tab_id, browser.context.clone()))
             } else if !browser.context.interface.is_empty() {
                 fetch_properties(state)
             } else {
@@ -1046,7 +1087,7 @@ fn start_watch(state: &mut State) -> Option<Effect> {
         follow: true,
     });
     state.page = Page::Watch;
-    Some(Effect::Listen(id, context, target))
+    Some(Effect::Listen(id, state.id, context, target))
 }
 
 fn watch_key(state: &mut State, key: KeyCode) -> Option<Effect> {
@@ -1081,10 +1122,6 @@ fn watch_key(state: &mut State, key: KeyCode) -> Option<Effect> {
 }
 
 fn watch_action(state: &mut State, index: usize) {
-    if index == 3 {
-        back(state);
-        return;
-    }
     let Some(watch) = state.watch_mut() else {
         return;
     };
@@ -1358,72 +1395,268 @@ fn popup_key(state: &mut State, key: KeyCode) -> Option<Effect> {
     None
 }
 
+fn open_bus_picker(state: &mut State) {
+    state.key_prefix = None;
+    state.bus_picker = Some(BusPicker {
+        selected: match state.bus {
+            Bus::Session => 0,
+            Bus::System => 1,
+            Bus::Other(_) => 2,
+        },
+        address: tui_input::Input::new(match &state.bus {
+            Bus::Other(address) => address.clone(),
+            _ => String::new(),
+        }),
+        pending: None,
+        error: None,
+    });
+}
+
+fn connect_bus(state: &mut State) -> Option<Effect> {
+    let picker = state.bus_picker.as_ref()?;
+    if picker.pending.is_some() {
+        return None;
+    }
+    let bus = match picker.selected {
+        0 => Bus::Session,
+        1 => Bus::System,
+        _ => Bus::Other(picker.address.value().to_string()),
+    };
+    if matches!(&bus, Bus::Other(address) if address.is_empty()) {
+        state.bus_picker.as_mut()?.error = Some("Enter a D-Bus address".into());
+        return None;
+    }
+    if bus == state.bus {
+        state.bus_picker = None;
+        return None;
+    }
+    let id = state.request_id();
+    let picker = state.bus_picker.as_mut()?;
+    picker.pending = Some(id);
+    picker.error = None;
+    Some(Effect::Connect(id, bus))
+}
+
+fn bus_picker_key(state: &mut State, key: KeyEvent) -> Option<Effect> {
+    if key.code == KeyCode::Esc {
+        state.bus_picker = None;
+        return None;
+    }
+    let picker = state.bus_picker.as_mut()?;
+    if picker.pending.is_some() {
+        return None;
+    }
+    match key.code {
+        KeyCode::Enter => return connect_bus(state),
+        KeyCode::Up | KeyCode::BackTab => picker.selected = (picker.selected + 2) % 3,
+        KeyCode::Down | KeyCode::Tab => picker.selected = (picker.selected + 1) % 3,
+        _ if picker.selected == 2 => {
+            picker.address.handle_event(&Event::Key(key));
+        }
+        KeyCode::Char('j') => picker.selected = (picker.selected + 1) % 3,
+        KeyCode::Char('k') => picker.selected = (picker.selected + 2) % 3,
+        _ => {}
+    }
+    None
+}
+
+fn mouse_scroll(state: &mut State, event: MouseEvent, target: ClickTarget) -> Option<Effect> {
+    let down = event.kind == MouseEventKind::ScrollDown;
+    let key = if down { KeyCode::Down } else { KeyCode::Up };
+    match target {
+        ClickTarget::Service(_) | ClickTarget::ServicesPane => {
+            if state.filter.is_some() {
+                move_filtered(state, if down { 1 } else { -1 });
+            } else {
+                let count = state.services.len();
+                move_index(
+                    &mut state.service_selected,
+                    count,
+                    if down { 1 } else { -1 },
+                );
+            }
+            state.follow_selection[0] = true;
+        }
+        ClickTarget::Navigation(..)
+        | ClickTarget::NavigationPane
+        | ClickTarget::Member(_)
+        | ClickTarget::MembersPane
+        | ClickTarget::Category(_) => {
+            let navigation = matches!(
+                target,
+                ClickTarget::Navigation(..) | ClickTarget::NavigationPane
+            );
+            let pane = usize::from(!navigation);
+            state.follow_selection[pane] = false;
+            state.scroll[pane] = if down {
+                state.scroll[pane].saturating_add(1)
+            } else {
+                state.scroll[pane].saturating_sub(1)
+            };
+        }
+        ClickTarget::Result => {
+            let browser = state.browser.as_mut()?;
+            if let Some(outcome) = &browser.editor.outcome {
+                scroll_text(
+                    &outcome.text(),
+                    &mut browser.editor.scroll,
+                    &mut browser.editor.hscroll,
+                    key,
+                );
+            }
+        }
+        ClickTarget::WatchEvents => return watch_key(state, key),
+        ClickTarget::ExpandedResult => {
+            let expanded = state.expanded.as_mut()?;
+            scroll_text(
+                &expanded.text,
+                &mut expanded.scroll,
+                &mut expanded.hscroll,
+                key,
+            );
+        }
+        _ => {}
+    }
+    None
+}
+
+fn position_input(input: &mut tui_input::Input, column: u16, width: u16) {
+    let column = column as usize + input.visual_scroll(width.saturating_sub(1) as usize);
+    let mut cursor = 0;
+    let mut text = String::new();
+    for ch in input.value().chars() {
+        text.push(ch);
+        if ratatui::text::Line::raw(text.as_str()).width() > column {
+            break;
+        }
+        cursor += 1;
+    }
+    *input = std::mem::take(input).with_cursor(cursor);
+}
+
 fn mouse(state: &mut State, event: MouseEvent) -> Option<Effect> {
     state.key_prefix = None;
     if state.help_open {
-        return None;
-    }
-    if matches!(
-        event.kind,
-        MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
-    ) {
-        if state.popup.is_some() {
-            return None;
+        match event.kind {
+            MouseEventKind::ScrollDown => state.help_scroll = (state.help_scroll + 1).min(30),
+            MouseEventKind::ScrollUp => state.help_scroll = state.help_scroll.saturating_sub(1),
+            _ => {}
         }
-        let key = if event.kind == MouseEventKind::ScrollDown {
-            KeyCode::Down
-        } else {
-            KeyCode::Up
-        };
-        return if state.filter.is_some() {
-            move_filtered(state, if key == KeyCode::Down { 1 } else { -1 });
-            None
-        } else {
-            key_event(state, KeyEvent::new(key, KeyModifiers::NONE))
-        };
-    }
-    if event.kind != MouseEventKind::Down(MouseButton::Left) {
         return None;
     }
-    let target = state
+    let (target_area, target) = state
         .click_targets
         .iter()
         .rev()
         .find(|(area, _)| area.contains((event.column, event.row).into()))
-        .map(|(_, target)| target.clone())?;
-    if state.popup.is_some() && !matches!(target, ClickTarget::PopupTool(_)) {
+        .map(|(area, target)| (*area, target.clone()))?;
+    if matches!(
+        event.kind,
+        MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+    ) {
+        if state.popup.is_some() || state.bus_picker.is_some() {
+            return None;
+        }
+        return mouse_scroll(state, event, target);
+    }
+    if event.kind != MouseEventKind::Down(MouseButton::Left) {
         return None;
     }
-    if !matches!(
+    if state.bus_picker.is_some() {
+        match target {
+            ClickTarget::BusPicker => state.bus_picker = None,
+            ClickTarget::BusDismiss => state.bus_picker = None,
+            ClickTarget::BusOption(index) if state.bus_picker.as_ref()?.pending.is_none() => {
+                state.bus_picker.as_mut()?.selected = index;
+                if index < 2 {
+                    return connect_bus(state);
+                }
+            }
+            ClickTarget::BusAddress if state.bus_picker.as_ref()?.pending.is_none() => {
+                let picker = state.bus_picker.as_mut()?;
+                picker.selected = 2;
+                position_input(
+                    &mut picker.address,
+                    event.column.saturating_sub(target_area.x),
+                    target_area.width,
+                );
+            }
+            _ => {}
+        }
+        return None;
+    }
+    if state.popup.is_some()
+        && !matches!(target, ClickTarget::PopupTool(_) | ClickTarget::PopupCopy)
+    {
+        return None;
+    }
+    if matches!(
         target,
-        ClickTarget::Tab(_) | ClickTarget::CloseTab(_) | ClickTarget::NewTab
+        ClickTarget::Service(_)
+            | ClickTarget::Navigation(..)
+            | ClickTarget::Category(_)
+            | ClickTarget::Member(_)
+            | ClickTarget::Field(_, _)
+            | ClickTarget::Action(_)
+            | ClickTarget::Result
     ) && let Some(browser) = state.browser.as_mut()
     {
         browser.editor.editing = false;
     }
     match target {
-        ClickTarget::Service(index) => {
-            let already = state.service_selected == index;
-            state.service_selected = index;
-            if already {
-                return open_service(state);
+        ClickTarget::Up { to_navigation } => {
+            clear_filter(state);
+            state.status = None;
+            if let Some(browser) = &mut state.browser {
+                browser.editor.editing = false;
+            }
+            if state.page == Page::Browser && !to_navigation {
+                state.page = Page::Services;
+            } else if state.page != Page::Services {
+                back(state);
             }
         }
-        ClickTarget::Navigation(index) => {
-            if state
-                .browser
-                .as_ref()
-                .is_some_and(|browser| browser.focus != Focus::Navigation)
-            {
-                clear_filter(state);
-            }
+        ClickTarget::Filter => {
+            position_input(
+                state.filter.as_mut()?,
+                event.column.saturating_sub(target_area.x),
+                target_area.width,
+            );
+        }
+        ClickTarget::Service(index) => {
+            state.service_selected = index;
+            state.follow_selection[0] = true;
+            return open_service(state);
+        }
+        ClickTarget::Navigation(index, click_focus) => {
+            let query = if state.browser.as_ref()?.focus == Focus::Navigation {
+                state.query()
+            } else {
+                ""
+            };
+            let row = *state.browser.as_ref()?.navigation(query).get(index)?;
+            clear_filter(state);
+            state.follow_selection[0] = true;
             let browser = state.browser.as_mut()?;
-            let already = browser.focus == Focus::Navigation && browser.nav_selected == index;
-            browser.focus = Focus::Navigation;
-            browser.nav_selected = index;
-            if already {
-                return open_navigation(state);
+            let focus = if matches!(row, NavRow::Interface(..)) {
+                click_focus
+            } else {
+                Focus::Navigation
+            };
+            browser.focus = focus;
+            browser.nav_selected = browser
+                .navigation("")
+                .iter()
+                .position(|candidate| *candidate == row)?;
+            if let NavRow::Interface(object, interface) = row
+                && browser.context.object == browser.objects[object].path
+                && browser.context.interface == browser.objects[object].interfaces[interface]
+            {
+                return None;
             }
+            let effect = open_navigation(state);
+            state.browser.as_mut()?.focus = focus;
+            return effect;
         }
         ClickTarget::Category(category) => {
             clear_filter(state);
@@ -1435,30 +1668,26 @@ fn mouse(state: &mut State, event: MouseEvent) -> Option<Effect> {
             browser.focus = Focus::Members;
         }
         ClickTarget::Member(index) => {
-            if state.browser.as_ref().is_some_and(|browser| {
-                browser.focus != Focus::Members || browser.selected() == index
-            }) {
-                clear_filter(state);
-            }
+            clear_filter(state);
+            state.follow_selection[1] = true;
             let browser = state.browser.as_mut()?;
-            let already = browser.focus == Focus::Members && browser.selected() == index;
             if browser.selected() != index {
                 browser.selected[browser.category as usize] = index;
                 browser.select_member();
             }
-            browser.focus = if already {
-                if browser.editor.fields.is_empty() {
-                    Focus::Action(0)
-                } else {
-                    Focus::Field(0)
-                }
-            } else {
-                Focus::Members
-            };
+            browser.focus = Focus::Members;
         }
-        ClickTarget::Field(index) => {
+        ClickTarget::Field(index, input_x) => {
             clear_filter(state);
-            state.browser.as_mut()?.focus = Focus::Field(index);
+            let browser = state.browser.as_mut()?;
+            browser.focus = Focus::Field(index);
+            browser.editor.editing = true;
+            let field = browser.editor.fields.get_mut(index)?;
+            position_input(
+                &mut field.input,
+                event.column.saturating_sub(input_x),
+                target_area.right().saturating_sub(input_x),
+            );
         }
         ClickTarget::Action(index) => {
             clear_filter(state);
@@ -1471,17 +1700,20 @@ fn mouse(state: &mut State, event: MouseEvent) -> Option<Effect> {
         }
         ClickTarget::Tab(index) => state.select_tab(index),
         ClickTarget::CloseTab(index) => state.close_tab_at(index),
-        ClickTarget::NewTab => state.new_tab(),
+        ClickTarget::NewTab => {
+            state.new_tab();
+            return refresh(state);
+        }
+        ClickTarget::BusPicker => open_bus_picker(state),
         ClickTarget::WatchAction(index) => watch_action(state, index),
         ClickTarget::PopupTool(index) => {
             let popup = state.popup.as_mut()?;
-            if popup.selected == index {
-                return popup_key(state, KeyCode::Enter);
-            }
             popup.selected = index;
             popup.scroll = 0;
             popup.status = None;
         }
+        ClickTarget::PopupCopy => return popup_key(state, KeyCode::Enter),
+        _ => {}
     }
     None
 }
