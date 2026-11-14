@@ -158,8 +158,10 @@ is `0` on success, `1` on failure; piping into `less`/`head` does not panic
   to normal mode without moving focus. Moving down from the last field focuses
   the action row; up returns to the last field, and `h/l` selects an action. In
   insert mode, `Tab` moves between fields; `Enter` finishes editing and focuses
-  the actions without executing. `Expand result` opens large replies
-  full-screen, and `Esc` returns to the editor. Basic values are entered
+  the actions without executing. `Open in editor` writes large replies to a
+  temporary text file, expands nested arrays/dictionaries/structures with
+  indentation, and opens it with `$VISUAL` or `$EDITOR`; after the editor exits,
+  the browser is restored. Basic values are entered
   verbatim, including spaces and empty strings; containers use busctl-style
   tokens, e.g. `2 hello world` for `as`. Container inputs point to `?` help for
   syntax rules and the busctl reference; press `Esc` first when editing.
@@ -190,19 +192,15 @@ is `0` on success, `1` on failure; piping into `less`/`head` does not panic
   expand only as needed to distinguish services, and same-named listeners add
   their service, e.g. `👁️ …Player:volume`. A bus suffix appears when otherwise
   identical titles belong to different buses. The `Bus▾` menu shows the current
-  tab's selected bus. Expanded results keep their source tab's title. Tab widths
-  follow their labels; long titles are clipped, and overflow keeps the active
-  tab visible.
+  tab's selected bus. Tab widths follow their labels; long titles are clipped,
+  and overflow keeps the active tab visible.
 - **Mouse interaction**: the `^` control at the left of the context row goes up
   one visible level. Wide browsers return to the service list; narrow member
-  views return to navigation first. Expanded results return to their source
-  page, and leaving a watch stops its subscription. The service list hides the
-  control. The symbol and its two padding spaces are clickable. Clicking a
-  service opens it; clicking an object folds or unfolds it. Clicking an
-  interface loads its members, keeping focus in navigation when panes are side
-  by side, or showing the member list on narrow screens. Clicking a member
-  selects it without moving focus into the form. Clicking an input enters insert
-  mode at the clicked position; clicking the filter positions its cursor. The
+  views return to navigation first. Leaving a watch stops its subscription. The
+  service list hides the control. The symbol and its two padding spaces are
+  clickable. Clicking a service opens it; clicking an object folds or unfolds
+  it. Clicking an interface loads its members, keeping focus in navigation
+  when panes are side by side, or showing the member list in narrow terminals.
   wheel scrolls the area under the pointer without moving keyboard focus or
   changing the selected member. In command previews, click a tool to select it
   and click `Copy` to copy the command.

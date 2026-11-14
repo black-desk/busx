@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -73,11 +74,6 @@ pub fn render(
             .watch()
             .map(|watch| breadcrumb(&watch.context, context_width))
             .unwrap_or_default(),
-        Page::Expanded => state
-            .expanded
-            .as_ref()
-            .map(|expanded| truncate(&expanded.title, context_width))
-            .unwrap_or_default(),
     };
     if state.page != Page::Services {
         let [up, context_area] =
@@ -124,22 +120,6 @@ pub fn render(
             }
         }
         Page::Watch => watch_view(frame, content, state, targets, scroll),
-        Page::Expanded => {
-            if let Some(expanded) = &state.expanded {
-                let block = Block::bordered().title("Result · y copy · c copy command");
-                let inner = block.inner(content);
-                frame.render_widget(block, content);
-                targets.push((inner, ClickTarget::ExpandedResult));
-                scroll[2] = result_text(
-                    frame,
-                    inner,
-                    &expanded.text,
-                    expanded.scroll,
-                    expanded.hscroll,
-                    false,
-                );
-            }
-        }
     }
     if let (Some(area), Some(input)) = (filter, &state.filter) {
         let [label, field] =
@@ -163,12 +143,11 @@ pub fn render(
             Page::Browser => match state.browser.as_ref().map(|browser| browser.focus) {
                 Some(Focus::Navigation) => "j/k select · h/l fold · Enter open · / filter",
                 Some(Focus::Action(_)) => "h/l action · k inputs · j result · Enter run",
-                Some(Focus::Result) => "hjkl scroll · Enter expand · y copy",
+                Some(Focus::Result) => "hjkl scroll · Enter open in editor · y copy",
                 Some(Focus::Field(_)) => "NORMAL · i edit · j/k focus · Enter actions",
                 _ => "j/k select · h/l category · Enter details · / filter",
             },
-            Page::Watch => "hjkl scroll · p pause · s stop · x clear · Enter expand",
-            Page::Expanded => "hjkl scroll · PgUp/PgDn page · y copy · Esc back",
+            Page::Watch => "hjkl scroll · p pause · s stop · x clear · Enter open in editor",
         }
     };
     let pending = state.key_prefix.map(|prefix| match prefix {
@@ -201,7 +180,7 @@ pub fn render(
     if state.help_open {
         targets.clear();
         frame.render_widget(Clear, area);
-        let help = "busx · keyboard\n\nt            new browsing tab\nq            close current tab (last tab exits)\nb            switch bus from the service list\ngt / gT      next / previous tab\n{number}gt   jump to tab number\nTab / S-Tab  next / previous pane or form control\ngg / G       first / last item or result line\nj / k        down / up\nh / l        member categories · fold objects · actions\nEnter        inspect · activate focused action\n/            filter services, navigation, or members\nr            refresh service/tree/property values\nn            focus navigation (also on narrow screens)\nc            copy command (choose a tool)\ny            copy result or watch text\nEsc          leave input · back to navigation · back\nCtrl-C       close current tab, including from inputs\n\nNavigation: /App47 is an object; @ marks an interface.\nInterface names retain their full namespace.\nLong names are clipped; the selected full name is above.\nArrow keys remain aliases for hjkl.\n\nMouse: ^ goes up one visible level; hidden on the service list.\nClick members to select, inputs to edit; wheel scrolls.\nInputs: i enters INSERT; Esc returns to NORMAL.\nj/k selects fields in NORMAL; Tab moves focus.\nEnter finishes editing and focuses actions without running.\nIn INSERT, q, t and other characters enter text normally.\nFilters accept text immediately after /.\nInput syntax follows busctl (see man busctl).\nBasic values: enter verbatim, including spaces.\nArrays/dicts: count, then elements/key-value pairs.\nExample: as takes 2 hello world; empty arrays take 0.\nStructs: fields in order; variants: signature then value.\nQuote container tokens with spaces, e.g. 1 \"hello world\".\nCall and Write run only when their action is activated.\n\nWatch uses the current tab for one subscription.\np pauses display, s stops but keeps retained messages,\nx clears retained events, End or G follows latest.\nEsc returns to browsing and stops this subscription.\nq closes the tab and stops its subscription.\nUse t to browse elsewhere while this tab listens.\nOnly the latest 1000 events are retained per watch.\n\nResult: hjkl scroll, PgUp/PgDn page, gg/G first/last.\nEsc returns from an expanded result to its source page.\n\nEsc or ? closes help";
+        let help = "busx · keyboard\n\nt            new browsing tab\nq            close current tab (last tab exits)\nb            switch bus from the service list\ngt / gT      next / previous tab\n{number}gt   jump to tab number\nTab / S-Tab  next / previous pane or form control\ngg / G       first / last item or result line\nj / k        down / up\nh / l        member categories · fold objects · actions\nEnter        inspect · activate focused action\n/            filter services, navigation, or members\nr            refresh service/tree/property values\nn            focus navigation (also on narrow screens)\nc            copy command (choose a tool)\ny            copy result or watch text\nEsc          leave input · back to navigation · back\nCtrl-C       close current tab, including from inputs\n\nNavigation: /App47 is an object; @ marks an interface.\nInterface names retain their full namespace.\nLong names are clipped; the selected full name is above.\nArrow keys remain aliases for hjkl.\n\nMouse: ^ goes up one visible level; hidden on the service list.\nClick members to select, inputs to edit; wheel scrolls.\nInputs: i enters INSERT; Esc returns to NORMAL.\nj/k selects fields in NORMAL; Tab moves focus.\nEnter finishes editing and focuses actions without running.\nIn INSERT, q, t and other characters enter text normally.\nFilters accept text immediately after /.\nInput syntax follows busctl (see man busctl).\nBasic values: enter verbatim, including spaces.\nArrays/dicts: count, then elements/key-value pairs.\nExample: as takes 2 hello world; empty arrays take 0.\nStructs: fields in order; variants: signature then value.\nQuote container tokens with spaces, e.g. 1 \"hello world\".\nCall and Write run only when their action is activated.\n\nWatch uses the current tab for one subscription.\np pauses display, s stops but keeps retained messages,\nx clears retained events, End or G follows latest.\nEsc returns to browsing and stops this subscription.\nq closes the tab and stops its subscription.\nUse t to browse elsewhere while this tab listens.\nOnly the latest 1000 events are retained per watch.\n\nResult: y copies the result; Enter opens it in the configured editor.\n\nEsc or ? closes help";
         frame.render_widget(
             Paragraph::new(help)
                 .wrap(Wrap { trim: false })

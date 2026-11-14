@@ -25,4 +25,4 @@ expression: "lines.join(\"\\n\")"
 │Following latest · retained 0/1000                                                                │
 │ Pause   Stop   Clear                                                                             │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘
-hjkl scroll · p pause · s stop · x clear · Enter expand                                     · ? help
+hjkl scroll · p pause · s stop · x clear · Enter open in editor                             · ? help

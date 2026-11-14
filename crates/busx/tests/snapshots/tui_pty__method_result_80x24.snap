@@ -14,7 +14,7 @@ expression: "lines.join(\"\\n\")"
 │                       │└─────────────────────────────────────────────────────┘
 │                       │┌MakeFd───────────────────────────────────────────────┐
 │                       ││In: none · Out: h                                    │
-│                       ││ Call   Watch   Copy command   Expand result         │
+│                       ││ Call   Watch   Copy command   Open in editor         │
 │                       ││SUCCESS                                              │
 │                       ││<fd /dev/null ro>                                    │
 │                       ││                                                     │

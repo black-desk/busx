@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -30,7 +31,6 @@ pub enum Page {
     Services,
     Browser,
     Watch,
-    Expanded,
 }
 
 /// Window-wide data plus independent browser tabs. Dereferencing State
@@ -60,7 +60,6 @@ pub struct Tab {
     pub service_selected: usize,
     pub browser: Option<Browser>,
     pub watch: Option<Watch>,
-    pub expanded: Option<Expanded>,
     pub popup: Option<CopyAsPopup>,
     pub filter: Option<Input>,
     pub status: Option<String>,
@@ -84,7 +83,6 @@ impl Tab {
             service_selected: 0,
             browser: None,
             watch: None,
-            expanded: None,
             popup: None,
             filter: None,
             status: None,
@@ -103,10 +101,7 @@ impl Tab {
     }
 
     fn title_page(&self) -> Page {
-        self.expanded
-            .as_ref()
-            .filter(|_| self.page == Page::Expanded)
-            .map_or(self.page, |expanded| expanded.origin)
+        self.page
     }
 
     fn title_context(&self) -> Option<&Context> {
@@ -498,7 +493,7 @@ impl Browser {
         };
         actions.push(Action::Copy);
         if self.editor.outcome.is_some() {
-            actions.push(Action::Expand);
+            actions.push(Action::OpenEditor);
         }
         actions
     }
@@ -686,7 +681,7 @@ pub enum Action {
     Write,
     Watch,
     Copy,
-    Expand,
+    OpenEditor,
 }
 
 impl Action {
@@ -697,7 +692,7 @@ impl Action {
             Self::Write => "Write",
             Self::Watch => "Watch",
             Self::Copy => "Copy command",
-            Self::Expand => "Expand result",
+            Self::OpenEditor => "Open in editor",
         }
     }
 }
@@ -755,15 +750,6 @@ impl Watch {
     }
 }
 
-pub struct Expanded {
-    pub origin: Page,
-    pub title: String,
-    pub text: String,
-    pub op: Option<CopyOp>,
-    pub scroll: usize,
-    pub hscroll: usize,
-}
-
 pub struct CopyAsPopup {
     pub commands: Vec<(Tool, Option<String>)>,
     pub selected: usize,
@@ -791,7 +777,6 @@ pub enum ClickTarget {
     NavigationPane,
     MembersPane,
     WatchEvents,
-    ExpandedResult,
     Service(usize),
     Navigation(usize, Focus),
     Category(Category),
