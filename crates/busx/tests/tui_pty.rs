@@ -4,6 +4,7 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -411,7 +412,6 @@ fn editor_formats_nested_results() {
     let mut p = spawn_with_editor(&bus.address, 80, 24, None, Some(&editor.path));
     open_interface(&mut p);
     probe_property(&mut p, "counts");
-    key(&mut p, KeyCode::Down);
     key(&mut p, KeyCode::Enter);
     wait(&mut p, "{1: 10, 2: 20}");
     text(&mut p, "j");
