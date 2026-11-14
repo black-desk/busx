@@ -1,0 +1,28 @@
+---
+source: crates/busx/tests/tui_pty.rs
+expression: "lines.join(\"\\n\")"
+---
+ 1 Custom ×                                                                   +
+┌Services (17)─────────────────────────────────────────────────────────────Bus▾┐
+│  Name                                                    PID        Process  │
+│> org.busx.ScrollA                                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollB                                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollC                                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollD                                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollE                                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollF                                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollG                                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollH                                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollI                                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollJ                                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollK                                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollL                                      <PID>      <FIXTURE>  │
+│  org.busx.Test                                         <PID>      <FIXTURE>  │
+│  org.busx.TestServiceNameThatIsIntentionallyVeryLo…    <PID>      <FIXTURE>  │
+│  org.freedesktop.DBus                                  <PID>    dbus-daemon  │
+│  :1.0                                                  <PID>      <FIXTURE>  │
+│  :1.1                                                  <PID>           busx  │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+j/k select · Enter open · / filter · b bus                              · ? help

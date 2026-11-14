@@ -1,0 +1,28 @@
+---
+source: crates/busx/tests/tui_pty.rs
+expression: "lines.join(\"\\n\")"
+---
+ 1 🔍  …UiFixture ×                                                            +
+ ^ org.example.UnrelatedNamespace
+┌Navigation─────────────┐┌─────────────────────────────────────────────────────┐
+│        ▾ /Ui          ││ Properties 1  Methods 1  Signals 1                  │
+│>         @ org.exampl…││  Name              Type   Mode Value                │
+│        ▸ /child_0     ││> Ready             b      r    true                 │
+│          @ org.exampl…││                                                     │
+│        ▸ /child_1     ││                                                     │
+│          @ org.exampl…││                                                     │
+│        ▸ /child_10    │└─────────────────────────────────────────────────────┘
+│          @ org.exampl…│┌Ready────────────────────────────────────────────────┐
+│        ▸ /child_11    ││b · r                                                │
+│          @ org.exampl…││Current  true                                        │
+│        ▸ /child_2     ││ Read   Watch   Copy command                         │
+│          @ org.exampl…││                                                     │
+│        ▸ /child_3     ││                                                     │
+│          @ org.exampl…││                                                     │
+│        ▸ /child_4     ││                                                     │
+│          @ org.exampl…││                                                     │
+│        ▸ /child_5     ││                                                     │
+│/ object · @ interface ││                                                     │
+└───────────────────────┘└─────────────────────────────────────────────────────┘
+ Filter /org.example.UnrelatedNamespace
+Type to filter · Enter open · Esc leave filter                 · Esc then ? help

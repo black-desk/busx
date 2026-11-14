@@ -1,97 +1,54 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Event loop. `run_loop` is backend- and event-source-agnostic; the real
-//! crossterm + flume wiring lives in `run`. It is exercised end-to-end via
-//! tuiprobe PTY tests (in `tests/tui_pty.rs`).
+//! Terminal lifecycle and asynchronous D-Bus effects.
 
-use std::io::{self, Stdout};
-use std::time::Duration;
+use std::ffi::OsString;
+use std::io::{self, Stdout, Write};
+use std::process::Command;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crossterm::event::{self, Event};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use futures::{FutureExt, StreamExt};
 use ratatui::Terminal;
-use ratatui::backend::{Backend, CrosstermBackend};
+use ratatui::backend::CrosstermBackend;
 use zbus::Connection;
 
 use crate::dbus;
+use crate::dbus::conn::Bus;
 use crate::error::Result;
+use crate::tui::copy::CopyOp;
 use crate::tui::msg::{Effect, Msg};
 use crate::tui::render::render;
-use crate::tui::state::{ActionResult, ListenTarget, State};
-use crate::tui::update::update;
-
-/// Pretty-print an owned value (the common tail of call/get result rendering).
-fn pretty(v: &zvariant::OwnedValue) -> String {
-    crate::value::pretty::pretty(v)
-}
+use crate::tui::state::{ActionResult, Context, ListenTarget, Page, State};
+use crate::tui::update::{listen_rule, update};
 
 type Tui = Terminal<CrosstermBackend<Stdout>>;
 
-/// Loop driver: holds the display `State` and advances it from a stream of
-/// `Msg`s. Built directly in tests; `run` builds it for production.
-pub struct App {
-    pub state: State,
-}
+/// The guard is installed before entering raw mode so partial setup failures
+/// and unwinding restore the terminal too.
+struct TerminalGuard;
 
-impl App {
-    /// Render, then consume one event, repeating until `state.quit` or the event
-    /// source is exhausted. Generic over the backend.
-    ///
-    /// Draws at the top of each iteration, so a non-quit mutation IS rendered on
-    /// the next pass; a quit mutation exits without a final redraw (the screen is
-    /// discarded when the terminal is torn down).
-    ///
-    /// `on_effect` performs any IO `update` requests (a fetch). It is injected so
-    /// tests stay bus-free (they pass `|_| {}`); production closes over the
-    /// connection + message channel.
-    pub fn run_loop<B, F>(
-        &mut self,
-        terminal: &mut Terminal<B>,
-        mut events: impl Iterator<Item = Msg>,
-        mut on_effect: F,
-    ) -> Result<()>
-    where
-        B: Backend,
-        crate::error::Error: From<<B as Backend>::Error>,
-        F: FnMut(Effect),
-    {
-        let mut targets: Vec<(ratatui::layout::Rect, crate::tui::state::ClickTarget)> = Vec::new();
-        // Persisted per-list scroll offsets for the top screen's list(s),
-        // threaded into `render` so the cursor doesn't snap back to the viewport
-        // bottom each frame (see `render`). Like `targets`, this is loop-owned.
-        // Reset on any navigation (screen-stack depth change) so a freshly
-        // entered / returned-to screen starts at the top.
-        let mut scroll = [0usize; 3];
-        let mut prev_len = self.state.screens().len();
-        while !self.state.quit {
-            if self.state.screens().len() != prev_len {
-                scroll = [0; 3];
-                prev_len = self.state.screens().len();
-            }
-            terminal.draw(|f| render(f, &self.state, &mut targets, &mut scroll))?;
-            // The draw closure's `&self.state` borrow ends when `draw` returns,
-            // so storing into `click_targets` here is fine. `take` clears `targets`
-            // for reuse next frame (no clone).
-            self.state.click_targets = std::mem::take(&mut targets);
-            match events.next() {
-                Some(msg) => {
-                    if let Some(effect) = update(&mut self.state, msg) {
-                        on_effect(effect);
-                    }
-                }
-                None => break, // scripted test source exhausted
-            }
-        }
-        Ok(())
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = execute!(
+            io::stdout(),
+            LeaveAlternateScreen,
+            event::DisableMouseCapture,
+            crossterm::cursor::Show
+        );
     }
 }
 
-/// Launch the TUI against the real terminal.
 pub fn run(
     user: bool,
     system: bool,
@@ -100,51 +57,390 @@ pub fn run(
 ) -> Result<()> {
     let (conn, bus) =
         async_global_executor::block_on(dbus::conn::connect_with_bus(user, system, address))?;
-    let (tx, rx) = flume::unbounded::<Msg>();
-    let (user_arg, system_arg, address_arg) = (user, system, address.map(String::from));
-    // Every effect — including `CopyToClipboard` — is dispatched by `run_effect`
-    // on a background thread/task, so the event loop never blocks on IO. NEVER
-    // print from any of these: the TUI runs in raw mode + the alternate screen,
-    // and any stray stdout/stderr write corrupts the display. The clipboard
-    // tooling lives ONLY here (never in `update`/`render`/tests).
-    let on_effect = move |effect: Effect| {
-        run_effect(
-            effect,
-            conn.clone(),
-            tx.clone(),
-            user_arg,
-            system_arg,
-            address_arg.as_deref(),
-        )
-    };
-    on_effect(Effect::FetchServices); // initial service-list fetch
-
-    let mut app = App {
-        state: State::loading_service(),
-    };
-    app.state.bus = bus;
-    app.state.show_standard_interfaces = show_standard_interfaces;
-    let mut terminal = setup_terminal()?;
-    let result = app.run_loop(&mut terminal, CrosstermSource { rx }, on_effect);
-    // Always try to restore the terminal; prefer the loop's result over a
-    // restore failure (don't mask the real error), but warn on restore failure.
-    if let Err(e) = restore_terminal(&mut terminal) {
-        eprintln!("busx: warning: failed to restore terminal: {e}");
+    let (tx, rx) = flume::bounded::<Msg>(1024);
+    let mut state = State::new(bus, conn, show_standard_interfaces);
+    let id = state.request_id();
+    state.services_request = id;
+    run_effect(Effect::Services(id, state.id), &state, tx.clone());
+    let _guard = TerminalGuard;
+    enable_raw_mode()?;
+    execute!(
+        io::stdout(),
+        EnterAlternateScreen,
+        event::EnableMouseCapture
+    )?;
+    let mut terminal: Tui = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+    while !state.quit {
+        let mut targets = vec![];
+        let mut scroll = state.scroll;
+        terminal.draw(|frame| render(frame, &state, &mut targets, &mut scroll))?;
+        state.scroll = scroll;
+        state.click_targets = targets;
+        // Keep logical scrolling aligned with the rendered viewport, including
+        // after End and when a watch was following the latest event.
+        match state.page {
+            Page::Browser => {
+                if let Some(browser) = &mut state.browser {
+                    browser.editor.scroll = scroll[2];
+                }
+            }
+            Page::Watch => {
+                if let Some(watch) = state.watch_mut() {
+                    watch.scroll = scroll[2];
+                }
+            }
+            Page::Services => {}
+        }
+        let msg = loop {
+            // Give keyboard/mouse input priority over busy streams.
+            if event::poll(Duration::ZERO)? {
+                if let Some(msg) = terminal_event(event::read()?) {
+                    break msg;
+                }
+            } else if let Ok(msg) = rx.try_recv() {
+                break msg;
+            } else if event::poll(Duration::from_millis(50))?
+                && let Some(msg) = terminal_event(event::read()?)
+            {
+                break msg;
+            }
+        };
+        if let Some(effect) = update(&mut state, msg) {
+            let open_editor = matches!(effect, Effect::Editor(_, _));
+            run_effect(effect, &state, tx.clone());
+            if open_editor {
+                terminal.clear()?;
+            }
+        }
     }
-    result
+    Ok(())
 }
 
-/// Copy `text` to the system clipboard. Tries the standard CLI clipboard tools
-/// first (reliable across Wayland/X compositors — `wl-copy` for Wayland,
-/// `xclip`/`xsel` for X), then `arboard` as a last-resort fallback. Returns
-/// `Ok(())` on the first method that accepts the text, or an `Err` describing
-/// why every method failed. NEVER prints — the TUI runs in raw mode + the
-/// alternate screen, and any stdout/stderr write corrupts the display; the
-/// caller surfaces the `Err` inside the popup via `Msg::ClipboardResult`.
-///
-/// We do not `.wait()` on the spawned tool: `wl-copy`/`xclip`/`xsel` may
-/// daemonize themselves to hold the selection after their parent exits, so
-/// writing `text` to stdin and dropping it (which closes the pipe) is correct.
+fn terminal_event(event: Event) -> Option<Msg> {
+    match event {
+        Event::Key(key) => Some(Msg::Key(key)),
+        Event::Mouse(mouse) => Some(Msg::Mouse(mouse)),
+        Event::Resize(_, _) => Some(Msg::Resize),
+        _ => None,
+    }
+}
+
+fn run_effect(effect: Effect, state: &State, tx: flume::Sender<Msg>) {
+    if let Effect::Editor(id, text) = effect {
+        let _ = tx.send(Msg::Editor(id, open_editor(&text)));
+        return;
+    }
+    if let Effect::Clipboard(id, text) = effect {
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::Clipboard(id, write_to_clipboard(&text)));
+        });
+        return;
+    }
+    if let Effect::Connect(id, bus) = effect {
+        async_global_executor::spawn(async move {
+            let result = match bus {
+                Bus::Session => dbus::conn::connect_with_bus(true, false, None).await,
+                Bus::System => dbus::conn::connect_with_bus(false, true, None).await,
+                Bus::Other(address) => {
+                    dbus::conn::connect_with_bus(false, false, Some(&address)).await
+                }
+            };
+            let _ = tx.send_async(Msg::Connected(id, result)).await;
+        })
+        .detach();
+        return;
+    }
+    let tab_id = match &effect {
+        Effect::Services(_, tab_id)
+        | Effect::Objects(_, tab_id, _)
+        | Effect::Interface(_, tab_id, _)
+        | Effect::Properties(_, tab_id, _)
+        | Effect::Execute(_, tab_id, _, _)
+        | Effect::Listen(_, tab_id, _, _) => *tab_id,
+        Effect::Connect(_, _) | Effect::Clipboard(_, _) | Effect::Editor(_, _) => unreachable!(),
+    };
+    let Some(tab) = state.tabs.iter().find(|tab| tab.id == tab_id) else {
+        return;
+    };
+    let conn = tab.connection.clone();
+    let bus = tab.bus.clone();
+    async_global_executor::spawn(async move {
+        let msg = match effect {
+            Effect::Services(id, _) => {
+                Msg::Services(id, dbus::list::list_names(&conn, false, false).await)
+            }
+            Effect::Objects(id, _, service) => {
+                Msg::Objects(id, dbus::tree::object_tree(&conn, &service).await)
+            }
+            Effect::Interface(id, _, context) => Msg::Interface(
+                id,
+                dbus::introspect::introspect(&conn, &context.service, &context.object).await,
+            ),
+            Effect::Properties(id, _, context) => {
+                let result = match dbus::property::get_all(
+                    &conn,
+                    &context.service,
+                    &context.object,
+                    &context.interface,
+                )
+                .await
+                {
+                    Ok(values) => Ok(values),
+                    Err(_) => {
+                        dbus::property::get_all_by_one(
+                            &conn,
+                            &context.service,
+                            &context.object,
+                            &context.interface,
+                        )
+                        .await
+                    }
+                };
+                Msg::Properties(id, result)
+            }
+            Effect::Execute(id, tab_id, context, op) => {
+                let result = execute_op(&conn, &op).await;
+                Msg::Action(id, tab_id, context, op, result)
+            }
+            Effect::Listen(id, _, context, target) => {
+                let (cancel_tx, cancel_rx) = futures::channel::oneshot::channel();
+                if tx.send_async(Msg::WatchReady(id, cancel_tx)).await.is_err() {
+                    return;
+                }
+                // Cancellation covers connection and subscription setup, not
+                // just the receive loop. A stopped watch cannot rearm later.
+                let result = futures::select! {
+                    result = listen(id, &conn, &bus, &context, &target, &tx).fuse() => result,
+                    _ = cancel_rx.fuse() => Ok(()),
+                };
+                Msg::WatchEnded(id, result)
+            }
+            Effect::Connect(_, _) | Effect::Clipboard(_, _) | Effect::Editor(_, _) => {
+                unreachable!()
+            }
+        };
+        let _ = tx.send_async(msg).await;
+    })
+    .detach();
+}
+
+fn open_editor(text: &str) -> std::result::Result<(), String> {
+    let mut file = tempfile::Builder::new()
+        .prefix("busx-result-")
+        .suffix(".txt")
+        .tempfile()
+        .map_err(|error| format!("create temporary result file: {error}"))?;
+    let formatted = crate::value::pretty::format_for_editor(text);
+    file.write_all(formatted.as_bytes())
+        .map_err(|error| format!("write temporary result file: {error}"))?;
+    file.flush()
+        .map_err(|error| format!("flush temporary result file: {error}"))?;
+
+    let editor = ["VISUAL", "EDITOR"]
+        .into_iter()
+        .find_map(|name| std::env::var_os(name).filter(|value| !value.is_empty()))
+        .unwrap_or_else(|| OsString::from("vi"));
+
+    crossterm::terminal::disable_raw_mode()
+        .map_err(|error| format!("leave raw mode for editor: {error}"))?;
+    let suspended = crossterm::execute!(
+        io::stdout(),
+        crossterm::terminal::LeaveAlternateScreen,
+        crossterm::event::DisableMouseCapture,
+        crossterm::cursor::Show
+    );
+    if let Err(error) = suspended {
+        let _ = crossterm::execute!(
+            io::stdout(),
+            crossterm::terminal::EnterAlternateScreen,
+            crossterm::event::EnableMouseCapture,
+            crossterm::cursor::Hide
+        );
+        let _ = crossterm::terminal::enable_raw_mode();
+        return Err(format!("leave terminal for editor: {error}"));
+    }
+
+    let editor_result = Command::new(editor)
+        .arg(file.path())
+        .status()
+        .map_err(|error| format!("run editor: {error}"))
+        .and_then(|status| {
+            if status.success() {
+                Ok(())
+            } else {
+                Err(format!("editor exited with {status}"))
+            }
+        });
+    let restore_result = crossterm::execute!(
+        io::stdout(),
+        crossterm::terminal::EnterAlternateScreen,
+        crossterm::event::EnableMouseCapture,
+        crossterm::cursor::Hide
+    )
+    .map_err(|error| format!("return to terminal after editor: {error}"))
+    .and_then(|_| {
+        crossterm::terminal::enable_raw_mode()
+            .map_err(|error| format!("restore raw mode after editor: {error}"))
+    });
+    editor_result.and(restore_result)
+}
+
+async fn execute_op(conn: &Connection, op: &CopyOp) -> Result<ActionResult> {
+    match op {
+        CopyOp::Call {
+            service,
+            object,
+            iface,
+            method,
+            signature,
+            args,
+        } => {
+            let values =
+                dbus::call::call_method(conn, service, object, iface, method, signature, args)
+                    .await?;
+            Ok(ActionResult::Call(
+                values
+                    .iter()
+                    .map(|value| crate::value::pretty::pretty(value))
+                    .collect(),
+            ))
+        }
+        CopyOp::Get {
+            service,
+            object,
+            iface,
+            property,
+        } => {
+            let value = dbus::property::get_one(conn, service, object, iface, property).await?;
+            Ok(ActionResult::Get(crate::value::pretty::pretty(&value)))
+        }
+        CopyOp::Set {
+            service,
+            object,
+            iface,
+            property,
+            signature,
+            value,
+        } => {
+            dbus::property::set(conn, service, object, iface, property, signature, value).await?;
+            Ok(ActionResult::Set)
+        }
+        CopyOp::Listen { .. } => Err(crate::error::Error::Msg(
+            "Use Watch to start a subscription".into(),
+        )),
+    }
+}
+
+async fn listen(
+    id: u64,
+    conn: &Connection,
+    bus: &Bus,
+    context: &Context,
+    target: &ListenTarget,
+    tx: &flume::Sender<Msg>,
+) -> Result<()> {
+    let rule = listen_rule(context, target)?;
+    if matches!(target, ListenTarget::Method(_)) {
+        // Use the bus actually reached by the browser, including session-to-
+        // system fallback, rather than trying the original CLI defaults again.
+        let dedicated = match bus {
+            Bus::Session => Connection::session().await?,
+            Bus::System => Connection::system().await?,
+            Bus::Other(address) => {
+                zbus::connection::Builder::address(address.as_str())?
+                    .build()
+                    .await?
+            }
+        };
+        let owner = zbus::fdo::DBusProxy::new(conn)
+            .await?
+            .get_name_owner(
+                context
+                    .service
+                    .as_str()
+                    .try_into()
+                    .map_err(zbus::Error::from)?,
+            )
+            .await?;
+        let mut resolved = context.clone();
+        resolved.service = owner.to_string();
+        let rule = listen_rule(&resolved, target)?;
+        dbus::monitor::become_monitor(&dedicated, Some(&rule)).await?;
+        let own_name = dedicated
+            .unique_name()
+            .map(|name| name.to_string())
+            .unwrap_or_default();
+        let mut stream = zbus::MessageStream::from(&dedicated);
+        let _ = tx.send_async(Msg::WatchStarted(id, rule.to_string())).await;
+        while let Some(message) = stream.next().await {
+            match message {
+                Ok(message) if !dbus::monitor::is_become_monitor_noise(&message, &own_name) => {
+                    if send_message(tx, id, &message).await.is_err() {
+                        return Ok(());
+                    }
+                }
+                Ok(_) => {}
+                Err(error) => tracing::debug!("dropped malformed message: {error}"),
+            }
+        }
+    } else {
+        let rule_text = rule.to_string();
+        let mut stream = zbus::MessageStream::for_match_rule(rule, conn, None).await?;
+        let _ = tx.send_async(Msg::WatchStarted(id, rule_text)).await;
+        while let Some(message) = stream.next().await {
+            match message {
+                Ok(message) if property_matches(&message, context, target) => {
+                    if send_message(tx, id, &message).await.is_err() {
+                        return Ok(());
+                    }
+                }
+                Ok(_) => {}
+                Err(error) => tracing::debug!("dropped malformed message: {error}"),
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn send_message(
+    tx: &flume::Sender<Msg>,
+    id: u64,
+    message: &zbus::Message,
+) -> std::result::Result<(), ()> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let seconds = now.as_secs() % 86400;
+    let timestamp = format!(
+        "{:02}:{:02}:{:02}.{:03} UTC",
+        seconds / 3600,
+        seconds / 60 % 60,
+        seconds % 60,
+        now.subsec_millis()
+    );
+    tx.send_async(Msg::WatchMessage(
+        id,
+        format!("{timestamp}\n{}", dbus::monitor::format_message(message)),
+    ))
+    .await
+    .map_err(|_| ())
+}
+
+fn property_matches(message: &zbus::Message, context: &Context, target: &ListenTarget) -> bool {
+    let ListenTarget::Property(property) = target else {
+        return true;
+    };
+    let Ok((interface, changed, invalidated)) = message.body().deserialize::<(
+        String,
+        std::collections::HashMap<String, zvariant::OwnedValue>,
+        Vec<String>,
+    )>() else {
+        return false;
+    };
+    interface == context.interface
+        && (changed.contains_key(property) || invalidated.contains(property))
+}
+
 fn write_to_clipboard(text: &str) -> std::result::Result<(), String> {
     use std::io::Write;
     use std::process::{Command, Stdio};
@@ -157,7 +453,13 @@ fn write_to_clipboard(text: &str) -> std::result::Result<(), String> {
         ("xsel", &["--clipboard", "--input"]),
     ];
     for (prog, args) in tools {
-        if let Ok(mut child) = Command::new(prog).args(*args).stdin(Stdio::piped()).spawn() {
+        if let Ok(mut child) = Command::new(prog)
+            .args(*args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
             if let Some(mut stdin) = child.stdin.take() {
                 let _ = stdin.write_all(text.as_bytes());
             }
@@ -173,330 +475,4 @@ fn write_to_clipboard(text: &str) -> std::result::Result<(), String> {
             "no wl-copy/xclip/xsel on PATH and arboard unavailable: {e}"
         )),
     }
-}
-
-/// Perform a requested `Effect` against the bus; deliver the result as a `Msg`.
-///
-/// `user`/`system`/`address` are only used by the Method-listen branch, which
-/// builds its own dedicated connection (BecomeMonitor makes a connection
-/// recv-only, so it cannot reuse the main one).
-fn run_effect(
-    effect: Effect,
-    conn: Connection,
-    tx: flume::Sender<Msg>,
-    user: bool,
-    system: bool,
-    address: Option<&str>,
-) {
-    match effect {
-        Effect::FetchServices => {
-            async_global_executor::spawn(async move {
-                let res = dbus::list::list_names(&conn, false, false).await;
-                let _ = tx.send(Msg::ServicesLoaded(res));
-            })
-            .detach();
-        }
-        Effect::FetchObjects(service) => {
-            async_global_executor::spawn(async move {
-                let res = dbus::tree::object_tree(&conn, &service).await;
-                let _ = tx.send(Msg::ObjectsLoaded(res));
-            })
-            .detach();
-        }
-        Effect::FetchInterfaces(service, object) => {
-            async_global_executor::spawn(async move {
-                let res = dbus::introspect::introspect(&conn, &service, &object).await;
-                let _ = tx.send(Msg::InterfacesLoaded(service, object, res));
-            })
-            .detach();
-        }
-        Effect::FetchProperties(service, object, iface) => {
-            async_global_executor::spawn(async move {
-                // The interface always comes from introspection here, so a
-                // `GetAll` failure means the service doesn't implement it
-                // (some non-standard apps don't) — silently fall back to
-                // Get-ing each property individually. The CLI does NOT do this.
-                let res = match dbus::property::get_all(&conn, &service, &object, &iface).await {
-                    Ok(map) => Ok(map),
-                    Err(_) => {
-                        dbus::property::get_all_by_one(&conn, &service, &object, &iface).await
-                    }
-                };
-                let _ = tx.send(Msg::PropertiesLoaded(res));
-            })
-            .detach();
-        }
-        Effect::CallMethod {
-            service,
-            object,
-            iface,
-            method,
-            signature,
-            args,
-        } => {
-            async_global_executor::spawn(async move {
-                let res = dbus::call::call_method(
-                    &conn, &service, &object, &iface, &method, &signature, &args,
-                )
-                .await;
-                let _ = tx.send(Msg::ActionResult(
-                    res.map(|vs| ActionResult::Call(vs.iter().map(pretty).collect())),
-                ));
-            })
-            .detach();
-        }
-        Effect::GetProperty {
-            service,
-            object,
-            iface,
-            property,
-        } => {
-            async_global_executor::spawn(async move {
-                let res =
-                    dbus::property::get_one(&conn, &service, &object, &iface, &property).await;
-                let _ = tx.send(Msg::ActionResult(
-                    res.map(|v| ActionResult::Get(pretty(&v))),
-                ));
-            })
-            .detach();
-        }
-        Effect::SetProperty {
-            service,
-            object,
-            iface,
-            property,
-            signature,
-            value,
-        } => {
-            async_global_executor::spawn(async move {
-                let res = dbus::property::set(
-                    &conn,
-                    &service,
-                    &object,
-                    &iface,
-                    &property,
-                    &signature,
-                    &[value],
-                )
-                .await;
-                let _ = tx.send(Msg::ActionResult(res.map(|_| ActionResult::Set)));
-            })
-            .detach();
-        }
-        Effect::Listen {
-            service: _,
-            object,
-            iface,
-            target,
-        } => {
-            // `address: Option<&str>` is not `'static`; own it for the spawned task.
-            let address_owned = address.map(String::from);
-            async_global_executor::spawn(async move {
-                use futures::{FutureExt, StreamExt};
-                let (cancel_tx, cancel_rx) = futures::channel::oneshot::channel::<()>();
-                let _ = tx.send(Msg::ListenStarted(cancel_tx));
-                let mut cancel_rx = cancel_rx.fuse();
-
-                // Method listen: BecomeMonitor makes a connection
-                // recv-only, so build a dedicated one and let the bus filter the
-                // method's calls. `ListenStarted` is already sent above so the
-                // cancel is wired for this branch too.
-                if let ListenTarget::Method { .. } = &target {
-                    // BecomeMonitor makes a connection recv-only — build a dedicated one.
-                    let dedicated =
-                        match dbus::conn::connect(user, system, address_owned.as_deref()).await {
-                            Ok(c) => c,
-                           Err(e) => {
-                                let _ = tx.send(Msg::ActionResult(Err(
-                                    crate::error::Error::context("listen: connect failed", e),
-                                )));
-                               return;
-                           }
-                       };
-                   let rule = match crate::tui::update::listen_rule(&iface, &object, &target) {
-                       Ok(r) => r,
-                       Err(e) => {
-                            let _ = tx.send(Msg::ActionResult(Err(e)));
-                           return;
-                       }
-                   };
-                   if let Err(e) =
-                       crate::dbus::monitor::become_monitor(&dedicated, Some(&rule)).await
-                   {
-                       // Privileged op — some buses refuse it.
-                        let _ = tx.send(Msg::ActionResult(Err(
-                            crate::error::Error::context("BecomeMonitor refused", e),
-                        )));
-                       return;
-                   }
-                    // The BecomeMonitor rule filters at the bus, so this stream
-                    // yields only matching method_call messages — no client-side
-                    // filtering or serial tracking needed.
-                    //
-                    // Exception: the daemon emits NameAcquired / NameLost
-                    // signals for this connection's own unique name as monitor
-                    // mode takes effect — bus plumbing, not the traffic the
-                    // user asked to listen for. `is_become_monitor_noise`
-                    // suppresses just those by content and forwards everything
-                    // else immediately, mirroring the CLI `monitor` op. (An
-                    // earlier "discard everything until NameLost(own_name)"
-                    // gate could hang and drop real traffic when that
-                    // confirmation is late or never arrives.)
-                    let own_name = dedicated
-                        .unique_name()
-                        .map(|n| n.to_string())
-                        .unwrap_or_default();
-                    let mut stream = zbus::MessageStream::from(&dedicated).fuse();
-                    loop {
-                        futures::select! {
-                            msg = stream.next() => match msg {
-                                Some(Ok(m)) => {
-                                    // Suppress BecomeMonitor lifecycle noise for
-                                    // our own unique name; forward all real
-                                    // traffic immediately (see the comment above).
-                                    if crate::dbus::monitor::is_become_monitor_noise(&m, &own_name) {
-                                        continue;
-                                    }
-                                    let _ = tx.send(Msg::ListenMessage(
-                                        crate::dbus::monitor::format_message(&m)));
-                                }
-                                Some(Err(e)) => tracing::debug!("dropped malformed message: {e}"),
-                                None => break,        // stream ended
-                            },
-                            _ = cancel_rx => break,   // Esc left the Result → stop
-                        }
-                    }
-                    return;
-                }
-
-                // Signal / Property listen: subscribe via the match rule on the
-                // main connection; PropertiesChanged is filtered client-side.
-               let rule = match crate::tui::update::listen_rule(&iface, &object, &target) {
-                   Ok(r) => r,
-                   Err(e) => {
-                        let _ = tx.send(Msg::ActionResult(Err(e)));
-                       return;
-                   }
-               };
-               let stream = match zbus::MessageStream::for_match_rule(rule, &conn, None).await {
-                   Ok(s) => s.fuse(),
-                   Err(e) => {
-                        // `for_match_rule` returns zbus::Error; widen to our Error.
-                        let _ = tx.send(Msg::ActionResult(Err(crate::error::Error::from(e))));
-                       return;
-                   }
-               };
-                let mut stream = stream;
-                loop {
-                    futures::select! {
-                        msg = stream.next() => match msg {
-                            Some(Ok(m)) => {
-                                if listen_message_matches(&m, &target) {
-                                    let _ = tx.send(Msg::ListenMessage(
-                                        crate::dbus::monitor::format_message(&m)));
-                                }
-                            }
-                            Some(Err(e)) => tracing::debug!("dropped malformed message: {e}"),
-                            None => break,        // stream ended
-                        },
-                        _ = cancel_rx => break,   // Esc left the Result → stop
-                    }
-                }
-            })
-            .detach();
-        }
-        // Clipboard write is an inherently blocking operation (subprocess +
-        // compositor round-trip), so run it on a dedicated OS thread — never on
-        // the event loop, which must stay responsive (an arboard fallback with
-        // no compositor timeout otherwise freezes the whole TUI). The result
-        // comes back as `Msg::ClipboardResult`, identical to the dbus effects.
-        Effect::CopyToClipboard(text) => {
-            std::thread::spawn(move || {
-                let res = write_to_clipboard(&text);
-                let _ = tx.send(Msg::ClipboardResult(res));
-            });
-        }
-    }
-}
-
-/// Property listen forwards only `PropertiesChanged` messages whose changed- or
-/// invalidated-keys mention the watched property. Best-effort: on parse failure
-/// the message passes through (don't kill the stream for one odd message).
-fn listen_message_matches(m: &zbus::Message, target: &ListenTarget) -> bool {
-    let ListenTarget::Property { property } = target else {
-        return true; // Signal (Method never reaches here — returns early in the task)
-    };
-    let Ok((_, changed, invalidated)) = m.body().deserialize::<(
-        String,
-        std::collections::HashMap<String, zvariant::OwnedValue>,
-        Vec<String>,
-    )>() else {
-        return true; // best-effort: can't parse → show it
-    };
-    changed.contains_key(property) || invalidated.iter().any(|k| k == property)
-}
-
-/// Production event source: drains the worker channel, and between messages
-/// polls crossterm for keys (short timeout so worker results flow promptly).
-struct CrosstermSource {
-    rx: flume::Receiver<Msg>,
-}
-
-impl Iterator for CrosstermSource {
-    type Item = Msg;
-
-    fn next(&mut self) -> Option<Msg> {
-        loop {
-            if let Ok(msg) = self.rx.try_recv() {
-                return Some(msg);
-            }
-            match event::poll(Duration::from_millis(50)) {
-                Ok(false) => continue, // timeout: re-drain the channel
-                Ok(true) => {}
-                // Input poll failed (e.g. terminal gone). Don't print — we're
-                // still in raw mode + the alternate screen, so any write would
-                // corrupt the display. Just exit the loop; `restore_terminal`
-                // runs next, then the process exits.
-                Err(_) => return None,
-            }
-            if let Ok(ev) = event::read()
-                && let Some(msg) = non_mouse(ev)
-            {
-                return Some(msg);
-            }
-        }
-    }
-}
-
-/// Map a crossterm event to a `Msg`. Mouse events are forwarded raw so
-/// `update` can hit-test them against `state.click_targets`.
-fn non_mouse(ev: Event) -> Option<Msg> {
-    match ev {
-        Event::Key(k) => Some(Msg::Key(k)),
-        Event::Resize(_, _) => Some(Msg::Resize),
-        Event::Mouse(m) => Some(Msg::Mouse(m)),
-        _ => None,
-    }
-}
-
-fn setup_terminal() -> Result<Tui> {
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(
-        stdout,
-        EnterAlternateScreen,
-        crossterm::event::EnableMouseCapture
-    )?;
-    Ok(Terminal::new(CrosstermBackend::new(stdout))?)
-}
-
-fn restore_terminal(terminal: &mut Tui) -> Result<()> {
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        crossterm::event::DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
-    Ok(())
 }

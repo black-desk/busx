@@ -1,5 +1,6 @@
 <!--
 SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 
 SPDX-License-Identifier: MIT
 -->
@@ -94,10 +95,19 @@ TUI rendering logic is snapshot-tested with [`insta`][insta]; the expected
 snapshots live in `crates/busx/tests/snapshots/*.snap`. Each test launches the
 real `busx` (on the `testbus` private bus) inside a real terminal from
 `tuiprobe`, drives it to the target state, then snapshots the screen —
-exercising the full `main` → CLI → crossterm → ratatui → `render` pipeline.
-`wait_for_snapshot!` polls until the screen matches an existing expected
-snapshot (intermediate frames are never persisted), then
-`insta::assert_snapshot!` asserts the new frame.
+exercising the full `main` → CLI → crossterm → ratatui → `render` pipeline. TUI
+tests wait for visible outcomes with `tuiprobe::TuiProbe::wait_for`; expected
+snapshots do not control interaction timing. Selected stable frames are checked
+with `insta::assert_snapshot!`, covering 80×24, narrow terminals, parameter
+alignment, navigation, watch, help, and overflowing tab strips. Service-table
+PID and fixture process fields are normalized without changing their
+terminal-column widths. D-Bus calls, property values, match rules, and captured
+clipboard commands verify effects independently of the snapshots. The
+delayed-reply fixture uses a release channel, so tab-switching scenarios do not
+depend on arbitrary sleeps.
+
+The container-copy scenario also executes its copied command with `busctl`,
+which must be available alongside `dbus-daemon` for this suite.
 
 [insta]: https://insta.rs
 

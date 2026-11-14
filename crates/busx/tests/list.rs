@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -22,7 +23,7 @@ fn list_in_tty(addr: &str, cols: u16, rows: u16) -> String {
             pixel_height: 0,
         })
         .expect("open pty");
-    let mut cmd = CommandBuilder::new(busx_binary());
+    let mut cmd = CommandBuilder::new(assert_cmd::cargo::cargo_bin!("busx"));
     cmd.arg("--address");
     cmd.arg(addr);
     cmd.arg("list");
@@ -35,17 +36,6 @@ fn list_in_tty(addr: &str, cols: u16, rows: u16) -> String {
     let status = child.wait().expect("wait busx list");
     assert!(status.success(), "busx list failed in pty: {status:?}");
     String::from_utf8_lossy(&out).replace("\r\n", "\n")
-}
-
-/// Locate the compiled busx binary (tests run inside `target/debug/deps/`).
-fn busx_binary() -> std::path::PathBuf {
-    std::env::current_exe()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("busx")
 }
 
 /// `--json list` returns an array of `{ name, pid, process }` objects; the test

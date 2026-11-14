@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -498,17 +499,17 @@ fn append_rendered(r: &Rendered) -> String {
 //   `a<X>` → count `N` + N elements;  `a{KV}` → count `N` + N (key,value) pairs;
 //   `(...)` → fields flat until `)`.
 //
-// Walking **tokens** (rather than `encode::parse`→`Value`) keeps copy-as robust
-// to partial/unfilled args: a token shortage renders a `?` placeholder instead
-// of erroring, so the user still gets a usable skeleton command. Each per-tool
-// renderer renders the consumed value in that tool's CLI syntax.
+// Walking **tokens** (rather than `encode::parse`→`Value`) keeps each renderer
+// independent of zvariant's value representation. The TUI validates every
+// operation with `encode::parse` before opening the copy popup; the missing-token
+// fallback below is therefore only defensive for malformed internal values.
 
-/// Placeholder emitted when a token is missing (partial/unfilled args).
+/// Placeholder emitted when a token is missing from a malformed internal op.
 const MISSING: &str = "?";
 
 /// Read-only cursor over the positional busctl tokens. [`Tok::next`] never
 /// panics: once the tokens run out it returns [`MISSING`] for every subsequent
-/// read, so partial args render a usable skeleton.
+/// read, so a malformed operation cannot panic the renderer.
 struct Tok<'a> {
     toks: &'a [String],
     pos: usize,

@@ -1,0 +1,16 @@
+---
+source: crates/busx/tests/tui_pty.rs
+expression: "lines.join(\"\\n\")"
+---
+ 1 Custom ×                                                   +
+┌Services (17)─────────────────────────────────────────────Bus▾┐
+│  Name                                    PID        Process  │
+│> org.busx.ScrollA                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollB                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollC                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollD                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollE                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollF                      <PID>      <FIXTURE>  │
+│  org.busx.ScrollG                      <PID>      <FIXTURE>  │
+└──────────────────────────────────────────────────────────────┘
+j/k select · Enter open · / filter · b bus              · ? help

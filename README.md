@@ -1,5 +1,8 @@
 <!--
 SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 
 SPDX-License-Identifier: MIT
 -->
@@ -136,12 +139,91 @@ is `0` on success, `1` on failure; piping into `less`/`head` does not panic
 
 - **Runs in a terminal**: no graphical environment needed — works over SSH, in a
   TTY, in a container; d-feet / d-spy are GTK apps that need a desktop.
-- **copy-as**: any operation (method call, get / set property, listen for
-  signals) can be copied as a command line in `dbus-send` / `busctl` / `qdbus` /
-  `gdbus` form
-- **inline filter**: press `/` on any list screen (services / objects /
-  interfaces) to filter by substring (case-insensitive) — type to narrow, `↑↓`
-  to pick, `Enter` to open, `Esc` to clear
+- **Service browser**: a shared object/interface tree and member categories
+  (properties, methods, signals). At 80 columns and above, navigation stays
+  beside the inspector; narrower terminals show the focused pane. `Tab` /
+  `Shift+Tab` move focus, `h/l` switch member categories or fold objects, and
+  `j/k` select rows (arrow keys remain available). `gg/G` jump to the first/last
+  item; `n` returns to navigation. Navigation distinguishes object paths
+  (`▸ /App47`) from indented interfaces (`@ org.gnome.SessionManager.App`).
+  Interface names retain their full namespace; names that exceed the pane width
+  are truncated with an ellipsis, and the selected full name is shown above.
+  Leaf objects start folded; unbranched container paths are compressed.
+  Breadcrumbs use `›` to keep object-path slashes unambiguous.
+- **Inline operations**: select a member to inspect its signature, property
+  permissions (`r` / `w` / `rw`), and current value. Fill parameters and
+  activate `Call` / `Write` explicitly; parameters and results stay together.
+  Parameter inputs share an aligned label column. Keyboard focus starts in
+  normal mode: `j/k` selects a field, `i` enters insert mode, and `Esc` returns
+  to normal mode without moving focus. Moving down from the last field focuses
+  the action row; up returns to the last field, and `h/l` selects an action. In
+  insert mode, `Tab` moves between fields; `Enter` finishes editing and focuses
+  the actions without executing. `Open in editor` writes large replies to a
+  temporary text file, expands nested arrays/dictionaries/structures with
+  indentation, and opens it with `$VISUAL` or `$EDITOR`; after the editor exits,
+  the browser is restored. Basic values are entered verbatim, including spaces
+  and empty strings; containers use busctl-style tokens, e.g. `2 hello world`
+  for `as`. Container inputs point to `?` help for syntax rules and the busctl
+  reference; press `Esc` first when editing. Ordinary characters, including `q`,
+  type normally inside inputs; `Ctrl+C` closes the current tab from any input.
+- **Independent tabs**: `t` opens a new service browser; `gt/gT` switch to the
+  next/previous tab, and `{number}gt` jumps to a tab. Each tab keeps its own
+  service, object, interface, inputs, results, filter, and scroll position. `q`
+  closes the current tab; closing the last tab exits. `Ctrl+C` closes the
+  current tab even while editing. These letter commands apply in normal mode;
+  typed characters are preserved while editing. The top `+` also opens a tab,
+  tab titles switch tabs, and each tab's `×` closes it.
+- **Per-tab buses**: new tabs inherit the current bus. On a service-list tab,
+  press `b` or click `Bus▾` on the right of the Services title row to choose
+  Session, System, or a custom address for the current tab. Browser and watch
+  tabs do not offer this menu. The compact dropdown opens directly below the
+  trigger, with their right edges aligned, keeping the page visible. Selecting
+  Session or System with the mouse applies it immediately; keyboard selection is
+  confirmed with Enter. Selecting Custom address reveals its input and always
+  requires Enter. Esc, clicking outside, or clicking `Bus▾` again closes the
+  menu without activating the page underneath. A successful switch stops that
+  tab's watch and returns it to the service list; other tabs keep their buses,
+  inputs, results, and subscriptions. Failed or cancelled connections preserve
+  the current page. Service-list tabs are named `Session`, `System`, or
+  `Custom`; browsing tabs use a magnifying glass and a shortened service name,
+  e.g. `🔍 …NetworkManager`, and listening tabs use `👁️ …volume`. The ellipsis
+  marks omitted context; full names remain in the page context. Namespaces
+  expand only as needed to distinguish services, and same-named listeners add
+  their service, e.g. `👁️ …Player:volume`. A bus suffix appears when otherwise
+  identical titles belong to different buses. The `Bus▾` menu shows the current
+  tab's selected bus. Tab widths follow their labels; long titles are clipped,
+  and overflow keeps the active tab visible.
+- **Mouse interaction**: the `^` control at the left of the context row goes up
+  one visible level. Wide browsers return to the service list; narrow member
+  views return to navigation first. Leaving a watch stops its subscription. The
+  service list hides the control. The symbol and its two padding spaces are
+  clickable. Clicking a service opens it; clicking an object folds or unfolds
+  it. Clicking an interface loads its members, keeping focus in navigation when
+  panes are side by side, or showing the member list in narrow terminals. wheel
+  scrolls the area under the pointer without moving keyboard focus or changing
+  the selected member. In command previews, click a tool to select it and click
+  `Copy` to copy the command.
+- **Contextual footer**: one line shows actions for the focused area and the
+  help entry. Status messages temporarily replace the action hints; global tab
+  shortcuts are listed in help. While editing, leave insert mode with `Esc`
+  before pressing `?` for help.
+- **Watch in place**: `Watch` changes the current tab into a single signal,
+  property-change, or method-call subscription. Use `t` to browse elsewhere
+  while this tab continues listening. `p` freezes the display while collection
+  continues, `s` stops but keeps the messages, `x` clears retained events, and
+  `End` follows the latest event. `Esc` stops the subscription and restores that
+  tab's browser, inputs, and selection; closing the tab also stops it. Each
+  watch retains at most 1,000 events; method-call watching requires permission
+  to become a bus monitor.
+- **copy-as**: `c` previews the current operation as a `dbus-send` / `busctl` /
+  `qdbus` / `gdbus` / `busx` command; choose a tool and press `Enter` to copy.
+  `y` copies result or watch text. Inputs are validated with busctl syntax
+  before the preview opens; invalid or incomplete values show an error instead.
+  Unsupported tool formats are marked in the preview.
+- **Inline filter**: `/` filters services, object/interface navigation, or the
+  active member tab by substring (case-insensitive). Type to narrow, `Up/Down`
+  to select, `Enter` to open, and `Esc` to clear. `?` shows contextual keyboard
+  help outside inputs.
 
 ## Install
 

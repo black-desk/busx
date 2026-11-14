@@ -1,55 +1,30 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Pure rendering. Reads `&State`; draws the breadcrumb, the top screen, the
-//! key-hint, plus the filter box, copy-as popup, and help overlays when active.
-//! Below a minimum terminal size it draws only a "terminal too small" message.
+//! Responsive browser and inline inspector. Narrow terminals show navigation
+//! and content separately; inputs reuse tui-input's visual cursor/scroll model.
 
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph, Wrap};
 
-use crate::tui::copy::Tool;
-use crate::tui::state::{
-    ActionKind, ActionResult, ClickTarget, CopyAsPopup, DetailFocus, DetailScreen, InterfaceFocus,
-    ListenTarget, NavContext, ResultScreen, Screen, ServiceScreen, State,
-};
+use crate::tui::state::*;
 
-/// Smallest terminal the TUI will render normally. Below this the three-row
-/// layout (breadcrumb + body + footer) collapses and the body list has no
-/// room; instead of a garbled screen we show a "terminal too small" message.
-const MIN_WIDTH: u16 = 12;
-const MIN_HEIGHT: u16 = 3;
+const ACCENT: Color = Color::Cyan;
+const MUTED: Color = Color::DarkGray;
 
-/// `scroll` carries the persisted list-scroll offsets for the *top* screen's
-/// list(s), threaded in/out across frames. Slot 0 is the single list on the
-/// Service/Objects/Interfaces screens; slots 0/1/2 are the methods/properties/
-/// signals columns on the Interface screen. The app loop owns it (like
-/// `targets`) and resets it to `[0; 3]` whenever the navigation stack depth
-/// changes, so a freshly entered screen starts at the top.
-///
-/// Without this, each frame builds a fresh `ListState` (offset 0) and ratatui
-/// re-anchors the selected item to the *bottom* of the viewport — so after
-/// scrolling down, moving the cursor back up keeps the highlight glued to the
-/// last row. Seeding `with_offset` from the persisted value lets ratatui keep
-/// the cursor stable (vim/less-style: the viewport only scrolls once the cursor
-/// reaches an edge).
-/// Format a bus error for display: its top-level message, then each cause on
-/// its own indented line (matching `busx`'s `-v` cause-chain output). Preserving
-/// the typed [`crate::error::Error`] in `State` — instead of flattening it to a
-/// `String` when the async task reports — is what makes the underlying
-/// zbus/fdo detail reachable here; without it only the outer message survives.
-fn error_text(e: &crate::error::Error) -> String {
-    let mut s = format!("{e}");
-    let mut source = std::error::Error::source(e);
-    while let Some(cause) = source {
-        s.push_str(&format!("\n  caused by: {cause}"));
-        source = cause.source();
-    }
-    s
+fn active() -> Style {
+    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+}
+fn selected() -> Style {
+    Style::default().add_modifier(Modifier::REVERSED)
 }
 
 pub fn render(
@@ -58,1059 +33,1373 @@ pub fn render(
     targets: &mut Vec<(Rect, ClickTarget)>,
     scroll: &mut [usize; 3],
 ) {
+    targets.clear();
     let area = frame.area();
-    // Guard: below this size the layout (breadcrumb + body + footer, each ≥1
-    // row, and a list that needs a few columns) breaks down. Rather than
-    // render a garbled screen, show a single centered message.
-    if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
-        frame.render_widget(Clear, area);
-        let msg = format!(
-            "terminal too small (need ≥{}×{}, have {}×{})",
-            MIN_WIDTH, MIN_HEIGHT, area.width, area.height
-        );
+    if area.width < 32 || area.height < 10 {
         frame.render_widget(
-            Paragraph::new(msg)
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(Color::Yellow)),
+            Paragraph::new("Terminal too small\nNeed at least 32 x 10\nCtrl-C to quit"),
             area,
         );
         return;
     }
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(1),
-        ])
-        .split(area);
-    let (crumb, main, footer) = (chunks[0], chunks[1], chunks[2]);
-
-    render_breadcrumb(frame, crumb, state);
-    // When the `/` filter is active on a list screen, carve a one-line input box
-    // out of the bottom of `main` so the list shrinks by a row to host it.
-    let query = state
-        .filter
-        .as_ref()
-        .map(|f| f.value().to_string())
-        .unwrap_or_default();
-    let (list_area, filter_area) = if state.filter.is_some() {
-        let sub = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(1)])
-            .split(main);
-        (sub[0], Some(sub[1]))
-    } else {
-        (main, None)
-    };
-    match state.top() {
-        Screen::Service(s) => render_service(frame, list_area, s, &query, targets, scroll),
-        Screen::Objects(o) => render_objects(frame, list_area, o, &query, targets, scroll),
-        Screen::Interfaces(i) => render_interfaces(frame, list_area, i, &query, targets, scroll),
-        Screen::Interface(i) => render_interface(frame, list_area, i, targets, scroll),
-        Screen::Detail(d) => render_detail(frame, list_area, d, &state.nav, targets),
-        Screen::Result(r) => render_result(frame, list_area, r),
-    }
-    render_keyhint(frame, footer, state.top());
-
-    if let (Some(input), Some(area)) = (state.filter.as_ref(), filter_area) {
-        render_filter_box(frame, area, input);
-    }
-
-    // The copy-as popup overlays the whole frame when open. Drawn last so it sits
-    // on top of the screen + keyhint; Clear wipes the underlying area first.
-    if let Some(popup) = &state.popup {
-        // Clear the whole frame so the popup reads as a true modal — no
-        // underlying screen content bleeds in around the centered popup
-        // area. Matches the lazygit/htop/bottom convention for modal
-        // overlays.
-        frame.render_widget(Clear, area);
-        render_popup(frame, area, popup, targets);
-    }
-    // The help overlay sits on top of everything (above the popup too, though the
-    // two can't be open at once — help can't open while the popup is up). Not
-    // clickable, so it records no click targets.
-    if state.help_open {
-        // Same modal treatment as the copy-as popup above.
-        frame.render_widget(Clear, area);
-        render_help(frame, area);
-    }
-}
-
-fn render_breadcrumb(frame: &mut Frame, area: Rect, state: &State) {
-    let mut parts: Vec<String> = Vec::new();
-    // The drill path comes from the single source of truth (`nav`), one crumb
-    // per level the user has descended — so the breadcrumb reads
-    // `service > object > interface > call Method > Result` without any screen
-    // re-stating its parent's context.
-    let nav = &state.nav;
-    if !nav.service.is_empty() {
-        parts.push(nav.service.clone());
-    }
-    if !nav.object.is_empty() {
-        parts.push(nav.object.clone());
-    }
-    if !nav.interface.is_empty() {
-        parts.push(nav.interface.clone());
-    }
-    // The action screens (Detail/Result) layer their own label on top.
-    for screen in state.screens() {
-        if let Some(label) = screen_action_label(screen) {
-            parts.push(label);
-        }
-    }
-    let text = parts.join(" > ");
-    frame.render_widget(Paragraph::new(text), area);
-}
-
-/// The label an action screen contributes to the breadcrumb: Detail → its
-/// action, Result → "Result". The context screens (Service/Objects/Interfaces/
-/// Interface) contribute via `State::nav` instead, so they return `None` here.
-fn screen_action_label(s: &Screen) -> Option<String> {
-    match s {
-        Screen::Detail(d) => Some(action_label(&d.kind)),
-        Screen::Result(_) => Some("Result".to_string()),
-        _ => None,
-    }
-}
-
-/// The member a listen targets (signal/method member, or property name).
-fn listen_member(target: &ListenTarget) -> String {
-    match target {
-        ListenTarget::Signal { member } | ListenTarget::Method { member } => member.clone(),
-        ListenTarget::Property { property } => property.clone(),
-    }
-}
-
-/// Short (unqualified) action label for the breadcrumb Detail crumb — the
-/// interface is already the preceding crumb, so `call ListUnits` rather than
-/// `call org.busx.Test.ListUnits`.
-fn action_label(kind: &ActionKind) -> String {
-    match kind {
-        ActionKind::Call { method, .. } => format!("call {method}"),
-        ActionKind::Get { property } => format!("get {property}"),
-        ActionKind::Set { property, .. } => format!("set {property}"),
-        ActionKind::Listen { target } => format!("listen {}", listen_member(target)),
-    }
-}
-
-/// Interface-qualified action label for the Detail *block title* — it reads
-/// standalone, outside the breadcrumb path: `call org.busx.Test.ListUnits`,
-/// `get org.busx.Test.volume`, `listen org.busx.Test.Changed`.
-fn action_title(kind: &ActionKind, iface: &str) -> String {
-    match kind {
-        ActionKind::Call { method, .. } => format!("call {iface}.{method}"),
-        ActionKind::Get { property } => format!("get {iface}.{property}"),
-        ActionKind::Set { property, .. } => format!("set {iface}.{property}"),
-        ActionKind::Listen { target } => format!("listen {iface}.{}", listen_member(target)),
-    }
-}
-
-/// Truncate `s` to `cap` display columns, appending `…` when longer — so a long
-/// service name doesn't blow past its column and misalign the row.
-fn truncate(s: &str, cap: usize) -> String {
-    if s.chars().count() <= cap {
-        s.to_string()
-    } else {
-        let head: String = s.chars().take(cap.saturating_sub(1)).collect();
-        format!("{head}…")
-    }
-}
-
-/// Left-align `s` in exactly `width` display columns: truncate (with `…`) if
-/// longer, pad with spaces if shorter. Used to align table-like columns (the
-/// member name/signature columns on the Interface screen, the arg labels on the
-/// Detail screen).
-fn pad_col(s: &str, width: usize) -> String {
-    format!("{:<width$}", truncate(s, width))
-}
-
-/// Build `name  signature` rows with the name column padded to the widest
-/// member (capped to the column's inner width) so signatures line up. Shared by
-/// the methods and signals columns.
-fn member_rows(rows: &[(String, String)], inner_w: usize) -> Vec<ListItem<'_>> {
-    let sig_w = rows
-        .iter()
-        .map(|(_, s)| s.chars().count())
-        .max()
-        .unwrap_or(0);
-    let name_w = rows
-        .iter()
-        .map(|(n, _)| n.chars().count())
-        .max()
-        .unwrap_or(0)
-        .min(inner_w.saturating_sub(sig_w + 2));
-    rows.iter()
-        .map(|(n, s)| ListItem::new(Line::from(format!("{}  {}", pad_col(n, name_w), s))))
-        .collect()
-}
-
-/// The one-line `/` filter input at the bottom of a list screen. A yellow `/`
-/// prompt, the query, and a block cursor at the input's cursor position (a
-/// reversed cell — the next char under the cursor, or a trailing space when the
-/// cursor sits past the end). The list above shrinks by one row to host this.
-fn render_filter_box(frame: &mut Frame, area: Rect, input: &tui_input::Input) {
-    let value = input.value();
-    let cursor = input.cursor().min(value.len());
-    let (before, after) = value.split_at(cursor);
-    let rev = Style::default().add_modifier(Modifier::REVERSED);
-    let prompt = Style::default().fg(Color::Yellow);
-
-    let mut spans = vec![Span::styled("/ ", prompt), Span::raw(before.to_string())];
-    // Block cursor: the first char of `after` (reversed), or a reversed space
-    // when the cursor is past the last char.
-    let mut rest = "";
-    match after.chars().next() {
-        Some(_) => {
-            let end = after
-                .char_indices()
-                .nth(1)
-                .map(|(i, _)| i)
-                .unwrap_or(after.len());
-            let (cur, tail) = after.split_at(end);
-            spans.push(Span::styled(cur.to_string(), rev));
-            rest = tail;
-        }
-        None => spans.push(Span::styled(" ", rev)),
-    }
-    spans.push(Span::raw(rest.to_string()));
-    frame.render_widget(Paragraph::new(Line::from(spans)), area);
-}
-
-fn render_service(
-    frame: &mut Frame,
-    area: Rect,
-    s: &ServiceScreen,
-    query: &str,
-    targets: &mut Vec<(Rect, ClickTarget)>,
-    scroll: &mut [usize; 3],
-) {
-    let title = if s.loading {
-        "Services (loading…)"
-    } else {
-        "Services"
-    };
-    let block = Block::default().borders(Borders::ALL).title(title);
-
-    if let Some(err) = &s.error {
-        frame.render_widget(
-            Paragraph::new(format!("error: {}", error_text(err))).block(block),
-            area,
-        );
-        return;
-    }
-
-    // The filtered view (raw indices); empty query ⇒ all rows.
-    let view = crate::tui::state::filter_view(&s.services, query, |sv| sv.name.as_str());
-
-    // Fixed column widths driven by hard kernel limits rather than the data
-    // on screen, so the layout is identical across runs / machines / CI:
-    // - PID column: `/proc/sys/kernel/pid_max` defaults to 4194304 → 7 digits.
-    // - PROCESS column: `TASK_COMM_LEN` is 16 (15 chars + NUL) → 15 chars,
-    //   matching what `/proc/<pid>/comm` (the source of this field) can hold.
-    // NAME gets whatever's left (two 2-space separators = 4 cols) and is
-    // truncated with `…`. NAME left-aligned; PID/PROCESS right-aligned.
-    // Fixed widths (not auto-sized to the data) are required by the e2e
-    // snapshot tests — insta filters mask the PID / process-name *content*
-    // to `<PID>` / `<PROC>` after render, and with auto-sized columns the
-    // mask's width would differ from the original's, shifting every
-    // subsequent column. Fixed widths let the filter replace a
-    // column-width-wide run with a column-width-wide placeholder.
-    let inner_w = area.width.saturating_sub(2) as usize; // inside the borders
-    const PID_W: usize = 7;
-    const PROC_W: usize = 15;
-    let name_w = inner_w.saturating_sub(PID_W + PROC_W + 4);
-
-    let items: Vec<ListItem> = view
-        .iter()
-        .map(|&i| {
-            let sv = &s.services[i];
-            let pid = sv.pid.map(|p| p.to_string()).unwrap_or_default();
-            let proc = sv.process.clone().unwrap_or_default();
-            ListItem::new(Line::from(format!(
-                "{name:<name_w$}  {pid:>pid_w$}  {proc:>proc_w$}",
-                name = truncate(&sv.name, name_w),
-                pid = pid,
-                proc = proc,
-                name_w = name_w,
-                pid_w = PID_W,
-                proc_w = PROC_W,
-            )))
-        })
-        .collect();
-    let list = List::new(items)
-        .block(block.clone())
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-    let mut list_state = ListState::default().with_offset(scroll[0]);
-    // Highlight the selected raw index if it's in the view; otherwise nothing.
-    if let Some(pos) = view.iter().position(|&i| i == s.selected) {
-        list_state.select(Some(pos));
-    }
-    frame.render_stateful_widget(list, area, &mut list_state);
-    // Persist the offset ratatui computed so the cursor stays put next frame
-    // (rather than re-anchoring to the viewport bottom from offset 0).
-    scroll[0] = list_state.offset();
-
-    // Record click targets for the visible rows only, offset by the scroll so a
-    // click maps to the row actually rendered under the cursor.
-    push_list_rows(targets, area, scroll[0], &view, ClickTarget::ServiceRow);
-}
-
-fn render_objects(
-    frame: &mut Frame,
-    area: Rect,
-    o: &crate::tui::state::ObjectsScreen,
-    query: &str,
-    targets: &mut Vec<(Rect, ClickTarget)>,
-    scroll: &mut [usize; 3],
-) {
-    let title = if o.loading {
-        "Objects (loading…)"
-    } else {
-        "Objects"
-    };
-    let block = Block::default().borders(Borders::ALL).title(title);
-    if let Some(err) = &o.error {
-        frame.render_widget(
-            Paragraph::new(format!("error: {}", error_text(err))).block(block),
-            area,
-        );
-        return;
-    }
-    let view = crate::tui::state::filter_view(&o.paths, query, |p| p.as_str());
-    let items: Vec<ListItem> = view
-        .iter()
-        .map(|&i| ListItem::new(Line::from(o.paths[i].clone())))
-        .collect();
-    let list = List::new(items)
-        .block(block.clone())
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-    let mut ls = ListState::default().with_offset(scroll[0]);
-    if let Some(pos) = view.iter().position(|&i| i == o.selected) {
-        ls.select(Some(pos));
-    }
-    frame.render_stateful_widget(list, area, &mut ls);
-    scroll[0] = ls.offset();
-
-    push_list_rows(targets, area, scroll[0], &view, ClickTarget::ObjectsRow);
-}
-
-fn render_interfaces(
-    frame: &mut Frame,
-    area: Rect,
-    i: &crate::tui::state::InterfacesScreen,
-    query: &str,
-    targets: &mut Vec<(Rect, ClickTarget)>,
-    scroll: &mut [usize; 3],
-) {
-    let title = if i.loading {
-        "Interfaces (loading…)"
-    } else {
-        "Interfaces"
-    };
-    let block = Block::default().borders(Borders::ALL).title(title);
-    if let Some(err) = &i.error {
-        frame.render_widget(
-            Paragraph::new(format!("error: {}", error_text(err))).block(block),
-            area,
-        );
-        return;
-    }
-    let view = crate::tui::state::filter_view(&i.names, query, |n| n.as_str());
-    let items: Vec<ListItem> = view
-        .iter()
-        .map(|&idx| ListItem::new(Line::from(i.names[idx].clone())))
-        .collect();
-    let list = List::new(items)
-        .block(block.clone())
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-    let mut ls = ListState::default().with_offset(scroll[0]);
-    if let Some(pos) = view.iter().position(|&idx| idx == i.selected) {
-        ls.select(Some(pos));
-    }
-    frame.render_stateful_widget(list, area, &mut ls);
-    scroll[0] = ls.offset();
-
-    push_list_rows(targets, area, scroll[0], &view, ClickTarget::InterfacesRow);
-}
-
-fn render_interface(
-    frame: &mut Frame,
-    area: Rect,
-    i: &crate::tui::state::InterfaceScreen,
-    targets: &mut Vec<(Rect, ClickTarget)>,
-    scroll: &mut [usize; 3],
-) {
-    // Left: the three stacked member lists. Right: the action-button bar for the
-    // focused column's selected member.
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
-        .split(area);
-    let (left, right) = (cols[0], cols[1]);
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(34),
-            Constraint::Percentage(33),
-            Constraint::Percentage(33),
-        ])
-        .split(left);
-
-    let method_rows: Vec<(String, String)> = i
-        .methods
-        .iter()
-        .map(|m| (m.name.clone(), m.signature.clone()))
-        .collect();
-    let methods = member_rows(&method_rows, chunks[0].width.saturating_sub(2) as usize);
-    scroll[0] = render_sub_list(
-        frame,
-        chunks[0],
-        "methods",
-        methods,
-        i.selected[0],
-        !i.in_buttons && i.focus == InterfaceFocus::Methods,
-        scroll[0],
-    );
-    push_list_rows(
-        targets,
-        chunks[0],
-        scroll[0],
-        &(0..i.methods.len()).collect::<Vec<_>>(),
-        ClickTarget::MethodRow,
-    );
-
-    // Properties show the GetAll value alongside name + signature. If GetAll
-    // failed for this object/interface, show that scoped to this column (some
-    // objects' GetAll rejects interfaces they don't track — e.g. the standard
-    // org.freedesktop.DBus.* ones) instead of blanking the whole screen: the
-    // methods and signals columns stay visible.
-    if let Some(err) = &i.error {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title("properties (unavailable)");
-        frame.render_widget(Paragraph::new(error_text(err)).block(block), chunks[1]);
-    } else {
-        // Align the name and signature columns so the GetAll values line up.
-        let inner = chunks[1].width.saturating_sub(2) as usize;
-        let sig_w = i
-            .properties
-            .iter()
-            .map(|(_, s, _)| s.chars().count())
-            .max()
-            .unwrap_or(0);
-        let name_w = i
-            .properties
-            .iter()
-            .map(|(n, _, _)| n.chars().count())
-            .max()
-            .unwrap_or(0)
-            .min(inner.saturating_sub(sig_w + 4));
-        let properties: Vec<ListItem> = i
-            .properties
-            .iter()
-            .map(|(n, sig, _access)| {
-                let val = i
-                    .prop_values
-                    .iter()
-                    .find(|(k, _)| k == n)
-                    .map(|(_, v)| v.as_str())
-                    .unwrap_or("");
-                ListItem::new(Line::from(format!(
-                    "{}  {:<sig_w$}  {}",
-                    pad_col(n, name_w),
-                    sig,
-                    val,
-                    sig_w = sig_w,
-                )))
+    let [header, body, footer] = Layout::vertical([
+        Constraint::Length(if state.page == Page::Services { 1 } else { 2 }),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .areas(area);
+    tab_bar(frame, line(header, 0), state, targets);
+    let context_width = header.width.saturating_sub(3) as usize;
+    let context = match state.page {
+        Page::Services => String::new(),
+        Page::Browser => state
+            .browser
+            .as_ref()
+            .map(|browser| {
+                if browser.focus == Focus::Navigation
+                    && let Some(row) = browser.navigation(state.query()).get(browser.nav_selected)
+                {
+                    let name = match *row {
+                        NavRow::Object(index) => &browser.objects[index].path,
+                        NavRow::Interface(object, interface) => {
+                            &browser.objects[object].interfaces[interface]
+                        }
+                    };
+                    return truncate(name, context_width);
+                }
+                breadcrumb(&browser.context, context_width)
             })
-            .collect();
-        let p_title = if i.loading {
-            "properties (loading…)"
-        } else {
-            "properties"
-        };
-        scroll[1] = render_sub_list(
-            frame,
-            chunks[1],
-            p_title,
-            properties,
-            i.selected[1],
-            !i.in_buttons && i.focus == InterfaceFocus::Properties,
-            scroll[1],
-        );
-        push_list_rows(
-            targets,
-            chunks[1],
-            scroll[1],
-            &(0..i.properties.len()).collect::<Vec<_>>(),
-            ClickTarget::PropertyRow,
-        );
-    }
-
-    let signals = member_rows(&i.signals, chunks[2].width.saturating_sub(2) as usize);
-    scroll[2] = render_sub_list(
-        frame,
-        chunks[2],
-        "signals",
-        signals,
-        i.selected[2],
-        !i.in_buttons && i.focus == InterfaceFocus::Signals,
-        scroll[2],
-    );
-    push_list_rows(
-        targets,
-        chunks[2],
-        scroll[2],
-        &(0..i.signals.len()).collect::<Vec<_>>(),
-        ClickTarget::SignalRow,
-    );
-
-    // Action-button bar: the buttons offered for the focused column's selected
-    // member. Highlighted (focused) when `in_buttons`. Never grows past a few
-    // rows, so its offset isn't persisted (seed 0; return ignored).
-    let buttons: Vec<ListItem> = action_buttons(i.focus)
-        .iter()
-        .map(|b| ListItem::new(Line::from(*b)))
-        .collect();
-    let n_buttons = buttons.len();
-    let _ = render_sub_list(
-        frame,
-        right,
-        "actions",
-        buttons,
-        i.button_selected,
-        i.in_buttons,
-        0,
-    );
-    push_list_rows(
-        targets,
-        right,
-        0,
-        &(0..n_buttons).collect::<Vec<_>>(),
-        ClickTarget::ActionButton,
-    );
-}
-
-/// Record one click target per VISIBLE list row, accounting for the scroll
-/// `offset`: row `i` renders at `inner.y + (i - offset)`. Only the visible
-/// window `[offset, offset+height)` gets targets. Without the offset a scrolled
-/// list desyncs clicks from the rendered rows — e.g. clicking the top visible
-/// row (index `offset`) would hit row 0 instead.
-/// Record click targets for the visible rows of a (possibly filtered) list.
-/// `rows` is the raw-index view (see `state::filter_view`); `offset` is the
-/// scroll position within that view. Each target carries the row's *raw* index
-/// so the mouse handler (which sets `selected = i`) works unchanged whether or
-/// not a filter is active.
-fn push_list_rows(
-    targets: &mut Vec<(Rect, ClickTarget)>,
-    area: Rect,
-    offset: usize,
-    rows: &[usize],
-    make: impl Fn(usize) -> ClickTarget,
-) {
-    let inner = Block::default().borders(Borders::ALL).inner(area);
-    let vh = inner.height as usize;
-    let start = offset.min(rows.len());
-    let end = offset.saturating_add(vh).min(rows.len());
-    for (rel, &raw) in rows[start..end].iter().enumerate() {
-        targets.push((
-            Rect::new(inner.x, inner.y + rel as u16, inner.width, 1),
-            make(raw),
-        ));
-    }
-}
-
-/// The action buttons offered for a given column (mirrors `update`).
-fn action_buttons(column: InterfaceFocus) -> &'static [&'static str] {
-    match column {
-        InterfaceFocus::Methods => &["Call", "Listen"],
-        InterfaceFocus::Properties => &["Get", "Set", "Listen"],
-        InterfaceFocus::Signals => &["Listen"],
-    }
-}
-
-/// The action form: one row per input field (label + value), then a `[Trigger]`
-/// trigger button. The focused field / trigger is REVERSED (trigger is BOLD too).
-/// Zero-arg calls render just the trigger row.
-fn render_detail(
-    frame: &mut Frame,
-    area: Rect,
-    d: &DetailScreen,
-    nav: &NavContext,
-    targets: &mut Vec<(Rect, ClickTarget)>,
-) {
-    let title = if d.loading {
-        format!("{} (loading…)", action_title(&d.kind, &nav.interface))
-    } else {
-        action_title(&d.kind, &nav.interface)
+            .unwrap_or_default(),
+        Page::Watch => state
+            .watch()
+            .map(|watch| breadcrumb(&watch.context, context_width))
+            .unwrap_or_default(),
     };
-    let block = Block::default().borders(Borders::ALL).title(title);
-
-    if let Some(err) = &d.error {
+    if state.page != Page::Services {
+        let [up, context_area] =
+            Layout::horizontal([Constraint::Length(3), Constraint::Min(1)]).areas(line(header, 1));
+        frame.render_widget(Paragraph::new(" ^ ").style(active()), up);
+        targets.push((
+            up,
+            ClickTarget::Up {
+                to_navigation: state.page == Page::Browser
+                    && area.width < 80
+                    && state
+                        .browser
+                        .as_ref()
+                        .is_some_and(|browser| browser.focus != Focus::Navigation),
+            },
+        ));
         frame.render_widget(
-            Paragraph::new(format!("error: {}", error_text(err))).block(block),
+            Paragraph::new(context).style(Style::default().fg(MUTED)),
+            context_area,
+        );
+    }
+    let (content, filter) = if state.filter.is_some() {
+        let [content, filter] =
+            Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(body);
+        (content, Some(filter))
+    } else {
+        (body, None)
+    };
+    scroll[2] = 0;
+    match state.page {
+        Page::Services => services(frame, content, state, targets, &mut scroll[0]),
+        Page::Browser => {
+            if let Some(browser) = &state.browser {
+                browser_view(
+                    frame,
+                    content,
+                    browser,
+                    state.query(),
+                    targets,
+                    scroll,
+                    state.follow_selection,
+                    state.bus_picker.is_none(),
+                );
+            }
+        }
+        Page::Watch => watch_view(frame, content, state, targets, scroll),
+    }
+    if let (Some(area), Some(input)) = (filter, &state.filter) {
+        let [label, field] =
+            Layout::horizontal([Constraint::Length(9), Constraint::Min(1)]).areas(area);
+        frame.render_widget(Paragraph::new(" Filter /"), label);
+        input_widget(frame, field, input, true, state.bus_picker.is_none());
+        targets.push((field, ClickTarget::Filter));
+    }
+    let editing = state.filter.is_some()
+        || (state.page == Page::Browser
+            && state.browser.as_ref().is_some_and(|browser| {
+                browser.editor.editing && matches!(browser.focus, Focus::Field(_))
+            }));
+    let hint = if state.filter.is_some() {
+        "Type to filter · Enter open · Esc leave filter"
+    } else if editing {
+        "INSERT · Tab next · Enter done · Esc normal"
+    } else {
+        match state.page {
+            Page::Services => "j/k select · Enter open · / filter · b bus",
+            Page::Browser => match state.browser.as_ref().map(|browser| browser.focus) {
+                Some(Focus::Navigation) => "j/k select · h/l fold · Enter open · / filter",
+                Some(Focus::Action(_)) => "h/l action · k inputs · j result · Enter run",
+                Some(Focus::Result) => "hjkl scroll · Enter open in editor · y copy",
+                Some(Focus::Field(_)) => "NORMAL · i edit · j/k focus · Enter actions",
+                _ => "j/k select · h/l category · Enter details · / filter",
+            },
+            Page::Watch => "hjkl scroll · p pause · s stop · x clear · Enter open in editor",
+        }
+    };
+    let pending = state.key_prefix.map(|prefix| match prefix {
+        KeyPrefix::Count(count) => format!("{count}"),
+        KeyPrefix::G(Some(count)) => format!("{count}g"),
+        KeyPrefix::G(None) => "g".into(),
+    });
+    let status = state
+        .status
+        .as_deref()
+        .or(pending.as_deref())
+        .unwrap_or(hint);
+    let help = if editing { "Esc then ? help" } else { "? help" };
+    let help_width = help.len() as u16;
+    let [message, help_area] =
+        Layout::horizontal([Constraint::Min(1), Constraint::Length(help_width + 2)]).areas(footer);
+    frame.render_widget(
+        Paragraph::new(truncate(status, message.width as usize)).style(Style::default().fg(MUTED)),
+        message,
+    );
+    frame.render_widget(
+        Paragraph::new(format!("· {help}")).style(Style::default().fg(MUTED)),
+        help_area,
+    );
+    if let Some(popup) = &state.popup {
+        targets.clear();
+        frame.render_widget(Clear, area);
+        copy_popup(frame, area, popup, targets);
+    }
+    if state.help_open {
+        targets.clear();
+        frame.render_widget(Clear, area);
+        let help = "busx · keyboard\n\nt            new browsing tab\nq            close current tab (last tab exits)\nb            switch bus from the service list\ngt / gT      next / previous tab\n{number}gt   jump to tab number\nTab / S-Tab  next / previous pane or form control\ngg / G       first / last item or result line\nj / k        down / up\nh / l        member categories · fold objects · actions\nEnter        inspect · activate focused action\n/            filter services, navigation, or members\nr            refresh service/tree/property values\nn            focus navigation (also on narrow screens)\nc            copy command (choose a tool)\ny            copy result or watch text\nEsc          leave input · back to navigation · back\nCtrl-C       close current tab, including from inputs\n\nNavigation: /App47 is an object; @ marks an interface.\nInterface names retain their full namespace.\nLong names are clipped; the selected full name is above.\nArrow keys remain aliases for hjkl.\n\nMouse: ^ goes up one visible level; hidden on the service list.\nClick members to select, inputs to edit; wheel scrolls.\nInputs: i enters INSERT; Esc returns to NORMAL.\nj/k selects fields in NORMAL; Tab moves focus.\nEnter finishes editing and focuses actions without running.\nIn INSERT, q, t and other characters enter text normally.\nFilters accept text immediately after /.\nInput syntax follows busctl (see man busctl).\nBasic values: enter verbatim, including spaces.\nArrays/dicts: count, then elements/key-value pairs.\nExample: as takes 2 hello world; empty arrays take 0.\nStructs: fields in order; variants: signature then value.\nQuote container tokens with spaces, e.g. 1 \"hello world\".\nCall and Write run only when their action is activated.\n\nWatch uses the current tab for one subscription.\np pauses display, s stops but keeps retained messages,\nx clears retained events, End or G follows latest.\nEsc returns to browsing and stops this subscription.\nq closes the tab and stops its subscription.\nUse t to browse elsewhere while this tab listens.\nOnly the latest 1000 events are retained per watch.\n\nResult: y copies the result; Enter opens it in the configured editor.\n\nEsc or ? closes help";
+        frame.render_widget(
+            Paragraph::new(help)
+                .wrap(Wrap { trim: false })
+                .scroll((state.help_scroll as u16, 0))
+                .block(Block::bordered().title("Help · arrows scroll · Esc close")),
             area,
         );
-        return;
     }
+    if let Some(picker) = &state.bus_picker
+        && let Some(trigger) = targets
+            .iter()
+            .find_map(|(area, target)| (*target == ClickTarget::BusPicker).then_some(*area))
+    {
+        targets.clear();
+        targets.push((area, ClickTarget::BusDismiss));
+        targets.push((trigger, ClickTarget::BusPicker));
+        bus_picker(frame, area, trigger, picker, targets);
+    }
+}
 
-    // Fields chunk (one row per input + a little breathing room) + a 1-line
-    // trigger chunk pinned to the bottom of the block.
+fn services(
+    frame: &mut Frame,
+    area: Rect,
+    state: &State,
+    targets: &mut Vec<(Rect, ClickTarget)>,
+    scroll: &mut usize,
+) {
+    let title = if state.services_loading {
+        "Services · loading...".to_string()
+    } else {
+        format!("Services ({})", state.services.len())
+    };
+    let bus_style = if state.bus_picker.is_some() {
+        selected().fg(ACCENT)
+    } else {
+        active()
+    };
+    let block = Block::bordered()
+        .title(title)
+        .title(Line::from(Span::styled("Bus▾", bus_style)).right_aligned());
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    if inner.height < 1 {
+    targets.push((
+        Rect::new(area.right().saturating_sub(5), area.y, 4.min(area.width), 1),
+        ClickTarget::BusPicker,
+    ));
+    targets.push((inner, ClickTarget::ServicesPane));
+    if let Some(error) = &state.services_error {
+        frame.render_widget(
+            Paragraph::new(error_text(error))
+                .wrap(Wrap { trim: false })
+                .style(Style::default().fg(Color::Red)),
+            inner,
+        );
         return;
     }
-    let trigger_h = 1u16;
-    let fields_h = inner.height.saturating_sub(trigger_h);
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(fields_h), Constraint::Length(trigger_h)])
-        .split(inner);
-    let (fields_area, trigger_area) = (chunks[0], chunks[1]);
-
-    // Render each field: "label  value" on its own line; the focused field is
-    // REVERSED. With more fields than rows, the lower ones scroll off (fine for
-    // now; methods rarely have many IN-args). The `name  sig` label is split
-    // into two padded columns so both the member-name and signature line up
-    // across args. A bare label (no "  " — Set's signature, a Listen preview, a
-    // nameless arg) lands in the signature column; if no field has a name the
-    // name column is dropped entirely (no stray indent).
-    let split: Vec<(&str, &str)> = d
-        .field_labels
+    if inner.height == 0 {
+        return;
+    }
+    let name_width = (inner.width as usize).saturating_sub(26);
+    let wide = inner.width >= 50;
+    let header = if wide {
+        format!(
+            "  {}  {:>7}  {:>13}",
+            pad("Name", name_width.saturating_sub(2)),
+            "PID",
+            "Process"
+        )
+    } else {
+        "  Name".into()
+    };
+    frame.render_widget(
+        Paragraph::new(header).style(Style::default().fg(MUTED)),
+        line(inner, 0),
+    );
+    let query = state.query().to_ascii_lowercase();
+    let rows: Vec<_> = state
+        .services
         .iter()
-        .map(|l| match l.split_once("  ") {
-            Some((n, s)) => (n, s),
-            None => ("", l.as_str()),
+        .enumerate()
+        .filter(|(_, service)| service.name.to_ascii_lowercase().contains(&query))
+        .map(|(index, service)| {
+            let text = if wide {
+                format!(
+                    "{}  {:>7}  {:>13}",
+                    pad(&service.name, name_width.saturating_sub(2)),
+                    service
+                        .pid
+                        .map(|pid| pid.to_string())
+                        .unwrap_or_else(|| "-".into()),
+                    truncate(service.process.as_deref().unwrap_or("-"), 13)
+                )
+            } else {
+                service.name.clone()
+            };
+            (index, text)
         })
         .collect();
-    let width = fields_area.width as usize;
-    let sig_w = split
-        .iter()
-        .map(|(_, s)| s.chars().count())
-        .max()
-        .unwrap_or(0)
-        .min(width);
-    let name_w = split
-        .iter()
-        .map(|(n, _)| n.chars().count())
-        .max()
-        .unwrap_or(0)
-        .min(width.saturating_sub(sig_w + 6));
-    for (i, (name, sig)) in split.iter().copied().enumerate() {
-        if i as u16 >= fields_area.height {
-            break;
-        }
-        let focused = d.focus == DetailFocus::Field && i == d.field_selected;
-        let row_area = Rect {
-            x: fields_area.x,
-            y: fields_area.y + i as u16,
-            width: fields_area.width,
-            height: 1,
-        };
-        let input = d.inputs.get(i);
-        let value = input.map(|v| v.value()).unwrap_or("");
-        let label = if name_w == 0 {
-            sig.to_string()
-        } else {
-            format!("{}  {:<sig_w$}", pad_col(name, name_w), sig, sig_w = sig_w)
-        };
-        // Focused field: a `▶` marker + the label, then the whole input slot
-        // (value + cursor + trailing pad) drawn as one REVERSED block so the
-        // field reads as an interactive box even when empty — not just a lone
-        // cursor. The cursor is a yellow-on-reversed cell so it stands out
-        // within the block. Unfocused: plain, indented to align with the `▶`.
-        let line = if focused {
-            let cursor = input.map(|v| v.cursor()).unwrap_or(0).min(value.len());
-            let (before, after) = value.split_at(cursor);
-            let rev = Style::default().add_modifier(Modifier::REVERSED);
-            let prefix_w = 2 + label.chars().count() + 2;
-            let input_w = (fields_area.width as usize).saturating_sub(prefix_w);
-            let used = before.chars().count() + 1 + after.chars().count();
-            let pad = input_w.saturating_sub(used);
-            Line::from(vec![
-                Span::styled("▶ ", Style::default().fg(Color::Yellow)),
-                Span::raw(format!("{label}  ")),
-                Span::styled(before.to_string(), rev),
-                Span::styled(
-                    "▏",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::REVERSED),
-                ),
-                Span::styled(after.to_string(), rev),
-                Span::styled(" ".repeat(pad), rev),
-            ])
-        } else {
-            Line::raw(format!("  {label}  {value}"))
-        };
-        frame.render_widget(Paragraph::new(line), row_area);
-        targets.push((row_area, ClickTarget::DetailField(i)));
-    }
-
-    // The trigger button, centered, BOLD + REVERSED when focused.
-    let trigger_focused = d.focus == DetailFocus::Trigger;
-    let mut style = Style::default();
-    if trigger_focused {
-        style = style.add_modifier(Modifier::BOLD | Modifier::REVERSED);
-    }
-    frame.render_widget(
-        Paragraph::new("[Trigger]")
-            .style(style)
-            .alignment(Alignment::Center),
-        trigger_area,
+    list(
+        frame,
+        below(inner, 1),
+        rows,
+        state.service_selected,
+        true,
+        state.follow_selection[0],
+        scroll,
+        targets,
+        ClickTarget::Service,
     );
-    targets.push((trigger_area, ClickTarget::DetailTrigger));
 }
 
-/// The outcome of an action. For a streaming listen, message blocks are drawn
-/// from `r.messages`; a listen that is armed but has streamed no message yet
-/// shows "listening…" so the screen isn't blank. Otherwise it's a one-shot
-/// result: Loading → "…" (the title carries the context); error → the message;
-/// `Call(lines)` → one reply value per line (offset by `scroll` — clamped);
-/// `Get`/`Set` render their payload too.
-fn render_result(frame: &mut Frame, area: Rect, r: &ResultScreen) {
-    // Result screens are read-only (scroll-only) — no click targets.
-    let title = if r.loading {
-        format!("{} (loading…)", r.title)
+#[allow(clippy::too_many_arguments)]
+fn browser_view(
+    frame: &mut Frame,
+    area: Rect,
+    browser: &Browser,
+    query: &str,
+    targets: &mut Vec<(Rect, ClickTarget)>,
+    scroll: &mut [usize; 3],
+    follow_selection: [bool; 2],
+    show_cursor: bool,
+) {
+    if area.width >= 80 {
+        let [nav, content] =
+            Layout::horizontal([Constraint::Length(25), Constraint::Min(1)]).areas(area);
+        navigation(
+            frame,
+            nav,
+            browser,
+            if browser.focus == Focus::Navigation {
+                query
+            } else {
+                ""
+            },
+            targets,
+            &mut scroll[0],
+            follow_selection[0],
+            Focus::Navigation,
+        );
+        workspace(
+            frame,
+            content,
+            browser,
+            if browser.focus == Focus::Members {
+                query
+            } else {
+                ""
+            },
+            targets,
+            scroll,
+            follow_selection[1],
+            show_cursor,
+        );
+    } else if browser.focus == Focus::Navigation {
+        navigation(
+            frame,
+            area,
+            browser,
+            query,
+            targets,
+            &mut scroll[0],
+            follow_selection[0],
+            Focus::Members,
+        );
     } else {
-        r.title.clone()
-    };
-    let block = Block::default().borders(Borders::ALL).title(title);
+        workspace(
+            frame,
+            area,
+            browser,
+            query,
+            targets,
+            scroll,
+            follow_selection[1],
+            show_cursor,
+        );
+    }
+}
 
-    // Collect the body as logical lines — each rendered independently so a long
-    // line is clipped with `<`/`>` scroll hints instead of overrunning or
-    // wrapping. Vertical scroll (`r.scroll`) skips leading logical lines.
-    let mut lines: Vec<String> = if let Some(err) = &r.error {
-        vec![format!("error: {}", error_text(err))]
-    } else if !r.messages.is_empty() {
-        // Each listen message block may itself span multiple display lines.
-        r.messages
-            .iter()
-            .skip(r.scroll)
-            .flat_map(|m| m.split('\n').map(str::to_string))
-            .collect()
-    } else if r.cancel.is_some() {
-        // A listen is armed but no matching message has streamed yet. Without
-        // this the body would be blank and read as frozen. The CLI prints a
-        // `busx: monitoring` line the moment it goes live; this is the TUI's
-        // equivalent affordance.
-        vec!["listening…".to_string()]
-    } else if r.loading {
-        vec!["…".to_string()]
+#[allow(clippy::too_many_arguments)]
+fn navigation(
+    frame: &mut Frame,
+    area: Rect,
+    browser: &Browser,
+    query: &str,
+    targets: &mut Vec<(Rect, ClickTarget)>,
+    scroll: &mut usize,
+    follow_selection: bool,
+    click_focus: Focus,
+) {
+    let block = Block::bordered()
+        .title(if browser.tree_loading {
+            "Navigation · loading..."
+        } else {
+            "Navigation"
+        })
+        .border_style(if browser.focus == Focus::Navigation {
+            active()
+        } else {
+            Style::default()
+        });
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    targets.push((inner, ClickTarget::NavigationPane));
+    let [items, legend] =
+        Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(inner);
+    frame.render_widget(
+        Paragraph::new("/ object · @ interface").style(Style::default().fg(MUTED)),
+        legend,
+    );
+    let rows = browser
+        .navigation(query)
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            let text = match *row {
+                NavRow::Object(object) => {
+                    let object = &browser.objects[object];
+                    let indent = "  ".repeat(object.depth.min(3));
+                    let name = object.path.rsplit('/').next().unwrap_or("");
+                    format!(
+                        "{indent}{} /{name}",
+                        if object.expanded { "▾" } else { "▸" }
+                    )
+                }
+                NavRow::Interface(object, interface) => {
+                    let object = &browser.objects[object];
+                    let indent = "  ".repeat((object.depth + 1).min(4));
+                    let name = &object.interfaces[interface];
+                    let available = (items.width as usize).saturating_sub(indent.len() + 4);
+                    format!("{indent}@ {}", truncate(name, available))
+                }
+            };
+            (index, text)
+        })
+        .collect();
+    list(
+        frame,
+        items,
+        rows,
+        browser.nav_selected,
+        browser.focus == Focus::Navigation,
+        follow_selection,
+        scroll,
+        targets,
+        |index| ClickTarget::Navigation(index, click_focus),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn workspace(
+    frame: &mut Frame,
+    area: Rect,
+    browser: &Browser,
+    query: &str,
+    targets: &mut Vec<(Rect, ClickTarget)>,
+    scroll: &mut [usize; 3],
+    follow_selection: bool,
+    show_cursor: bool,
+) {
+    if let Some(error) = &browser.error {
+        frame.render_widget(
+            Paragraph::new(error_text(error))
+                .wrap(Wrap { trim: false })
+                .block(Block::bordered().title("Unavailable · r refresh")),
+            area,
+        );
+        return;
+    }
+    if browser.context.interface.is_empty() {
+        let row = browser.navigation("").get(browser.nav_selected).copied();
+        let text = match row {
+            Some(NavRow::Object(index)) => format!("{}\n\n{} interface(s)\n\nExpand the object and select an interface.\nEnter opens its members.", browser.objects[index].path, browser.objects[index].interfaces.len()),
+            Some(NavRow::Interface(object, interface)) => format!("{}\n\n{}\n\nEnter opens properties, methods and signals.", browser.objects[object].path, browser.objects[object].interfaces[interface]),
+            None if browser.tree_loading => "Loading service objects...".into(),
+            _ => "No visible objects or interfaces.\n\nUse --show-standard-interfaces to include\nstandard D-Bus interfaces.".into(),
+        };
+        frame.render_widget(
+            Paragraph::new(text)
+                .wrap(Wrap { trim: false })
+                .block(Block::bordered().title("Object")),
+            area,
+        );
+        return;
+    }
+    if browser.interface_loading {
+        frame.render_widget(
+            Paragraph::new("Loading interface...").block(Block::bordered()),
+            area,
+        );
+        return;
+    }
+    let top_height = if area.height >= 15 {
+        (area.height * 2 / 5).clamp(6, 10)
     } else {
-        match &r.result {
-            Some(ActionResult::Call(vs)) => vs.iter().skip(r.scroll).cloned().collect(),
-            Some(ActionResult::Get(v)) => v.split('\n').map(str::to_string).collect(),
-            Some(ActionResult::Set) => vec!["ok".to_string()],
-            None => vec![],
-        }
+        5
     };
+    let [members, detail] =
+        Layout::vertical([Constraint::Length(top_height), Constraint::Min(1)]).areas(area);
+    member_list(
+        frame,
+        members,
+        browser,
+        query,
+        targets,
+        &mut scroll[1],
+        follow_selection,
+    );
+    if !query.is_empty()
+        && browser.focus == Focus::Members
+        && browser.visible_members(query).is_empty()
+    {
+        frame.render_widget(
+            Paragraph::new("No matching members").block(Block::bordered().title("Details")),
+            detail,
+        );
+    } else {
+        inspector(frame, detail, browser, targets, &mut scroll[2], show_cursor);
+    }
+}
 
+fn member_list(
+    frame: &mut Frame,
+    area: Rect,
+    browser: &Browser,
+    query: &str,
+    targets: &mut Vec<(Rect, ClickTarget)>,
+    scroll: &mut usize,
+    follow_selection: bool,
+) {
+    let block = Block::bordered().border_style(if browser.focus == Focus::Members {
+        active()
+    } else {
+        Style::default()
+    });
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    targets.push((inner, ClickTarget::MembersPane));
+    if inner.height == 0 {
+        return;
+    }
+    let mut x = inner.x;
+    for category in Category::ALL {
+        let count = match category {
+            Category::Properties => browser.members.properties.len(),
+            Category::Methods => browser.members.methods.len(),
+            Category::Signals => browser.members.signals.len(),
+        };
+        let short = inner.width < 44;
+        let name = if short {
+            match category {
+                Category::Properties => "Props",
+                Category::Methods => "Methods",
+                Category::Signals => "Signals",
+            }
+        } else {
+            category.name()
+        };
+        let label = format!(" {name} {count} ");
+        let width = (label.len() as u16).min(inner.right().saturating_sub(x));
+        let rect = Rect::new(x, inner.y, width, 1);
+        frame.render_widget(
+            Paragraph::new(label).style(if browser.category == category {
+                selected()
+            } else {
+                Style::default().fg(MUTED)
+            }),
+            rect,
+        );
+        targets.push((rect, ClickTarget::Category(category)));
+        x += width;
+    }
+    let content = below(inner, 1);
+    let available = (content.width as usize).saturating_sub(2);
+    let name_width = (available / 3).clamp(8, 22);
+    let header = match browser.category {
+        Category::Properties => format!(
+            "  {} {} Mode Value",
+            pad("Name", name_width),
+            pad("Type", 6)
+        ),
+        Category::Methods => format!("  {} {} Out", pad("Method", name_width), pad("In", 8)),
+        Category::Signals => format!("  {} Arguments", pad("Signal", name_width)),
+    };
+    frame.render_widget(
+        Paragraph::new(header).style(Style::default().fg(MUTED)),
+        line(content, 0),
+    );
+    let rows = browser
+        .visible_members(query)
+        .into_iter()
+        .map(|index| {
+            let text = match browser.category {
+                Category::Properties => {
+                    let property = &browser.members.properties[index];
+                    let value = if !property.readable() {
+                        "(write-only)"
+                    } else {
+                        browser
+                            .value(&property.name)
+                            .unwrap_or(if browser.properties_loading {
+                                "..."
+                            } else {
+                                "-"
+                            })
+                    };
+                    format!(
+                        "{} {} {:<4} {}",
+                        pad(&property.name, name_width),
+                        pad(&property.signature, 6),
+                        property.mode(),
+                        value
+                    )
+                }
+                Category::Methods => {
+                    let method = &browser.members.methods[index];
+                    format!(
+                        "{} {} {}",
+                        pad(&method.name, name_width),
+                        pad(
+                            if method.signature.is_empty() {
+                                "-"
+                            } else {
+                                &method.signature
+                            },
+                            8
+                        ),
+                        if method.returns.is_empty() {
+                            "-"
+                        } else {
+                            &method.returns
+                        }
+                    )
+                }
+                Category::Signals => {
+                    let signal = &browser.members.signals[index];
+                    format!("{} {}", pad(&signal.name, name_width), signal.signature)
+                }
+            };
+            (index, text)
+        })
+        .collect();
+    list(
+        frame,
+        below(content, 1),
+        rows,
+        browser.selected(),
+        browser.focus == Focus::Members,
+        follow_selection,
+        scroll,
+        targets,
+        ClickTarget::Member,
+    );
+}
+
+fn inspector(
+    frame: &mut Frame,
+    area: Rect,
+    browser: &Browser,
+    targets: &mut Vec<(Rect, ClickTarget)>,
+    result_scroll: &mut usize,
+    show_cursor: bool,
+) {
+    let name = browser.member_name(browser.selected());
+    let title = if name.is_empty() { "Details" } else { name };
+    let block = Block::bordered().title(title).border_style(
+        if !matches!(browser.focus, Focus::Navigation | Focus::Members) {
+            active()
+        } else {
+            Style::default()
+        },
+    );
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.height == 0 {
         return;
     }
-    lines.truncate(inner.height as usize);
-    let width = inner.width as usize;
-    let rendered: Vec<Line> = lines
+    if name.is_empty() {
+        frame.render_widget(
+            Paragraph::new(format!(
+                "No {} on this interface",
+                browser.category.name().to_ascii_lowercase()
+            )),
+            inner,
+        );
+        return;
+    }
+    let mut y = 0;
+    match browser.category {
+        Category::Properties => {
+            let property = &browser.members.properties[browser.selected()];
+            frame.render_widget(
+                Paragraph::new(format!("{} · {}", property.signature, property.mode()))
+                    .style(Style::default().fg(MUTED)),
+                line(inner, y),
+            );
+            y += 1;
+            if property.readable() {
+                frame.render_widget(
+                    Paragraph::new(format!(
+                        "Current  {}",
+                        browser
+                            .value(name)
+                            .unwrap_or(if browser.properties_loading {
+                                "loading..."
+                            } else {
+                                "unavailable"
+                            })
+                    )),
+                    line(inner, y),
+                );
+                y += 1;
+            }
+        }
+        Category::Methods => {
+            let method = &browser.members.methods[browser.selected()];
+            frame.render_widget(
+                Paragraph::new(format!(
+                    "In: {} · Out: {}",
+                    if method.signature.is_empty() {
+                        "none"
+                    } else {
+                        &method.signature
+                    },
+                    if method.returns.is_empty() {
+                        "none"
+                    } else {
+                        &method.returns
+                    }
+                ))
+                .style(Style::default().fg(MUTED)),
+                line(inner, y),
+            );
+            y += 1;
+        }
+        Category::Signals => {
+            let signal = &browser.members.signals[browser.selected()];
+            frame.render_widget(
+                Paragraph::new(format!(
+                    "Arguments: {}",
+                    if signal.signature.is_empty() {
+                        "none"
+                    } else {
+                        &signal.signature
+                    }
+                ))
+                .style(Style::default().fg(MUTED)),
+                line(inner, y),
+            );
+            y += 1;
+            frame.render_widget(
+                Paragraph::new("Watch listens in this tab; t opens another.")
+                    .wrap(Wrap { trim: false }),
+                line(inner, y),
+            );
+            y += 1;
+        }
+    }
+    let fields_space = inner.height.saturating_sub(y + 4).max(1) as usize;
+    let label_width = browser
+        .editor
+        .fields
         .iter()
-        .map(|l| clipped_row(l, r.hscroll, width))
-        .collect();
-    frame.render_widget(Paragraph::new(rendered), inner);
-}
-
-/// Render one body line, clipped to `width` columns at the horizontal offset
-/// `hscroll`. A yellow `<` at the left marks content scrolled off the start; a
-/// yellow `>` at the right marks content cut off the end — the journalctl/less
-/// convention that invites scrolling instead of losing data to an invisible
-/// truncation. (Row-precise because render knows `area.width`, unlike `update`.)
-fn clipped_row(line: &str, hscroll: usize, width: usize) -> Line<'static> {
-    if width == 0 {
-        return Line::raw("");
-    }
-    let chars: Vec<char> = line.chars().collect();
-    let n = chars.len();
-    // `<` only when this row actually has content hidden to the left; `>` only
-    // when content survives the right edge. Both are computed per-row so short
-    // rows show no marker while a long sibling row does.
-    let has_left = hscroll > 0 && hscroll < n;
-    let left_pad = if has_left { 1 } else { 0 };
-    let content_w = width.saturating_sub(left_pad);
-    let has_right = hscroll.saturating_add(content_w) < n;
-    let content_w = if has_right {
-        content_w.saturating_sub(1)
+        .map(|field| Line::raw(field.label.as_str()).width() + 2)
+        .max()
+        .unwrap_or(0)
+        .min((inner.width / 2) as usize) as u16;
+    let start = if let Focus::Field(index) = browser.focus {
+        index.saturating_sub(fields_space - 1)
     } else {
-        content_w
+        0
     };
-    let shown: String = chars.iter().skip(hscroll).take(content_w).collect();
-    let mut spans: Vec<Span<'static>> = Vec::with_capacity(3);
-    if has_left {
-        spans.push(Span::styled("<", Style::default().fg(Color::Yellow)));
+    for (index, field) in browser
+        .editor
+        .fields
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(fields_space)
+    {
+        if y >= inner.height {
+            break;
+        }
+        let row = line(inner, y);
+        let [label, input] =
+            Layout::horizontal([Constraint::Length(label_width), Constraint::Min(1)]).areas(row);
+        frame.render_widget(
+            Paragraph::new(truncate(
+                &field.label,
+                label.width.saturating_sub(1) as usize,
+            )),
+            label,
+        );
+        input_widget(
+            frame,
+            input,
+            &field.input,
+            browser.focus == Focus::Field(index),
+            show_cursor && browser.editor.editing && browser.focus == Focus::Field(index),
+        );
+        targets.push((row, ClickTarget::Field(index, input.x)));
+        y += 1;
     }
-    if !shown.is_empty() {
-        spans.push(Span::raw(shown));
+    let containers = match browser.category {
+        Category::Methods => {
+            browser
+                .members
+                .methods
+                .get(browser.selected())
+                .is_some_and(|method| {
+                    method
+                        .args
+                        .iter()
+                        .any(|(_, sig)| sig.len() > 1 || sig == "v")
+                })
+        }
+        Category::Properties => browser
+            .members
+            .properties
+            .get(browser.selected())
+            .is_some_and(|property| property.signature.len() > 1 || property.signature == "v"),
+        Category::Signals => false,
+    };
+    if containers && !browser.editor.fields.is_empty() && y < inner.height {
+        frame.render_widget(
+            Paragraph::new("Input syntax: Esc, then ? for help").style(Style::default().fg(MUTED)),
+            line(inner, y),
+        );
+        y += 1;
     }
-    if has_right {
-        spans.push(Span::styled(">", Style::default().fg(Color::Yellow)));
+    let actions = browser.actions();
+    let mut x = inner.x;
+    for (index, action) in actions.iter().enumerate() {
+        let label = format!(" {} ", action.label());
+        let width = (label.len() as u16).min(inner.width);
+        if x + width > inner.right() {
+            x = inner.x;
+            y += 1;
+        }
+        if y >= inner.height {
+            break;
+        }
+        let rect = Rect::new(x, inner.y + y, width, 1);
+        let style = if browser.focus == Focus::Action(index) {
+            selected().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(ACCENT)
+        };
+        frame.render_widget(Paragraph::new(label).style(style), rect);
+        targets.push((rect, ClickTarget::Action(index)));
+        x += width + 1;
     }
-    Line::from(spans)
+    y += 1;
+    if y >= inner.height {
+        return;
+    }
+    let result_area = below(inner, y);
+    targets.push((result_area, ClickTarget::Result));
+    if browser.editor.pending.is_some() {
+        frame.render_widget(
+            Paragraph::new("Working...").style(Style::default().fg(Color::Yellow)),
+            result_area,
+        );
+    } else if let Some(outcome) = &browser.editor.outcome {
+        let error = outcome.error.is_some();
+        frame.render_widget(
+            Paragraph::new(if error { "ERROR" } else { "SUCCESS" })
+                .style(Style::default().fg(if error { Color::Red } else { Color::Green })),
+            line(result_area, 0),
+        );
+        *result_scroll = result_text(
+            frame,
+            below(result_area, 1),
+            &outcome.text(),
+            browser.editor.scroll,
+            browser.editor.hscroll,
+            error,
+        );
+    } else if let Some(error) = &browser.properties_error {
+        frame.render_widget(
+            Paragraph::new(error_text(error))
+                .style(Style::default().fg(Color::Red))
+                .wrap(Wrap { trim: false }),
+            result_area,
+        );
+    }
 }
 
-/// A titled list. The focused column gets a `▶` title prefix + bold border; the
-/// selected row is REVERSED in every column (so selection is visible everywhere).
-///
-/// `offset` seeds the list's scroll position (persisted across frames by the
-/// caller via `render`'s `scroll` param); the returned offset is what ratatui
-/// recomputed to keep `selected` visible, for the caller to persist.
-fn render_sub_list(
+fn watch_view(
     frame: &mut Frame,
     area: Rect,
-    title: &str,
-    items: Vec<ListItem>,
-    selected: usize,
-    focused: bool,
-    offset: usize,
-) -> usize {
-    let display_title = if focused {
-        format!("▶ {title}")
+    state: &State,
+    targets: &mut Vec<(Rect, ClickTarget)>,
+    scroll: &mut [usize; 3],
+) {
+    let Some(watch) = state.watch() else {
+        return;
+    };
+    let block = Block::bordered()
+        .title(format!(
+            "{} · {} · {} events",
+            watch.target.name(),
+            watch.status(),
+            watch.total
+        ))
+        .border_style(active());
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let [events, status, buttons] = Layout::vertical([
+        Constraint::Min(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .areas(inner);
+    targets.push((events, ClickTarget::WatchEvents));
+    if let Some(error) = &watch.error {
+        frame.render_widget(
+            Paragraph::new(error_text(error))
+                .wrap(Wrap { trim: false })
+                .style(Style::default().fg(Color::Red)),
+            events,
+        );
     } else {
-        title.to_string()
+        let text = watch.text();
+        if text.is_empty() {
+            frame.render_widget(
+                Paragraph::new(if watch.starting {
+                    "Starting subscription..."
+                } else if watch.stopped {
+                    "Subscription stopped."
+                } else {
+                    "Waiting for events..."
+                }),
+                events,
+            );
+        } else {
+            let offset = if watch.follow && watch.paused.is_none() {
+                text.lines().count().saturating_sub(events.height as usize)
+            } else {
+                watch.scroll
+            };
+            scroll[2] = result_text(frame, events, &text, offset, watch.hscroll, false);
+        }
+    }
+    let mode = if watch.paused.is_some() {
+        "PAUSED DISPLAY"
+    } else if watch.follow {
+        "Following latest"
+    } else {
+        "End: follow latest"
     };
-    let mut block = Block::default().borders(Borders::ALL).title(display_title);
-    if focused {
-        block = block.border_style(Style::default().add_modifier(Modifier::BOLD));
+    frame.render_widget(
+        Paragraph::new(format!(
+            "{mode} · retained {}/{}",
+            watch.events.len(),
+            EVENT_LIMIT
+        ))
+        .style(Style::default().fg(MUTED)),
+        status,
+    );
+    let mut x = buttons.x;
+    for (index, label) in [
+        if watch.paused.is_some() {
+            "Resume"
+        } else {
+            "Pause"
+        },
+        "Stop",
+        "Clear",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let label = format!(" {label} ");
+        let width = (label.len() as u16).min(buttons.right().saturating_sub(x));
+        let rect = Rect::new(x, buttons.y, width, buttons.height);
+        frame.render_widget(Paragraph::new(label).style(active()), rect);
+        targets.push((rect, ClickTarget::WatchAction(index)));
+        x += width + 1;
     }
-    let mut ls = ListState::default().with_offset(offset);
-    if !items.is_empty() {
-        ls.select(Some(selected));
-    }
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-    frame.render_stateful_widget(list, area, &mut ls);
-    ls.offset()
 }
 
-fn render_keyhint(frame: &mut Frame, area: Rect, screen: &Screen) {
-    let hint = match screen {
-        Screen::Service(_) => "↑↓ select · Enter open · / filter · r refresh · q quit · ? help",
-        Screen::Objects(_) => {
-            "↑↓ select · Enter open · / filter · r refresh · Esc back · q quit · ? help"
-        }
-        Screen::Interfaces(_) => {
-            "↑↓ select · Enter open · / filter · r refresh · Esc back · q quit · ? help"
-        }
-        Screen::Interface(_) => {
-            "Tab column · ↑↓ select · Enter open · r refresh · Esc back · q quit · ? help"
-        }
-        Screen::Detail(_) => "Tab move · Enter trigger · c copy-as · Esc back · q quit · ? help",
-        // A streaming-listen Result is armed when it has streamed messages or a
-        // live cancel sender; on those, Esc both pops the screen and stops the
-        // listen (the cancel sender drops). One-shot Results keep "Esc back".
-        Screen::Result(r) if !r.messages.is_empty() || r.cancel.is_some() => {
-            "↑↓ scroll · ←→ scroll · c copy-as · y copy · Esc back/stop · q quit · ? help"
-        }
-        Screen::Result(_) => {
-            "↑↓ scroll · ←→ scroll · c copy-as · y copy · Esc back · q quit · ? help"
-        }
-    };
-    frame.render_widget(Paragraph::new(hint), area);
+/// Keep the active tab visible even when there are more tabs than terminal
+/// columns. Tab numbers remain absolute when the strip scrolls horizontally.
+fn tab_bar(frame: &mut Frame, area: Rect, state: &State, targets: &mut Vec<(Rect, ClickTarget)>) {
+    let new_tab = Rect::new(area.right().saturating_sub(3), area.y, 3, 1);
+    frame.render_widget(Paragraph::new(" + ").style(active()), new_tab);
+    targets.push((new_tab, ClickTarget::NewTab));
+    let available = new_tab.x.saturating_sub(area.x + 2) as usize;
+    let titles: Vec<_> = state
+        .tab_titles()
+        .iter()
+        .enumerate()
+        .map(|(index, title)| format!(" {} {title}", index + 1))
+        .collect();
+    let widths: Vec<_> = titles
+        .iter()
+        .map(|title| {
+            (Line::raw(title.as_str()).width() + 3)
+                .min(28)
+                .min(available)
+        })
+        .collect();
+    let mut first = 0;
+    let mut end = state.active_tab + 1;
+    let mut used: usize = widths[..end].iter().sum();
+    while used > available && first < state.active_tab {
+        used -= widths[first];
+        first += 1;
+    }
+    while end < titles.len() && used + widths[end] <= available {
+        used += widths[end];
+        end += 1;
+    }
+    let mut x = area.x;
+    if first > 0 {
+        frame.render_widget(Paragraph::new("‹"), Rect::new(x, area.y, 1, 1));
+        x += 1;
+    }
+    for (index, title) in titles.iter().enumerate().take(end).skip(first) {
+        let width = widths[index] as u16;
+        let rect = Rect::new(x, area.y, width, 1);
+        let title_width = width.saturating_sub(3);
+        let title = truncate(title, title_width as usize);
+        let style = if index == state.active_tab {
+            selected()
+        } else {
+            Style::default().fg(MUTED)
+        };
+        frame.render_widget(Paragraph::new("").style(style), rect);
+        let title_rect = Rect::new(x, area.y, title_width, 1);
+        frame.render_widget(Paragraph::new(title).style(style), title_rect);
+        targets.push((title_rect, ClickTarget::Tab(index)));
+        let close_rect = Rect::new(x + title_width, area.y, width.min(3), 1);
+        frame.render_widget(Paragraph::new(" × ").style(style), close_rect);
+        targets.push((close_rect, ClickTarget::CloseTab(index)));
+        x += width;
+    }
+    if end < state.tabs.len() && x < new_tab.x {
+        frame.render_widget(Paragraph::new("›"), Rect::new(x, area.y, 1, 1));
+    }
 }
 
-/// Render the copy-as popup overlay: a centered, bordered block listing every
-/// tool in [`Tool::ALL`] (each with its command or "(unsupported)"), the selected row REVERSED,
-/// a preview area below showing the selected tool's full command (or the
-/// unsupported reason), and a status line at the bottom showing the result of the
-/// last copy attempt ("copying…" / "copied" / "error: …"). `Clear` wipes the
-/// underlying screen so the popup reads cleanly on top of it.
-///
-/// All content (tool rows, preview, status) is laid out from `block.inner(...)`
-/// — the area INSIDE the border — so it never paints over the border. (Drawing
-/// from the full `popup_area` is what previously let the first row overwrite the
-/// top border.)
-fn render_popup(
+fn bus_picker(
+    frame: &mut Frame,
+    area: Rect,
+    trigger: Rect,
+    picker: &BusPicker,
+    targets: &mut Vec<(Rect, ClickTarget)>,
+) {
+    let custom = picker.selected == 2;
+    let message_height = if picker.pending.is_some() {
+        1
+    } else if picker.error.is_some() {
+        3
+    } else {
+        0
+    };
+    let width = area.width.saturating_sub(2).min(44);
+    let y = trigger.bottom();
+    let area = Rect::new(
+        trigger.right().saturating_sub(width).max(area.x),
+        y,
+        width,
+        (6 + u16::from(custom) + message_height).min(area.bottom().saturating_sub(y)),
+    );
+    frame.render_widget(Clear, area);
+    targets.push((area, ClickTarget::BusMenu));
+    let block = Block::bordered()
+        .title("Bus · current tab")
+        .border_style(active());
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let [options, address, message, hint] = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Length(u16::from(custom)),
+        Constraint::Min(0),
+        Constraint::Length(1),
+    ])
+    .areas(inner);
+    for (index, label) in ["Session", "System", "Custom address"].iter().enumerate() {
+        let row = line(options, index as u16);
+        frame.render_widget(
+            Paragraph::new(format!(
+                " {} {label}",
+                if picker.selected == index { ">" } else { " " }
+            ))
+            .style(if picker.selected == index {
+                selected()
+            } else {
+                Style::default()
+            }),
+            row,
+        );
+        targets.push((row, ClickTarget::BusOption(index)));
+    }
+    if custom {
+        let [label, field] =
+            Layout::horizontal([Constraint::Length(10), Constraint::Min(1)]).areas(address);
+        frame.render_widget(
+            Paragraph::new(" Address  ").style(Style::default().fg(MUTED)),
+            label,
+        );
+        input_widget(
+            frame,
+            field,
+            &picker.address,
+            true,
+            picker.pending.is_none(),
+        );
+        targets.push((field, ClickTarget::BusAddress));
+    }
+    let (text, color) = if picker.pending.is_some() {
+        ("Connecting...", Color::Yellow)
+    } else if let Some(error) = &picker.error {
+        (error.as_str(), Color::Red)
+    } else {
+        ("", MUTED)
+    };
+    frame.render_widget(
+        Paragraph::new(text)
+            .wrap(Wrap { trim: false })
+            .style(Style::default().fg(color)),
+        message,
+    );
+    frame.render_widget(
+        Paragraph::new("↑/↓ choose · Enter · Esc").style(Style::default().fg(MUTED)),
+        hint,
+    );
+}
+
+fn copy_popup(
     frame: &mut Frame,
     area: Rect,
     popup: &CopyAsPopup,
     targets: &mut Vec<(Rect, ClickTarget)>,
 ) {
-    let popup_area = centered_rect(80, 50, area);
-    frame.render_widget(Clear, popup_area);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title("copy as — ↑↓ choose · Enter copy · Esc");
-    frame.render_widget(&block, popup_area);
-
-    // Content sits INSIDE the border. Three regions: the tool list (one row per
-    // tool), a preview area (selected tool's full command / unsupported reason),
-    // and a 1-line status line for the last copy attempt.
-    let inner = block.inner(popup_area);
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(Tool::ALL.len() as u16),
-            Constraint::Min(1),
-            Constraint::Length(1),
-        ])
-        .split(inner);
-    let (list_area, preview_area, status_area) = (chunks[0], chunks[1], chunks[2]);
-
-    // One row per tool: the command's first line (which already begins with the
-    // tool's own name, so no separate label is needed), or "{name}:
-    // (unsupported)" when the tool can't express the op (no command to identify
-    // it). The selected row is REVERSED; unsupported commands are dimmed grey.
-    for (i, (tool, cmd)) in popup.commands.iter().enumerate() {
-        if i as u16 >= list_area.height {
+    let block = Block::bordered().title("Copy command · Esc close");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let [tools, preview, status, hint] = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Min(1),
+        Constraint::Length(2),
+        Constraint::Length(1),
+    ])
+    .areas(inner);
+    let mut x = tools.x;
+    let mut y = tools.y;
+    for (index, (tool, command)) in popup.commands.iter().enumerate() {
+        let label = format!(" {} ", tool.name());
+        let width = label.len() as u16;
+        if x + width > tools.right() {
+            x = tools.x;
+            y += 1;
+        }
+        if y >= tools.bottom() {
             break;
         }
-        let row_area = Rect {
-            x: list_area.x,
-            y: list_area.y + i as u16,
-            width: list_area.width,
-            height: 1,
-        };
-        let body = match cmd {
-            Some(c) => first_line(c).to_string(),
-            None => format!("{}: (unsupported)", tool.name()),
-        };
-        let mut style = Style::default();
-        if i == popup.selected {
-            style = style.add_modifier(Modifier::REVERSED);
-        } else if cmd.is_none() {
-            style = style.fg(Color::DarkGray);
-        }
-        frame.render_widget(Paragraph::new(body).style(style), row_area);
-        targets.push((row_area, ClickTarget::PopupTool(i)));
-    }
-
-    // Preview: the selected tool's full command (commands may be multi-line for
-    // `# note` annotations); or why it's unsupported / a degenerate rule.
-    let preview = match popup.commands.get(popup.selected) {
-        Some((_tool, Some(c))) => c.clone(),
-        Some((tool, None)) => {
-            if matches!(*tool, Tool::Qdbus) {
-                "qdbus has no monitor facility — pick another tool.".to_string()
+        let rect = Rect::new(x, y, width.min(tools.right().saturating_sub(x)), 1);
+        frame.render_widget(
+            Paragraph::new(label).style(if popup.selected == index {
+                selected()
+            } else if command.is_none() {
+                Style::default().fg(MUTED)
             } else {
-                format!("{} cannot express this operation.", tool.name())
+                Style::default()
+            }),
+            rect,
+        );
+        targets.push((rect, ClickTarget::PopupTool(index)));
+        x += width + 1;
+    }
+    let command = popup
+        .commands
+        .get(popup.selected)
+        .and_then(|(_, command)| command.as_deref())
+        .unwrap_or("This tool cannot express the selected operation.");
+    frame.render_widget(
+        Paragraph::new(command)
+            .wrap(Wrap { trim: false })
+            .scroll((popup.scroll.min(u16::MAX as usize) as u16, 0))
+            .block(Block::bordered().title("Preview")),
+        preview,
+    );
+    frame.render_widget(
+        Paragraph::new(
+            popup
+                .status
+                .as_deref()
+                .unwrap_or("Preview wraps; copied text preserves the command."),
+        ),
+        status,
+    );
+    let [keys, copy] = Layout::horizontal([Constraint::Min(1), Constraint::Length(8)]).areas(hint);
+    frame.render_widget(
+        Paragraph::new("Left/Right tool · Enter copy · PgUp/PgDn scroll"),
+        keys,
+    );
+    frame.render_widget(Paragraph::new("[ Copy ]").style(active()), copy);
+    targets.push((copy, ClickTarget::PopupCopy));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn list(
+    frame: &mut Frame,
+    area: Rect,
+    rows: Vec<(usize, String)>,
+    selected_index: usize,
+    focused: bool,
+    follow_selection: bool,
+    offset: &mut usize,
+    targets: &mut Vec<(Rect, ClickTarget)>,
+    target: impl Fn(usize) -> ClickTarget,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    if rows.is_empty() {
+        frame.render_widget(
+            Paragraph::new("No matches").style(Style::default().fg(MUTED)),
+            area,
+        );
+        *offset = 0;
+        return;
+    }
+    let position = rows.iter().position(|(index, _)| *index == selected_index);
+    let items: Vec<_> = rows
+        .iter()
+        .enumerate()
+        .map(|(position_index, (_, text))| {
+            let item = ListItem::new(format!(
+                "{} {}",
+                if position == Some(position_index) {
+                    ">"
+                } else {
+                    " "
+                },
+                truncate(text, area.width.saturating_sub(2) as usize)
+            ));
+            if !follow_selection && position == Some(position_index) {
+                item.style(if focused {
+                    selected()
+                } else {
+                    Style::default().fg(ACCENT)
+                })
+            } else {
+                item
             }
-        }
-        None => String::new(),
-    };
-    frame.render_widget(
-        Paragraph::new(preview).style(Style::default().fg(Color::Yellow)),
-        preview_area,
-    );
-
-    // Status line: the result of the last copy attempt, shown inside the popup
-    // (never printed to the TTY). Green for success, red for an error; the
-    // "copying…" placeholder stays default-colored while the copy is in flight.
-    if let Some(status) = &popup.status {
-        let style = if status == "copied" {
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD)
-        } else if status.starts_with("error") {
-            Style::default().fg(Color::Red)
+        })
+        .collect();
+    let mut list_state = ListState::default()
+        .with_offset((*offset).min(rows.len().saturating_sub(area.height as usize)));
+    if follow_selection {
+        list_state.select(position);
+    }
+    frame.render_stateful_widget(
+        List::new(items).highlight_style(if focused {
+            selected()
         } else {
-            Style::default()
-        };
-        frame.render_widget(Paragraph::new(status.as_str()).style(style), status_area);
-    }
-}
-
-/// First line of a (possibly multi-line) command, for the compact tool list. The
-/// preview area below shows the full multi-line text.
-fn first_line(s: &str) -> &str {
-    s.split('\n').next().unwrap_or(s)
-}
-
-/// The global keybindings reference shown by the `?` help overlay. Mirrors the
-/// keys handled in `update::update_key` (and per-screen `update_*_key`); keep it
-/// in sync when a key changes.
-const HELP_TEXT: &str = "\
-busx — keybindings
-
-global:
-  ↑↓ / jk     move / scroll (Result)
-  ←→ / hl     (Result) scroll sideways; `<`/`>` marks hidden text
-  Enter       open / activate / drill in / fire the focused button
-  Esc         back (or stop a listen); at root Service screen, quit
-  q           quit
-  /           (list) filter — type, ↑↓ pick, Enter open, Esc clear
-  Tab         (Interface) cycle methods/properties/signals
-  r           refresh the current view
-  c           copy-as — dbus-send/busctl/qdbus/gdbus for the current op
-  y           (Result) copy the result text
-  ?           toggle this help
-  mouse       click to select / click a button / wheel to scroll
-
-navigation: Service → Objects → Interfaces → Interface → Detail → Result
-  (single-item levels auto-skip; Esc unwinds the stack)
-";
-
-/// Render the `?` help overlay: a centered, bordered block (titled with its own
-/// close hint) wrapping the `HELP_TEXT`. `Clear` wipes the underlying screen so
-/// the text reads cleanly on top. Not clickable — records no click targets.
-fn render_help(frame: &mut Frame, area: Rect) {
-    // Size the box to fit the full keybinding list without wrapping. The box
-    // is as large as the content (HELP_TEXT width/height + border), capped at
-    // 96% of the frame so it never bleeds off-screen; when the terminal is
-    // too small the content still wraps/clips rather than overflowing.
-    let content_w = HELP_TEXT.lines().map(str::len).max().unwrap_or(0) as u16;
-    let content_h = HELP_TEXT.lines().count() as u16;
-    let max_w = area.width.saturating_mul(96) / 100;
-    let max_h = area.height.saturating_mul(96) / 100;
-    let w = content_w.saturating_add(2).min(max_w); // +2 for borders
-    let h = content_h.saturating_add(2).min(max_h); // +2 for borders
-    let popup_area = centered_rect_abs(w, h, area);
-    frame.render_widget(Clear, popup_area);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title("help — Esc or ? to close");
-    let inner = block.inner(popup_area);
-    frame.render_widget(block, popup_area);
-    frame.render_widget(
-        Paragraph::new(HELP_TEXT).wrap(ratatui::widgets::Wrap { trim: false }),
-        inner,
+            Style::default().fg(ACCENT)
+        }),
+        area,
+        &mut list_state,
     );
-}
-
-/// The standard ratatui centered-rect helper: a rect of `pct_x`% × `pct_y`% of
-/// `r`, centered within it. Used to place the copy-as popup.
-fn centered_rect(pct_x: u16, pct_y: u16, r: Rect) -> Rect {
-    fn split_rect(len: u16, pct: u16) -> (u16, u16) {
-        // (margin, size): two equal margins flank a `pct`% central region.
-        let size = len.saturating_mul(pct) / 100;
-        let margin = len.saturating_sub(size) / 2;
-        (margin, size)
-    }
-    let (mx, w) = split_rect(r.width, pct_x);
-    let (my, h) = split_rect(r.height, pct_y);
-    Rect {
-        x: r.x + mx,
-        y: r.y + my,
-        width: w,
-        height: h,
+    *offset = list_state.offset();
+    for (visible, (index, _)) in rows
+        .iter()
+        .skip(*offset)
+        .take(area.height as usize)
+        .enumerate()
+    {
+        targets.push((
+            Rect::new(area.x, area.y + visible as u16, area.width, 1),
+            target(*index),
+        ));
     }
 }
 
-/// Center a rect of absolute size `w`×`h` within `r`, clamped to `r`'s bounds
-/// (so it never overflows the frame). Used by the help overlay, whose size is
-/// driven by `HELP_TEXT` content rather than a percentage.
-fn centered_rect_abs(w: u16, h: u16, r: Rect) -> Rect {
-    let w = w.min(r.width);
-    let h = h.min(r.height);
-    let x = r.x + r.width.saturating_sub(w) / 2;
-    let y = r.y + r.height.saturating_sub(h) / 2;
-    Rect {
-        x,
-        y,
-        width: w,
-        height: h,
+fn input_widget(
+    frame: &mut Frame,
+    area: Rect,
+    input: &tui_input::Input,
+    focused: bool,
+    editing: bool,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
     }
+    let offset = input.visual_scroll(area.width.saturating_sub(1) as usize);
+    frame.render_widget(
+        Paragraph::new(input.value())
+            .style(if focused {
+                selected()
+            } else {
+                Style::default().bg(Color::DarkGray)
+            })
+            .scroll((0, offset.min(u16::MAX as usize) as u16)),
+        area,
+    );
+    if editing {
+        let cursor = input
+            .visual_cursor()
+            .saturating_sub(offset)
+            .min(area.width.saturating_sub(1) as usize);
+        frame.set_cursor_position((area.x + cursor as u16, area.y));
+    }
+}
+
+fn result_text(
+    frame: &mut Frame,
+    area: Rect,
+    text: &str,
+    scroll: usize,
+    horizontal: usize,
+    wrap: bool,
+) -> usize {
+    let scroll = scroll.min(text.lines().count().saturating_sub(area.height as usize));
+    let paragraph = Paragraph::new(text).scroll((
+        scroll.min(u16::MAX as usize) as u16,
+        horizontal.min(u16::MAX as usize) as u16,
+    ));
+    frame.render_widget(
+        if wrap {
+            paragraph.wrap(Wrap { trim: false })
+        } else {
+            paragraph
+        },
+        area,
+    );
+    scroll
+}
+
+fn breadcrumb(context: &Context, width: usize) -> String {
+    if context.object.is_empty() {
+        return truncate(&context.service, width);
+    }
+    if context.interface.is_empty() {
+        return truncate(&format!("{} › {}", context.service, context.object), width);
+    }
+    let full = format!(
+        "{} › {} › {}",
+        context.service, context.object, context.interface
+    );
+    if Line::raw(full.as_str()).width() <= width {
+        return full;
+    }
+    let service = truncate(&context.service, width / 3);
+    let interface = truncate(&context.interface, width / 4);
+    let path_width = width.saturating_sub(
+        Line::raw(service.as_str()).width() + Line::raw(interface.as_str()).width() + 6,
+    );
+    format!(
+        "{service} › {} › {interface}",
+        tail(&context.object, path_width)
+    )
+}
+
+fn line(area: Rect, row: u16) -> Rect {
+    Rect::new(
+        area.x,
+        area.y + row.min(area.height),
+        area.width,
+        u16::from(row < area.height),
+    )
+}
+
+fn below(area: Rect, rows: u16) -> Rect {
+    Rect::new(
+        area.x,
+        area.y + rows.min(area.height),
+        area.width,
+        area.height.saturating_sub(rows),
+    )
+}
+
+/// Truncate by terminal-cell width, including CJK values and combining marks.
+fn truncate(text: &str, width: usize) -> String {
+    if Line::raw(text).width() <= width {
+        return text.into();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let mut used = 0;
+    let mut out = String::new();
+    for ch in text.chars() {
+        let size = Span::raw(ch.to_string()).width();
+        if used + size > width - 1 {
+            break;
+        }
+        out.push(ch);
+        used += size;
+    }
+    out.push('…');
+    out
+}
+
+fn pad(text: &str, width: usize) -> String {
+    let text = truncate(text, width);
+    let padding = width.saturating_sub(Line::raw(text.as_str()).width());
+    format!("{text}{}", " ".repeat(padding))
+}
+
+fn tail(text: &str, width: usize) -> String {
+    if Line::raw(text).width() <= width {
+        return text.into();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let mut used = 1;
+    let mut out = vec![];
+    for ch in text.chars().rev() {
+        let size = Span::raw(ch.to_string()).width();
+        if used + size > width {
+            break;
+        }
+        out.push(ch);
+        used += size;
+    }
+    format!("…{}", out.into_iter().rev().collect::<String>())
 }

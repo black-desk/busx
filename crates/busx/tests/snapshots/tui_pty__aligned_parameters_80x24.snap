@@ -1,0 +1,28 @@
+---
+source: crates/busx/tests/tui_pty.rs
+expression: "lines.join(\"\\n\")"
+---
+ 1 🔍  …UiFixture ×                                                            +
+ ^ org.busx.UiFixture › /org/busx/Ui › org.busx.UiFixture
+┌Navigation─────────────┐┌─────────────────────────────────────────────────────┐
+│  ▾ /                  ││ Properties 1  Methods 1  Signals 1                  │
+│    ▾ /org             ││  Method            In       Out                     │
+│      ▾ /busx          ││> DelayedEcho       ss       s                       │
+│        ▾ /Ui          ││                                                     │
+│>         @ org.busx.U…││                                                     │
+│          @ org.exampl…││                                                     │
+│        ▸ /child_0     │└─────────────────────────────────────────────────────┘
+│        ▸ /child_1     │┌DelayedEcho──────────────────────────────────────────┐
+│        ▸ /child_10    ││In: ss · Out: s                                      │
+│        ▸ /child_11    ││short  s                  alpha                      │
+│        ▸ /child_2     ││much_longer_parameter_na… beta                       │
+│        ▸ /child_3     ││ Call   Watch   Copy command                         │
+│        ▸ /child_4     ││                                                     │
+│        ▸ /child_5     ││                                                     │
+│        ▸ /child_6     ││                                                     │
+│        ▸ /child_7     ││                                                     │
+│        ▸ /child_8     ││                                                     │
+│        ▸ /child_9     ││                                                     │
+│/ object · @ interface ││                                                     │
+└───────────────────────┘└─────────────────────────────────────────────────────┘
+NORMAL · i edit · j/k focus · Enter actions                             · ? help

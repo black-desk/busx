@@ -1,0 +1,28 @@
+---
+source: crates/busx/tests/tui_pty.rs
+expression: "lines.join(\"\\n\")"
+---
+ 1 🔍  …Test ×                                                                 +
+ ^ org.busx.Test › /org/busx/Test › org.busx.Test
+┌Navigation─────────────┐┌─────────────────────────────────────────────────────┐
+│  ▾ /                  ││ Properties 4  Methods 10  Signals 0                 │
+│    ▾ /org             ││  Name              Type   Mode Value                │
+│      ▾ /busx          ││> counts            a{uu}  r    {1: 10, 2: 20}       │
+│        ▾ /Test        ││  hints             a{sv}  r    {"urgency": <y 1>}   │
+│>         @ org.busx.T…││  name              s      r    "busx-test"          │
+│        ▸ /sub         ││  volume            d      rw   0.5                  │
+│                       │└─────────────────────────────────────────────────────┘
+│                       │┌counts───────────────────────────────────────────────┐
+│                       ││a{uu} · r                                            │
+│                       ││Current  {1: 10, 2: 20}                              │
+│                       ││ Read   Watch   Copy command                         │
+│                       ││                                                     │
+│                       ││                                                     │
+│                       ││                                                     │
+│                       ││                                                     │
+│                       ││                                                     │
+│                       ││                                                     │
+│                       ││                                                     │
+│/ object · @ interface ││                                                     │
+└───────────────────────┘└─────────────────────────────────────────────────────┘
+j/k select · h/l category · Enter details · / filter                    · ? help
