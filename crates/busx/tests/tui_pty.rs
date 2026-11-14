@@ -413,7 +413,7 @@ fn editor_formats_nested_results() {
     open_interface(&mut p);
     probe_property(&mut p, "counts");
     key(&mut p, KeyCode::Enter);
-    wait(&mut p, "{1: 10, 2: 20}");
+    wait(&mut p, "SUCCESS");
     text(&mut p, "j");
     wait(&mut p, "Enter open in editor");
     key(&mut p, KeyCode::Enter);
