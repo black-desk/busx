@@ -161,12 +161,11 @@ is `0` on success, `1` on failure; piping into `less`/`head` does not panic
   the actions without executing. `Open in editor` writes large replies to a
   temporary text file, expands nested arrays/dictionaries/structures with
   indentation, and opens it with `$VISUAL` or `$EDITOR`; after the editor exits,
-  the browser is restored. Basic values are entered
-  verbatim, including spaces and empty strings; containers use busctl-style
-  tokens, e.g. `2 hello world` for `as`. Container inputs point to `?` help for
-  syntax rules and the busctl reference; press `Esc` first when editing.
-  Ordinary characters, including `q`, type normally inside inputs; `Ctrl+C`
-  closes the current tab from any input.
+  the browser is restored. Basic values are entered verbatim, including spaces
+  and empty strings; containers use busctl-style tokens, e.g. `2 hello world`
+  for `as`. Container inputs point to `?` help for syntax rules and the busctl
+  reference; press `Esc` first when editing. Ordinary characters, including `q`,
+  type normally inside inputs; `Ctrl+C` closes the current tab from any input.
 - **Independent tabs**: `t` opens a new service browser; `gt/gT` switch to the
   next/previous tab, and `{number}gt` jumps to a tab. Each tab keeps its own
   service, object, interface, inputs, results, filter, and scroll position. `q`
@@ -199,11 +198,11 @@ is `0` on success, `1` on failure; piping into `less`/`head` does not panic
   views return to navigation first. Leaving a watch stops its subscription. The
   service list hides the control. The symbol and its two padding spaces are
   clickable. Clicking a service opens it; clicking an object folds or unfolds
-  it. Clicking an interface loads its members, keeping focus in navigation
-  when panes are side by side, or showing the member list in narrow terminals.
-  wheel scrolls the area under the pointer without moving keyboard focus or
-  changing the selected member. In command previews, click a tool to select it
-  and click `Copy` to copy the command.
+  it. Clicking an interface loads its members, keeping focus in navigation when
+  panes are side by side, or showing the member list in narrow terminals. wheel
+  scrolls the area under the pointer without moving keyboard focus or changing
+  the selected member. In command previews, click a tool to select it and click
+  `Copy` to copy the command.
 - **Contextual footer**: one line shows actions for the focused area and the
   help entry. Status messages temporarily replace the action hints; global tab
   shortcuts are listed in help. While editing, leave insert mode with `Esc`
