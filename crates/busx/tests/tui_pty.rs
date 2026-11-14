@@ -3,6 +3,7 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -12,6 +13,7 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use portable_pty::CommandBuilder;
@@ -22,6 +24,16 @@ const SERVICE: &str = "org.busx.Test";
 const PATH: &str = "/org/busx/Test";
 
 fn spawn(addr: &str, cols: u16, rows: u16, clip: Option<&ClipboardMock>) -> TuiProbe {
+    spawn_with_editor(addr, cols, rows, clip, None)
+}
+
+fn spawn_with_editor(
+    addr: &str,
+    cols: u16,
+    rows: u16,
+    clip: Option<&ClipboardMock>,
+    editor: Option<&Path>,
+) -> TuiProbe {
     let mut probe = TuiProbe::builder()
         .cols(cols)
         .rows(rows)
@@ -30,6 +42,8 @@ fn spawn(addr: &str, cols: u16, rows: u16, clip: Option<&ClipboardMock>) -> TuiP
         .unwrap();
     let mut cmd = CommandBuilder::new(assert_cmd::cargo::cargo_bin!("busx"));
     cmd.args(["--address", addr]);
+    cmd.env_remove("VISUAL");
+    cmd.env("EDITOR", editor.unwrap_or_else(|| Path::new("true")));
     if let Some(clip) = clip {
         cmd.env("PATH", clip.child_path());
     }
@@ -203,6 +217,38 @@ struct ClipboardMock {
     _dir: tempfile::TempDir,
 }
 
+struct EditorMock {
+    path: std::path::PathBuf,
+    output: std::path::PathBuf,
+    _dir: tempfile::TempDir,
+}
+
+impl EditorMock {
+    fn new() -> Self {
+        let dir = tempfile::TempDir::new().expect("tempdir for editor mock");
+        let path = dir.path().join("editor");
+        let output = dir.path().join("result.txt");
+        let script = format!("#!/bin/sh\ncat \"$1\" > '{}'\n", output.display());
+        fs::write(&path, script).expect("write editor mock");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&path, perms).unwrap();
+        }
+        Self {
+            path,
+            output,
+            _dir: dir,
+        }
+    }
+
+    fn contents(&self) -> String {
+        fs::read_to_string(&self.output).expect("editor output")
+    }
+}
+
 impl ClipboardMock {
     fn new() -> Self {
         let dir = tempfile::TempDir::new().expect("tempdir for clipboard mock");
@@ -327,7 +373,7 @@ fn narrow_interface_and_help_layout() {
 }
 
 #[test]
-fn call_zero_arg_method_and_expand_result() {
+fn call_zero_arg_method_and_open_result_in_editor() {
     let bus = testbus::bus_owned();
     let mut p = spawn(&bus.address, 80, 24, None);
     open_interface(&mut p);
@@ -336,23 +382,15 @@ fn call_zero_arg_method_and_expand_result() {
     wait(&mut p, "/dev/null");
     snapshot("method_result_80x24", &p);
     text(&mut p, "j");
-    wait(&mut p, "Enter expand");
+    wait(&mut p, "Enter open in editor");
     key(&mut p, KeyCode::Enter);
-    wait(&mut p, "Result · y copy");
-    key(&mut p, KeyCode::Esc);
-    wait(&mut p, "SUCCESS");
-    assert!(p.contains("Methods"));
-    key(&mut p, KeyCode::Enter);
-    wait(&mut p, "Result · y copy");
-    click_up(&mut p, 2);
-    p.wait_for(|s| {
-        s.contains("Methods") && s.contains("SUCCESS") && !s.contains("Result · y copy")
-    })
-    .unwrap();
+    wait(&mut p, "Opened in editor");
+    assert!(p.contains("SUCCESS"));
+    close_last(&mut p);
 }
 
 #[test]
-fn result_horizontal_scroll() {
+fn result_opens_in_editor() {
     let bus = testbus::bus_owned();
     let mut p = spawn(&bus.address, 80, 24, None);
     open_interface(&mut p);
@@ -360,23 +398,28 @@ fn result_horizontal_scroll() {
     call(&mut p);
     wait(&mut p, "the quick brown fox");
     text(&mut p, "j");
-    wait(&mut p, "Enter expand");
-    snapshot("long_result_clipped", &p);
-    key(&mut p, KeyCode::Right);
-    wait(&mut p, "quick brown fox");
-    p.wait_for(|s| !s.contains("\"the quick brown fox"))
-        .unwrap();
-    snapshot("long_result_scrolled", &p);
-    let scrolled_line = p
-        .screen_contents()
-        .lines()
-        .find(|line| line.contains("quick brown fox"))
-        .unwrap()
-        .to_string();
-    text(&mut p, "t");
-    services(&mut p);
-    text(&mut p, "gt");
-    wait(&mut p, &scrolled_line);
+    wait(&mut p, "Enter open in editor");
+    key(&mut p, KeyCode::Enter);
+    wait(&mut p, "Opened in editor");
+    close_last(&mut p);
+}
+
+#[test]
+fn editor_formats_nested_results() {
+    let bus = testbus::bus_owned();
+    let editor = EditorMock::new();
+    let mut p = spawn_with_editor(&bus.address, 80, 24, None, Some(&editor.path));
+    open_interface(&mut p);
+    probe_property(&mut p, "counts");
+    text(&mut p, "l");
+    key(&mut p, KeyCode::Enter);
+    wait(&mut p, "{1: 10, 2: 20}");
+    text(&mut p, "j");
+    wait(&mut p, "Enter open in editor");
+    key(&mut p, KeyCode::Enter);
+    wait(&mut p, "Opened in editor");
+    assert_eq!(editor.contents(), "{\n  1: 10,\n  2: 20\n}");
+    close_last(&mut p);
 }
 
 #[test]
@@ -916,17 +959,14 @@ fn watch_pause_clear_stop_and_escape_restore_browser() {
     key(&mut p, KeyCode::Esc);
     wait(&mut p, "Enter run");
     poll(|| property_subscriptions(&conn) == baseline);
-    // The shared up control returns from an expanded watch without stopping
-    // it, then stops the subscription when leaving the watch itself.
+    // Opening a watch result in the editor keeps the subscription active.
     key(&mut p, KeyCode::Enter);
     wait(&mut p, "Waiting for events...");
     poll(|| property_subscriptions(&conn) == baseline + 1);
     proxy.set_property("volume", 6.75f64).unwrap();
     wait(&mut p, "6.75");
     key(&mut p, KeyCode::Enter);
-    wait(&mut p, "Result · y copy");
-    click_up(&mut p, 1);
-    wait(&mut p, "Following latest");
+    wait(&mut p, "Opened in editor");
     poll(|| property_subscriptions(&conn) == baseline + 1);
     proxy.set_property("volume", 7.25f64).unwrap();
     wait(&mut p, "7.25");
@@ -994,7 +1034,7 @@ fn copy_commands_match_selected_operation_and_quote_arguments() {
     text(&mut p, "l");
     call(&mut p);
     text(&mut p, "j");
-    wait(&mut p, "Enter expand");
+    wait(&mut p, "Enter open in editor");
     fs::write(&clip.log_path, "").unwrap();
     let command = copy_tool(&mut p, &clip, "dbus-send");
     copy_snapshot("copy_read_dbus_send", &command, &bus.address);

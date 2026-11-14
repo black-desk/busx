@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -79,6 +80,131 @@ pub fn pretty(v: &Value<'_>) -> String {
         #[allow(unreachable_patterns)]
         other => format!("unsupported value: {other:?}"),
     }
+}
+
+/// Expand the compact human representation for viewing in an external editor.
+///
+/// The compact representation is deliberately kept for the terminal and CLI.
+/// This pass only changes the layout: delimiters and commas outside quoted
+/// strings become line breaks, with two spaces per nesting level. Quoted values
+/// are copied byte-for-byte, so punctuation in a string is left untouched.
+pub fn format_for_editor(text: &str) -> String {
+    let mut output = String::with_capacity(text.len() + text.len() / 4);
+    let mut depth = 0usize;
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut fd_literal = false;
+    let mut line_start = true;
+
+    for (index, ch) in text.char_indices() {
+        if fd_literal {
+            output.push(ch);
+            if ch == '>' {
+                fd_literal = false;
+            }
+            line_start = false;
+            continue;
+        }
+
+        if quoted {
+            output.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            line_start = false;
+            continue;
+        }
+
+        if ch == '"' {
+            quoted = true;
+            output.push(ch);
+            line_start = false;
+            continue;
+        }
+
+        if text[index..].starts_with("<fd ") {
+            fd_literal = true;
+            output.push(ch);
+            line_start = false;
+            continue;
+        }
+
+        match ch {
+            '[' | '{' | '(' => {
+                output.push(ch);
+                depth += 1;
+                if next_non_whitespace(text, index + ch.len_utf8()) != Some(close_for(ch)) {
+                    push_editor_newline(&mut output, depth);
+                    line_start = true;
+                }
+            }
+            ']' | '}' | ')' => {
+                depth = depth.saturating_sub(1);
+                let empty = output
+                    .trim_end_matches([' ', '\t'])
+                    .ends_with(['[', '{', '(']);
+                if !line_start && !empty {
+                    push_editor_newline(&mut output, depth);
+                } else {
+                    trim_editor_line(&mut output);
+                    push_editor_indent(&mut output, depth);
+                }
+                output.push(ch);
+                line_start = false;
+            }
+            ',' => {
+                output.push(ch);
+                if depth > 0 {
+                    push_editor_newline(&mut output, depth);
+                    line_start = true;
+                }
+            }
+            '\n' => {
+                trim_editor_line(&mut output);
+                output.push('\n');
+                line_start = true;
+            }
+            ch if ch.is_whitespace() && line_start => {}
+            _ => {
+                output.push(ch);
+                line_start = false;
+            }
+        }
+    }
+    output
+}
+
+fn close_for(open: char) -> char {
+    match open {
+        '[' => ']',
+        '{' => '}',
+        '(' => ')',
+        _ => unreachable!(),
+    }
+}
+
+fn next_non_whitespace(text: &str, start: usize) -> Option<char> {
+    text[start..].chars().find(|ch| !ch.is_whitespace())
+}
+
+fn trim_editor_line(output: &mut String) {
+    while output.ends_with([' ', '\t']) {
+        output.pop();
+    }
+}
+
+fn push_editor_indent(output: &mut String, depth: usize) {
+    output.extend(std::iter::repeat_n(' ', depth * 2));
+}
+
+fn push_editor_newline(output: &mut String, depth: usize) {
+    trim_editor_line(output);
+    output.push('\n');
+    push_editor_indent(output, depth);
 }
 
 /// Render an fd as `<fd TARGET [SIZE] [MODE] [NOTE]>`. The target is resolved

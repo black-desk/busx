@@ -1,12 +1,15 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Terminal lifecycle and asynchronous D-Bus effects.
 
-use std::io::{self, Stdout};
+use std::ffi::OsString;
+use std::io::{self, Stdout, Write};
+use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crossterm::event::{self, Event};
@@ -81,11 +84,6 @@ pub fn run(
                     browser.editor.scroll = scroll[2];
                 }
             }
-            Page::Expanded => {
-                if let Some(expanded) = &mut state.expanded {
-                    expanded.scroll = scroll[2];
-                }
-            }
             Page::Watch => {
                 if let Some(watch) = state.watch_mut() {
                     watch.scroll = scroll[2];
@@ -108,7 +106,11 @@ pub fn run(
             }
         };
         if let Some(effect) = update(&mut state, msg) {
+            let open_editor = matches!(effect, Effect::Editor(_, _));
             run_effect(effect, &state, tx.clone());
+            if open_editor {
+                terminal.clear()?;
+            }
         }
     }
     Ok(())
@@ -124,6 +126,10 @@ fn terminal_event(event: Event) -> Option<Msg> {
 }
 
 fn run_effect(effect: Effect, state: &State, tx: flume::Sender<Msg>) {
+    if let Effect::Editor(id, text) = effect {
+        let _ = tx.send(Msg::Editor(id, open_editor(&text)));
+        return;
+    }
     if let Effect::Clipboard(id, text) = effect {
         std::thread::spawn(move || {
             let _ = tx.send(Msg::Clipboard(id, write_to_clipboard(&text)));
@@ -151,7 +157,7 @@ fn run_effect(effect: Effect, state: &State, tx: flume::Sender<Msg>) {
         | Effect::Properties(_, tab_id, _)
         | Effect::Execute(_, tab_id, _, _)
         | Effect::Listen(_, tab_id, _, _) => *tab_id,
-        Effect::Connect(_, _) | Effect::Clipboard(_, _) => unreachable!(),
+        Effect::Connect(_, _) | Effect::Clipboard(_, _) | Effect::Editor(_, _) => unreachable!(),
     };
     let Some(tab) = state.tabs.iter().find(|tab| tab.id == tab_id) else {
         return;
@@ -209,11 +215,74 @@ fn run_effect(effect: Effect, state: &State, tx: flume::Sender<Msg>) {
                 };
                 Msg::WatchEnded(id, result)
             }
-            Effect::Connect(_, _) | Effect::Clipboard(_, _) => unreachable!(),
+            Effect::Connect(_, _) | Effect::Clipboard(_, _) | Effect::Editor(_, _) => {
+                unreachable!()
+            }
         };
         let _ = tx.send_async(msg).await;
     })
     .detach();
+}
+
+fn open_editor(text: &str) -> std::result::Result<(), String> {
+    let mut file = tempfile::Builder::new()
+        .prefix("busx-result-")
+        .suffix(".txt")
+        .tempfile()
+        .map_err(|error| format!("create temporary result file: {error}"))?;
+    let formatted = crate::value::pretty::format_for_editor(text);
+    file.write_all(formatted.as_bytes())
+        .map_err(|error| format!("write temporary result file: {error}"))?;
+    file.flush()
+        .map_err(|error| format!("flush temporary result file: {error}"))?;
+
+    let editor = ["VISUAL", "EDITOR"]
+        .into_iter()
+        .find_map(|name| std::env::var_os(name).filter(|value| !value.is_empty()))
+        .unwrap_or_else(|| OsString::from("vi"));
+
+    crossterm::terminal::disable_raw_mode()
+        .map_err(|error| format!("leave raw mode for editor: {error}"))?;
+    let suspended = crossterm::execute!(
+        io::stdout(),
+        crossterm::terminal::LeaveAlternateScreen,
+        crossterm::event::DisableMouseCapture,
+        crossterm::cursor::Show
+    );
+    if let Err(error) = suspended {
+        let _ = crossterm::execute!(
+            io::stdout(),
+            crossterm::terminal::EnterAlternateScreen,
+            crossterm::event::EnableMouseCapture,
+            crossterm::cursor::Hide
+        );
+        let _ = crossterm::terminal::enable_raw_mode();
+        return Err(format!("leave terminal for editor: {error}"));
+    }
+
+    let editor_result = Command::new(editor)
+        .arg(file.path())
+        .status()
+        .map_err(|error| format!("run editor: {error}"))
+        .and_then(|status| {
+            if status.success() {
+                Ok(())
+            } else {
+                Err(format!("editor exited with {status}"))
+            }
+        });
+    let restore_result = crossterm::execute!(
+        io::stdout(),
+        crossterm::terminal::EnterAlternateScreen,
+        crossterm::event::EnableMouseCapture,
+        crossterm::cursor::Hide
+    )
+    .map_err(|error| format!("return to terminal after editor: {error}"))
+    .and_then(|_| {
+        crossterm::terminal::enable_raw_mode()
+            .map_err(|error| format!("restore raw mode after editor: {error}"))
+    });
+    editor_result.and(restore_result)
 }
 
 async fn execute_op(conn: &Connection, op: &CopyOp) -> Result<ActionResult> {

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -27,6 +28,7 @@ pub enum Msg {
     WatchMessage(u64, String),
     WatchEnded(u64, Result<()>),
     Clipboard(u64, std::result::Result<(), String>),
+    Editor(u64, std::result::Result<(), String>),
 }
 
 #[derive(Debug)]
@@ -39,4 +41,5 @@ pub enum Effect {
     Execute(u64, u64, Context, CopyOp),
     Listen(u64, u64, Context, ListenTarget),
     Clipboard(u64, String),
+    Editor(u64, String),
 }

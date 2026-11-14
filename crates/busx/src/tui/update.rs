@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -256,6 +257,15 @@ fn update_message(state: &mut State, msg: Msg) -> Option<Effect> {
             }
             None
         }
+        Msg::Editor(tab_id, result) => {
+            if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id) {
+                tab.status = Some(match result {
+                    Ok(()) => "Opened in editor".into(),
+                    Err(error) => format!("Editor failed: {error}"),
+                });
+            }
+            None
+        }
     }
 }
 
@@ -394,16 +404,6 @@ fn key_event(state: &mut State, key: KeyEvent) -> Option<Effect> {
         },
         Page::Browser => return browser_key(state, key),
         Page::Watch => return watch_key(state, key.code),
-        Page::Expanded => {
-            if let Some(expanded) = &mut state.expanded {
-                scroll_text(
-                    &expanded.text,
-                    &mut expanded.scroll,
-                    &mut expanded.hscroll,
-                    key.code,
-                );
-            }
-        }
     }
     None
 }
@@ -501,11 +501,6 @@ fn jump_selection(state: &mut State, index: usize) {
                 watch.scroll = index.min(watch.text().lines().count().saturating_sub(1));
             }
         }
-        Page::Expanded => {
-            if let Some(expanded) = &mut state.expanded {
-                expanded.scroll = index.min(expanded.text.lines().count().saturating_sub(1));
-            }
-        }
     }
 }
 
@@ -527,11 +522,6 @@ fn back(state: &mut State) {
                 Page::Browser
             } else {
                 Page::Services
-            }
-        }
-        Page::Expanded => {
-            if let Some(expanded) = state.expanded.take() {
-                state.page = expanded.origin;
             }
         }
     }
@@ -668,7 +658,7 @@ fn browser_key(state: &mut State, key: KeyEvent) -> Option<Effect> {
                 }
             }
             Focus::Action(index) => return activate(state, index),
-            Focus::Result => return expand(state),
+            Focus::Result => return open_editor(state),
             Focus::Field(_) => browser.focus = Focus::Action(0),
         },
         KeyCode::Left | KeyCode::Right | KeyCode::Char('h' | 'l')
@@ -819,7 +809,7 @@ fn activate(state: &mut State, index: usize) -> Option<Effect> {
             }
             None
         }
-        Action::Expand => expand(state),
+        Action::OpenEditor => open_editor(state),
         Action::Watch => start_watch(state),
         Action::Call | Action::Read | Action::Write => {
             let browser = state.browser.as_ref()?;
@@ -1002,10 +992,6 @@ fn current_op(state: &State) -> Result<Option<CopyOp>> {
         Page::Watch => Ok(state.watch().map(|watch| CopyOp::Listen {
             rule: watch.rule.clone(),
         })),
-        Page::Expanded => Ok(state
-            .expanded
-            .as_ref()
-            .and_then(|expanded| expanded.op.clone())),
         _ => Ok(None),
     }
 }
@@ -1020,45 +1006,16 @@ fn current_text(state: &State) -> Option<String> {
             .as_ref()
             .map(Outcome::text),
         Page::Watch => state.watch().map(Watch::text),
-        Page::Expanded => state
-            .expanded
-            .as_ref()
-            .map(|expanded| expanded.text.clone()),
         _ => None,
     }
 }
 
-fn expand(state: &mut State) -> Option<Effect> {
+fn open_editor(state: &mut State) -> Option<Effect> {
     let text = current_text(state)?;
     if text.is_empty() {
         return None;
     }
-    let op = match state.page {
-        Page::Browser => state.browser.as_ref()?.editor.last_op.clone(),
-        _ => current_op(state).ok().flatten(),
-    };
-    let title = match state.page {
-        Page::Browser => {
-            let browser = state.browser.as_ref()?;
-            format!(
-                "{}.{}",
-                browser.context.interface,
-                browser.member_name(browser.selected())
-            )
-        }
-        Page::Watch => state.watch()?.target.name().into(),
-        _ => return None,
-    };
-    state.expanded = Some(Expanded {
-        origin: state.page,
-        title,
-        text,
-        op,
-        scroll: 0,
-        hscroll: 0,
-    });
-    state.page = Page::Expanded;
-    None
+    Some(Effect::Editor(state.id, text))
 }
 
 fn start_watch(state: &mut State) -> Option<Effect> {
@@ -1103,7 +1060,7 @@ fn start_watch(state: &mut State) -> Option<Effect> {
 
 fn watch_key(state: &mut State, key: KeyCode) -> Option<Effect> {
     match key {
-        KeyCode::Enter => return expand(state),
+        KeyCode::Enter => return open_editor(state),
         KeyCode::Char('p') => watch_action(state, 0),
         KeyCode::Char('s') => watch_action(state, 1),
         KeyCode::Char('x') => watch_action(state, 2),
@@ -1517,15 +1474,6 @@ fn mouse_scroll(state: &mut State, event: MouseEvent, target: ClickTarget) -> Op
             }
         }
         ClickTarget::WatchEvents => return watch_key(state, key),
-        ClickTarget::ExpandedResult => {
-            let expanded = state.expanded.as_mut()?;
-            scroll_text(
-                &expanded.text,
-                &mut expanded.scroll,
-                &mut expanded.hscroll,
-                key,
-            );
-        }
         _ => {}
     }
     None
