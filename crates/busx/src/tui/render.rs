@@ -3,6 +3,7 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -304,8 +305,11 @@ fn browser_view(
     show_cursor: bool,
 ) {
     if area.width >= 80 {
-        let [nav, content] =
-            Layout::horizontal([Constraint::Length(25), Constraint::Min(1)]).areas(area);
+        let [nav, content] = Layout::horizontal([
+            Constraint::Length(browser.navigation_width.clamp(12, area.width - 24)),
+            Constraint::Min(24),
+        ])
+        .areas(area);
         navigation(
             frame,
             nav,
@@ -334,6 +338,10 @@ fn browser_view(
             follow_selection[1],
             show_cursor,
         );
+        targets.push((
+            Rect::new(nav.right() - 1, area.y, 2, area.height),
+            ClickTarget::NavigationDivider(area),
+        ));
     } else if browser.focus == Focus::Navigation {
         navigation(
             frame,
@@ -398,7 +406,7 @@ fn navigation(
             let text = match *row {
                 NavRow::Object(object) => {
                     let object = &browser.objects[object];
-                    let indent = "  ".repeat(object.depth.min(3));
+                    let indent = " ".repeat(object.depth);
                     let name = object.path.rsplit('/').next().unwrap_or("");
                     format!(
                         "{indent}{} /{name}",
@@ -407,7 +415,7 @@ fn navigation(
                 }
                 NavRow::Interface(object, interface) => {
                     let object = &browser.objects[object];
-                    let indent = "  ".repeat((object.depth + 1).min(4));
+                    let indent = " ".repeat(object.depth + 1);
                     let name = &object.interfaces[interface];
                     let available = (items.width as usize).saturating_sub(indent.len() + 4);
                     format!("{indent}@ {}", truncate(name, available))

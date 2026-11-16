@@ -6,9 +6,9 @@ expression: "lines.join(\"\\n\")"
  ^ /
 ┌Navigation─────────────┐┌Object───────────────────────────────────────────────────────────────────┐
 │> ▾ /                  ││/                                                                        │
-│    ▾ /org             ││                                                                         │
-│      ▾ /busx          ││0 interface(s)                                                           │
-│        ▸ /Test        ││                                                                         │
+│   ▾ /org              ││                                                                         │
+│    ▾ /busx            ││0 interface(s)                                                           │
+│     ▸ /Test           ││                                                                         │
 │                       ││Expand the object and select an interface.                               │
 │                       ││Enter opens its members.                                                 │
 │                       ││                                                                         │

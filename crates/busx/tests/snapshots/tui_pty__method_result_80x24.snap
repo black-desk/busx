@@ -6,11 +6,11 @@ expression: "lines.join(\"\\n\")"
  ^ org.busx.Test › /org/busx/Test › org.busx.Test
 ┌Navigation─────────────┐┌─────────────────────────────────────────────────────┐
 │  ▾ /                  ││ Properties 4  Methods 10  Signals 0                 │
-│    ▾ /org             ││  Method            In       Out                     │
-│      ▾ /busx          ││  TakeHints         a{sv}    u                       │
-│        ▾ /Test        ││  Join              as       s                       │
-│>         @ org.busx.T…││  BumpVolume        -        d                       │
-│        ▸ /sub         ││> MakeFd            -        h                       │
+│   ▾ /org              ││  Method            In       Out                     │
+│    ▾ /busx            ││  TakeHints         a{sv}    u                       │
+│     ▾ /Test           ││  Join              as       s                       │
+│>     @ org.busx.Test  ││  BumpVolume        -        d                       │
+│      ▸ /sub           ││> MakeFd            -        h                       │
 │                       │└─────────────────────────────────────────────────────┘
 │                       │┌MakeFd───────────────────────────────────────────────┐
 │                       ││In: none · Out: h                                    │

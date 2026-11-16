@@ -5,6 +5,7 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -335,6 +336,58 @@ fn service_filter_scroll_refresh_and_mouse() {
     wait(&mut p, "> org.busx.AddedAfterStartup");
     p.mouse_click(5, 3, MouseButton::Left).unwrap();
     wait(&mut p, "Navigation");
+}
+
+struct DeepTree;
+
+#[zbus::interface(name = "org.busx.D")]
+impl DeepTree {
+    fn ping(&self) {}
+}
+
+#[test]
+fn deep_navigation_preserves_parent_child_indentation() {
+    let bus = testbus::bus_owned();
+    let conn = Builder::address(bus.address.as_str())
+        .unwrap()
+        .name("org.busx.DeepTree")
+        .unwrap()
+        .build()
+        .unwrap();
+    for path in ["/", "/a", "/a/b", "/a/b/c", "/a/b/c/d", "/a/b/c/d/e"] {
+        conn.object_server().at(path, DeepTree).unwrap();
+    }
+    let mut p = spawn(&bus.address, 120, 24, None);
+    open_service(&mut p, "org.busx.DeepTree");
+    wait(&mut p, "     ▾ /c");
+    wait(&mut p, "      ▾ /d");
+    wait(&mut p, "       ▸ /e");
+    // The leaf starts folded; open it to verify its interface is one level deeper.
+    text(&mut p, "G");
+    text(&mut p, "l");
+    wait(&mut p, "        @ org.busx.D");
+}
+
+#[test]
+fn navigation_divider_can_be_dragged_and_clamps_to_both_panes() {
+    let bus = testbus::bus_owned();
+    let mut p = spawn(&bus.address, 100, 24, None);
+    open_service(&mut p, SERVICE);
+    let divider = |width: usize| format!("{}┐┌", "─".repeat(width - 12));
+    wait(&mut p, &divider(25));
+    p.mouse_drag((24, 10), (39, 10)).unwrap();
+    wait(&mut p, &divider(40));
+    p.mouse_drag((39, 10), (99, 10)).unwrap();
+    wait(&mut p, &divider(76));
+    p.mouse_drag((75, 10), (0, 10)).unwrap();
+    wait(&mut p, "┌Navigation┐┌");
+    p.resize(64, 24).unwrap();
+    wait(
+        &mut p,
+        "┌Navigation────────────────────────────────────────────────────┐",
+    );
+    p.resize(100, 24).unwrap();
+    wait(&mut p, "┌Navigation┐┌");
 }
 
 #[test]

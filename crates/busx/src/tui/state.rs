@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -41,6 +42,7 @@ pub struct State {
     pub help_open: bool,
     pub help_scroll: usize,
     pub key_prefix: Option<KeyPrefix>,
+    pub navigation_drag: Option<(Rect, u16)>,
     pub click_targets: Vec<(Rect, ClickTarget)>,
     pub show_standard_interfaces: bool,
     pub quit: bool,
@@ -144,6 +146,7 @@ impl State {
             help_open: false,
             help_scroll: 0,
             key_prefix: None,
+            navigation_drag: None,
             click_targets: vec![],
             show_standard_interfaces,
             quit: false,
@@ -295,6 +298,7 @@ impl State {
 }
 
 pub struct Browser {
+    pub navigation_width: u16,
     pub context: Context,
     pub objects: Vec<NavObject>,
     pub nav_selected: usize,
@@ -317,6 +321,7 @@ pub struct Browser {
 impl Browser {
     pub fn new(service: String, request: u64) -> Self {
         Self {
+            navigation_width: 25,
             context: Context {
                 service,
                 ..Context::default()
@@ -775,6 +780,7 @@ pub enum ClickTarget {
     Filter,
     ServicesPane,
     NavigationPane,
+    NavigationDivider(Rect),
     MembersPane,
     WatchEvents,
     Service(usize),
