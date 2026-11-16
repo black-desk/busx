@@ -3,6 +3,7 @@ SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 
 SPDX-License-Identifier: MIT
 -->
@@ -148,6 +149,8 @@ is `0` on success, `1` on failure; piping into `less`/`head` does not panic
   (`▸ /App47`) from indented interfaces (`@ org.gnome.SessionManager.App`).
   Interface names retain their full namespace; names that exceed the pane width
   are truncated with an ellipsis, and the selected full name is shown above.
+  Drag the divider between navigation and details to resize the panes.
+  Each visible object level adds one column of indentation.
   Leaf objects start folded; unbranched container paths are compressed.
   Breadcrumbs use `›` to keep object-path slashes unambiguous.
 - **Inline operations**: select a member to inspect its signature, property

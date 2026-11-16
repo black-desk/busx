@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: MIT
 
@@ -104,6 +105,15 @@ impl TuiProbe {
         let release = encode_mouse(col, row, button, false);
         self.write(&press)?;
         self.write(&release)?;
+        self.drain_into_emulator();
+        Ok(())
+    }
+
+    /// Drag with the left mouse button between terminal cells (0-based).
+    pub fn mouse_drag(&mut self, from: (u16, u16), to: (u16, u16)) -> Result<()> {
+        self.write(&encode_mouse(from.0, from.1, MouseButton::Left, true))?;
+        self.write(format!("\x1b[<32;{};{}M", to.0 + 1, to.1 + 1).as_bytes())?;
+        self.write(&encode_mouse(to.0, to.1, MouseButton::Left, false))?;
         self.drain_into_emulator();
         Ok(())
     }

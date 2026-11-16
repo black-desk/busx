@@ -3,6 +3,7 @@ SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 
 SPDX-License-Identifier: MIT
 -->
@@ -130,7 +131,7 @@ python 即可。所有诊断（错误、警告）打到 stderr 并带 `busx:` �
   `Tab` / `Shift+Tab` 切换焦点，`h/l` 切换成员分类或折叠／展开对象， `j/k`
   上下选择（保留方向键），`gg/G` 跳到首项／末项，`n` 返回导航。对象显示为
   `▸ /App47`，接口缩进显示为
-  `@ org.gnome.SessionManager.App`，保留完整接口前缀；超出区域宽度的名称以省略号截断，顶部显示选中项的完整名称。叶子对象默认收起，只有一个子节点的容器路径合并显示；面包屑使用
+  `@ org.gnome.SessionManager.App`，保留完整接口前缀；超出区域宽度的名称以省略号截断，顶部显示选中项的完整名称。拖动导航与详情之间的分隔线可调整宽度。每个可见对象层级增加一列缩进。叶子对象默认收起，只有一个子节点的容器路径合并显示；面包屑使用
   `›` 分隔，避免与对象路径中的 `/` 混淆。
 - **行内操作**：选择成员即可查看签名、属性权限（`r` / `w` /
   `rw`）和当前值。填写参数后明确激活 `Call` / `Write`

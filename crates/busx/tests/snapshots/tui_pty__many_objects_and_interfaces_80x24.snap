@@ -5,23 +5,23 @@ expression: "lines.join(\"\\n\")"
  1 🔍  …UiFixture ×                                                            +
  ^ org.example.UnrelatedNamespace
 ┌Navigation─────────────┐┌─────────────────────────────────────────────────────┐
-│        ▾ /Ui          ││ Properties 1  Methods 1  Signals 1                  │
-│>         @ org.exampl…││  Name              Type   Mode Value                │
-│        ▸ /child_0     ││> Ready             b      r    true                 │
-│          @ org.exampl…││                                                     │
-│        ▸ /child_1     ││                                                     │
-│          @ org.exampl…││                                                     │
-│        ▸ /child_10    │└─────────────────────────────────────────────────────┘
-│          @ org.exampl…│┌Ready────────────────────────────────────────────────┐
-│        ▸ /child_11    ││b · r                                                │
-│          @ org.exampl…││Current  true                                        │
-│        ▸ /child_2     ││ Read   Watch   Copy command                         │
-│          @ org.exampl…││                                                     │
-│        ▸ /child_3     ││                                                     │
-│          @ org.exampl…││                                                     │
-│        ▸ /child_4     ││                                                     │
-│          @ org.exampl…││                                                     │
-│        ▸ /child_5     ││                                                     │
+│     ▾ /Ui             ││ Properties 1  Methods 1  Signals 1                  │
+│>     @ org.example.Un…││  Name              Type   Mode Value                │
+│      ▸ /child_0       ││> Ready             b      r    true                 │
+│       @ org.example.U…││                                                     │
+│      ▸ /child_1       ││                                                     │
+│       @ org.example.U…││                                                     │
+│      ▸ /child_10      │└─────────────────────────────────────────────────────┘
+│       @ org.example.U…│┌Ready────────────────────────────────────────────────┐
+│      ▸ /child_11      ││b · r                                                │
+│       @ org.example.U…││Current  true                                        │
+│      ▸ /child_2       ││ Read   Watch   Copy command                         │
+│       @ org.example.U…││                                                     │
+│      ▸ /child_3       ││                                                     │
+│       @ org.example.U…││                                                     │
+│      ▸ /child_4       ││                                                     │
+│       @ org.example.U…││                                                     │
+│      ▸ /child_5       ││                                                     │
 │/ object · @ interface ││                                                     │
 └───────────────────────┘└─────────────────────────────────────────────────────┘
  Filter /org.example.UnrelatedNamespace

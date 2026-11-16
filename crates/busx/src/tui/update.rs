@@ -3,6 +3,7 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
+// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -33,7 +34,10 @@ fn update_message(state: &mut State, msg: Msg) -> Option<Effect> {
     match msg {
         Msg::Key(key) => key_event(state, key),
         Msg::Mouse(event) => mouse(state, event),
-        Msg::Resize => None,
+        Msg::Resize => {
+            state.navigation_drag = None;
+            None
+        }
         Msg::Connected(id, result) => {
             let index = state.tabs.iter().position(|tab| {
                 tab.bus_picker
@@ -1495,6 +1499,22 @@ fn position_input(input: &mut tui_input::Input, column: u16, width: u16) {
 
 fn mouse(state: &mut State, event: MouseEvent) -> Option<Effect> {
     state.key_prefix = None;
+    if let Some((area, offset)) = state.navigation_drag {
+        match event.kind {
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(browser) = state.browser.as_mut() {
+                    browser.navigation_width = event
+                        .column
+                        .saturating_sub(area.x)
+                        .saturating_add(offset)
+                        .clamp(12, area.width - 24);
+                }
+                return None;
+            }
+            MouseEventKind::Up(_) | MouseEventKind::Down(_) => state.navigation_drag = None,
+            _ => {}
+        }
+    }
     if state.help_open {
         match event.kind {
             MouseEventKind::ScrollDown => state.help_scroll = (state.help_scroll + 1).min(30),
@@ -1574,6 +1594,14 @@ fn mouse(state: &mut State, event: MouseEvent) -> Option<Effect> {
             } else if state.page != Page::Services {
                 back(state);
             }
+        }
+        ClickTarget::NavigationDivider(area) => {
+            let width = state
+                .browser
+                .as_ref()?
+                .navigation_width
+                .clamp(12, area.width - 24);
+            state.navigation_drag = Some((area, (area.x + width).saturating_sub(event.column)));
         }
         ClickTarget::Filter => {
             position_input(
