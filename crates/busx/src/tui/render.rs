@@ -1,9 +1,4 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
-// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
-// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
-// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
-// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
-// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -60,13 +55,19 @@ pub fn render(
                 if browser.focus == Focus::Navigation
                     && let Some(row) = browser.navigation(state.query()).get(browser.nav_selected)
                 {
-                    let name = match *row {
-                        NavRow::Object(index) => &browser.objects[index].path,
-                        NavRow::Interface(object, interface) => {
-                            &browser.objects[object].interfaces[interface]
+                    let mut context = browser.context.clone();
+                    match *row {
+                        NavRow::Object(index) => {
+                            context.object = browser.objects[index].path.clone();
+                            context.interface.clear();
                         }
-                    };
-                    return truncate(name, context_width);
+                        NavRow::Interface(object, interface) => {
+                            context.object = browser.objects[object].path.clone();
+                            context.interface =
+                                browser.objects[object].interfaces[interface].clone();
+                        }
+                    }
+                    return breadcrumb(&context, context_width);
                 }
                 breadcrumb(&browser.context, context_width)
             })

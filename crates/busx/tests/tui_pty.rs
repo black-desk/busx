@@ -1,11 +1,4 @@
 // SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
-// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
-// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
-// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
-// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
-// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
-// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
-// SPDX-FileCopyrightText: 2026 Chen Linxuan <me@black-desk.cn>
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
@@ -397,6 +390,7 @@ fn interface_layout_and_subobject_navigation() {
     open_interface(&mut p);
     snapshot("interface_80x24", &p);
     text(&mut p, "n");
+    wait(&mut p, "org.busx.Test › /org/busx/Test › org.busx.Test");
     filter(&mut p, "/sub");
     key(&mut p, KeyCode::Down);
     key(&mut p, KeyCode::Enter);
